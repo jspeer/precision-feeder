@@ -813,8 +813,9 @@ Push button (GPIO2 to GND, `packages/button.yaml`, 2026-10-14): a short press
 fed one portion; presses inside the minimum gap were refused (TOO_SOON) without
 moving; a 3 s press turned calibration mode on and another turned it off; a
 short press after the gap fed again. Some refusals came in pairs 0.3 to 0.4 s
-apart (double presses or release bounce; harmless behind the minimum gap, to be
-confirmed).
+apart: the test used a bare wire, not a switch, so those were real repeated
+contacts. The 50 ms filter stays; recheck with the real button if presses
+double up.
 
 Not yet checked: drift with food in the tray.
 
