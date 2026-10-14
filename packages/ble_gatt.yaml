@@ -1,0 +1,117 @@
+# Precision Feeder: BLE GATT control plane (optional).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Lets a PLC, a phone app or any BLE client feed, read status, edit the schedule,
+# calibrate, and set the clock. The byte layouts are in docs/PROTOCOL.md.
+#
+# Leave this package out for a Home Assistant only build: BLE then costs nothing
+# (about 320 KB of flash and 30 KB of RAM; see DESIGN.md section 16).
+#
+# The UUIDs are this project's own (random, generated once). Do not reuse them
+# for anything else. The low 16 bits identify the attribute.
+#
+# This package needs `external_components` to include precision_feeder_ble (the
+# example configurations do).
+
+substitutions:
+  # Shown to BLE scanners. At most 20 characters.
+  ble_name: Precision Feeder
+
+  # What to do with a clock pushed over BLE (the SET_TIME command):
+  #   fallback_only  accept it only if NTP / Home Assistant has not set the clock recently.
+  #                  Covers fallback AP mode, or power returning while the internet is down,
+  #                  without letting a wrong PLC clock override a correct one. (recommended)
+  #   always         accept any plausible value
+  #   off            refuse it
+  ble_time_policy: fallback_only
+  # How long after the last NTP / Home Assistant sync a BLE clock is still refused, under
+  # the fallback_only policy.
+  ble_network_time_stale_after: 24h
+
+esp32_ble:
+  name: ${ble_name}
+  # No pairing hardware, so Just Works. Authentication is discussed in DESIGN.md section 10.
+  io_capability: none
+
+esp32_ble_server:
+  id: gatt_server
+  manufacturer: Precision Feeder
+  model: Precision Feeder Rev2
+  firmware_version: ${fw_version}
+  max_clients: 1
+  services:
+    - uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010001
+      advertise: true
+      characteristics:
+        # Static facts: protocol version, capability bits, positions, profiles, events per profile.
+        - id: gatt_info
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010002
+          read: true
+          value: [1, 0, 0, 7, 3, 4]
+
+        # Commands from the client: seq u8, opcode u8, arguments.
+        - id: gatt_command
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010003
+          write: true
+          value: [0, 0]
+
+        # The device's answer to a command: seq u8, opcode u8, result u8, detail u8.
+        # Notified, and also readable in case the notification was missed.
+        - id: gatt_response
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010004
+          read: true
+          notify: true
+          value: [0, 0, 0, 0]
+
+        # Tray, schedule and time state (20 bytes, fits the default 23 byte MTU).
+        - id: gatt_status
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010005
+          read: true
+          notify: true
+          value: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+        # Profile header and event records. Write a record to change it; write a query to choose
+        # which record the next read returns.
+        - id: gatt_profile
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010006
+          read: true
+          write: true
+          value: [0, 0, 0, 0, 0, 0, 0, 0]
+
+        # Guard and location settings: key u8, value i32.
+        - id: gatt_config
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010007
+          read: true
+          write: true
+          value: [0, 0, 0, 0, 0]
+
+        # Per-position servo offsets: index u8, offset i16 (tenths of a degree).
+        - id: gatt_calibration
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010008
+          read: true
+          write: true
+          value: [0, 0, 0]
+
+        # Feed log: epoch u32, source u8, portions u8, result u8. One notification per feed request.
+        - id: gatt_event_log
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010009
+          notify: true
+          value: [0, 0, 0, 0, 0, 0, 0]
+
+# The protocol: what the characteristics above mean.
+precision_feeder_ble:
+  feeder: feeder
+  server: gatt_server
+  info: gatt_info
+  command: gatt_command
+  response: gatt_response
+  status: gatt_status
+  profile: gatt_profile
+  config: gatt_config
+  calibration: gatt_calibration
+  event_log: gatt_event_log
+  time_policy: ${ble_time_policy}
+  network_time_stale_after: ${ble_network_time_stale_after}

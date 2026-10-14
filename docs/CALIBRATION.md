@@ -41,7 +41,8 @@ the *Reload Pause* (10 minutes by default) so you can finish loading the tray.
 If power is lost during a feed, or you press **Stop** mid-feed, the position is
 **unknown** (LED magenta) and feeding is blocked. Look at the tray, set
 **Declared Tray Position** to where it really is, and press **Declare Tray
-Position**; or reload the tray.
+Position**; or reload the tray. On a build with the push button, a short press
+reloads the tray in this state (it moves to the closed slot), then load it.
 
 ## What still needs bench confirmation
 

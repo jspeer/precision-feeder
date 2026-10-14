@@ -12,3 +12,5 @@
 time:
   - platform: homeassistant
     id: ha_time
+    on_time_sync:
+      - lambda: id(feeder).note_time_sync(precision_feeder::TimeSource::HOME_ASSISTANT);

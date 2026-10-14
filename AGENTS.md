@@ -73,6 +73,17 @@ substitutions.
   what was and was not tested.
 - Things listed as unverified in DESIGN.md must be checked against current
   ESPHome docs and, where relevant, real hardware before being relied on.
+- Run the host tests after touching the feeder logic, the protocol or the Python
+  client. With any C++17 compiler, from `tests/`:
+  `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_core.cpp`,
+  `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
+  `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`; and
+  `python3 -m unittest test_precision_feeder_ble` in `tools/`. The C++ and Python
+  protocol tests share golden byte vectors; change them together.
+- Feeder logic belongs in `FeederCore` (`feeder_core.*`), which must stay free of
+  ESPHome includes so it can be tested on a host. Anything that needs the device
+  (clock, servo, flash, log) goes through a `hal_*` hook implemented in
+  `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.
 - Do not flash or upload to a device without the owner's explicit say-so.
 - Do not invent ESPHome options or BLE behaviour from memory; check the docs.
 
@@ -87,10 +98,13 @@ substitutions.
 ```
 README.md  LICENSE  DESIGN.md  AGENTS.md
 docs/         PROTOCOL.md, CALIBRATION.md
-components/   precision_feeder/ (external component)
+components/   precision_feeder/ (feeder_core: tray, guard, scheduler; precision_feeder: ESPHome adapter)
+              and precision_feeder_ble/
+              (optional BLE protocol; protocol.h, calendar.h and solar.h are pure and host-tested)
 packages/     reusable YAML packages
-examples/     ha-only.yaml, ble-plc.yaml, standalone.yaml
-tools/        Python bleak example client
+examples/     basic.yaml, ble.yaml
+tests/        host-side C++ tests (test_core.cpp, test_logic.cpp, test_protocol.cpp)
+tools/        Python reference client for the BLE protocol, and its tests
 ```
 
-Not all of this exists yet; see DESIGN.md section 12.
+See DESIGN.md section 12 for the intended layout.

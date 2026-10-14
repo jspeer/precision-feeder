@@ -1,0 +1,30 @@
+# Precision Feeder: heap and loop diagnostics (optional).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Reports how much internal heap is free. This is the number that matters when
+# WiFi, the API, the web server and BLE all share the ESP32-S3's internal RAM:
+# static RAM use is known at build time, but the Bluetooth stack allocates its
+# working memory from the heap when it starts, so only a running device can tell
+# you how much is really left.
+#
+#   Free Heap               total free internal heap
+#   Largest Free Heap Block the biggest single allocation that could still succeed
+#   Heap Fragmentation      how broken up the free heap is, in percent
+#   Loop Time               how long the longest main-loop pass took, in ms
+
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: debug
+    free:
+      name: "Free Heap"
+    block:
+      name: "Largest Free Heap Block"
+    fragmentation:
+      name: "Heap Fragmentation"
+    loop_time:
+      name: "Loop Time"

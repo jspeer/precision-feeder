@@ -46,9 +46,13 @@ say where the tray is.
 - **Optional push button** (as in the original), **web dashboard**, and
   **status LED**.
 - Time from NTP (configurable servers), optionally also from Home Assistant.
-
-Not yet implemented: the BLE control interface described in
-[DESIGN.md](DESIGN.md).
+- **Optional BLE control interface** for a PLC, phone app or script: feed, read
+  status, edit the schedule, calibrate, and push the clock when the feeder has no
+  network. Documented in [docs/PROTOCOL.md](docs/PROTOCOL.md), with a Python
+  reference client in `tools/`. Leave it out of the build and it costs nothing
+  (about 320 KB of flash and 30 KB of RAM when included).
+- OTA updates are authenticated with the API encryption key, and the web server's
+  own firmware-upload page is turned off.
 
 ## Hardware
 
@@ -78,11 +82,14 @@ signal line to GND.
 ## Repository layout
 
 ```
-components/precision_feeder/   the logic: tray, guard, scheduler, solar maths (C++)
+components/precision_feeder/   the logic: tray, guard, scheduler, solar maths (feeder_core: plain C++,
+                               host-tested) and the ESPHome adapter (precision_feeder)
 packages/                      reusable YAML: core, status, controls, editor, ...
-examples/                      a ready-to-edit configuration
-tests/                         host-side tests for the pure logic
-docs/                          calibration walkthrough
+components/precision_feeder_ble/  the BLE protocol (optional; compiled only if used)
+examples/                      ready-to-edit configurations (basic, and with BLE)
+tests/                         host-side C++ tests for the pure logic and the protocol
+tools/                         Python reference client for the BLE protocol, and its tests
+docs/                          calibration walkthrough, BLE protocol
 DESIGN.md                      design, decisions and open questions
 AGENTS.md                      guidance for AI agents and contributors
 ```

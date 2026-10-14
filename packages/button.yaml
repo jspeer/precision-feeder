@@ -7,8 +7,9 @@
 # Include this package only if your build has the button. Wire it between the
 # `button_pin` GPIO and GND (the internal pull-up is used).
 #
-#   short press : feed one portion; if the tray is empty, reload it instead
-#                 (the original firmware's single-button behaviour)
+#   short press : feed one portion; if the tray is empty, or its position is
+#                 unknown after a power cut mid-feed, reload it instead (moves to the
+#                 closed slot, then load it). The original firmware's single-button behaviour.
 #   long press  : (3 s or more) turn calibration mode on or off
 
 binary_sensor:
@@ -26,12 +27,7 @@ binary_sensor:
       - min_length: 50ms
         max_length: 2s
         then:
-          - lambda: |-
-              if (id(feeder).tray_state() == precision_feeder::TrayState::EMPTY) {
-                id(feeder).tray_reload();
-              } else {
-                id(feeder).request_feed(1, precision_feeder::Source::BUTTON);
-              }
+          - lambda: id(feeder).button_press();
       - min_length: 3s
         max_length: 15s
         then:

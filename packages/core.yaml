@@ -10,7 +10,7 @@
 substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
-  fw_version: "0.1.1"
+  fw_version: "0.2.1"
 
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
   servo_pin: GPIO1             # servo signal wire
@@ -56,9 +56,11 @@ api:
   encryption:
     key: !secret api_encryption_key
 
+# Over-the-air updates are authenticated with the same encryption key as the API
+# (api: encryption: key above), so there is no separate OTA password to manage.
 ota:
   - platform: esphome
-    password: !secret ota_password
+    encryption: {}
 
 wifi:
   ssid: !secret wifi_ssid
@@ -80,6 +82,10 @@ time:
       - ${ntp_server_1}
       - ${ntp_server_2}
       - ${ntp_server_3}
+    # Tell the feeder where the clock came from (shown in Home Assistant, and used to decide
+    # whether a clock pushed over BLE is needed).
+    on_time_sync:
+      - lambda: id(feeder).note_time_sync(precision_feeder::TimeSource::NTP);
 
 # The servo signal: a standard 50 Hz hobby-servo PWM.
 output:

@@ -37,6 +37,18 @@ sensor:
       return id(feeder).runway_days();
     update_interval: 30s
 
+  - platform: template
+    name: "Minutes Since Clock Sync"
+    entity_category: diagnostic
+    icon: mdi:clock-time-four-outline
+    unit_of_measurement: min
+    accuracy_decimals: 0
+    # Unknown until the clock has been set at least once.
+    lambda: |-
+      if (!id(feeder).time_ever_synced()) return NAN;
+      return id(feeder).time_age_min();
+    update_interval: 60s
+
 text_sensor:
   - platform: template
     name: "Tray State"
@@ -97,6 +109,14 @@ text_sensor:
     icon: mdi:alert-circle-outline
     lambda: return id(feeder).faults_text();
     update_interval: 5s
+
+  - platform: template
+    name: "Time Source"
+    icon: mdi:clock-check-outline
+    entity_category: diagnostic
+    # Where the clock was last set from: NTP, Home Assistant, BLE, or none.
+    lambda: return id(feeder).time_source_text();
+    update_interval: 30s
 
   - platform: template
     name: "Firmware Version"

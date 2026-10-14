@@ -195,7 +195,9 @@ Per event:
 Global:
 - `hold`: pause scheduled feeding for any number of hours, or until cancelled
   (an indefinite hold needs no clock); cancel hold
-- `one-shot` events: feed at a given date/time (calendar-style)
+- `one-shot` events: feed at a given date/time (calendar-style). They run even
+  when the Scheduler switch is off (it only stops recurring profile events), but
+  a hold or reload pause still applies (decision 2026-10-14).
 - `refill_interval_days` (for runway warnings)
 
 Examples (README): A "Normal" (2 events, Sunday fast); B "Vacation" (1 event,
@@ -235,6 +237,12 @@ retried on the next tick). If the device was offline, on hold, in the reload
 pause, or the guard refused the event for that whole minute, it is lost and
 logged. Nothing is dispensed afterwards to make up for it. This also removes the
 need to cancel a backlog on tray reload.
+
+Refusals are reported once. While the window is open, a `BUSY`, `TOO_SOON` or
+hold/reload-pause answer is retried silently; only the final outcome is
+reported (log, "Last Result", BLE event log): the feed when it happens, or the
+last refusal once when the window closes. An event that was missed because the
+device was off is skipped without a report.
 
 ## 6. Time sources
 
@@ -300,72 +308,40 @@ select, one offset number, declare-position recovery.
 
 ## 8. BLE GATT (secondary control plane)
 
-Implemented with ESPHome's `esp32_ble_server` on ESP-IDF (Bluedroid). Do **not**
-enable `bluetooth_proxy` on this device. **Verify binary size against the
-4 MB flash with OTA partitions early.** Notifications need testing at default
-MTU. BLE is a build option (section 9.1): HA-only builds leave it out.
+**The protocol is specified in [docs/PROTOCOL.md](docs/PROTOCOL.md), which is
+authoritative.** This section records the design intent and how the built
+protocol differs from the first draft.
 
-All multi-byte values little-endian. Design keeps each write within the
-default 20-byte payload (no MTU negotiation needed).
+Implemented with ESPHome's `esp32_ble_server` on ESP-IDF (Bluedroid). The GATT
+table (UUIDs, properties) is YAML in `packages/ble_gatt.yaml`; the meaning of the
+characteristics is C++ in `components/precision_feeder_ble/`, with the byte
+layouts and validation in a pure header (`protocol.h`) that is unit-tested on a
+host. BLE is a build option: HA-only builds leave the package out and pay nothing.
+`bluetooth_proxy` must not be enabled on this device. All records fit the default
+20-byte payload, so no MTU negotiation is needed. UUID base:
+`02dd1dd9-ba75-4bbc-bdea-306d2101xxxx` (generated 2026-10-13; this project's own).
 
-### 8.1 Service and characteristics (UUIDs to be generated before release)
-
-| Characteristic | Props | Content |
-|---|---|---|
-| Info | R | protocol version u8, capability bits u16, positions u8, profiles u8, events per profile u8, firmware version string |
-| Command | W | `seq u8, opcode u8, args...` |
-| Response | N | `seq u8, opcode u8, result u8, detail u8` |
-| Status | R, N | see 8.3 |
-| Profile | R, W | header or one event (8.5) |
-| Config | R, W | `key u8, value i32` |
-| Calibration | R, W | `index u8, offset i16` (tenths of a degree) |
-| Event log | N | `epoch u32, source u8, portions u8, result u8` |
-
-### 8.2 Opcodes
-
-| Op | Name | Args |
-|---|---|---|
-| 0x01 | FEED | portions u8 |
-| 0x02 | TRAY_RELOAD | none |
-| 0x03 | SET_PROFILE | index u8 |
-| 0x04 | HOLD | minutes u16 (0 cancels) |
-| 0x05 | STOP | none |
-| 0x06 | SET_TIME | epoch u32, utc_offset_min i16 |
-| 0x07 | SET_LOCATION | lat i32, lon i32 (1e-5 degrees) |
-| 0x08 | CALIBRATE | on/off u8 |
-| 0x09 | JOG | position u8, delta i16 |
-| 0x0A | SAVE_CALIBRATION | none |
-| 0x0B | SET_POSITION | position u8 (declare after UNKNOWN) |
-| 0x0C | SET_TIMEZONE | chunk index u8, chunk count u8, up to 17 bytes of a POSIX TZ string |
-
-### 8.3 Status
-
-`tray_position u8, remaining u8, tray_state u8, active_profile u8,
-flags u16 (time_valid, hold, calibrating, moving, scheduler_enabled, faults...),
-last_feed_epoch u32, last_feed_source u8, feeds_today u8, next_event_epoch u32,
-runway_days u8, time_source u8 (0 none, 1 BLE, 2 NTP, 3 HA), time_age_min u16`.
-
-### 8.4 Results and sources
-
-Results: 0 OK, 1 BUSY, 2 TOO_SOON, 3 DAILY_CAP, 4 EMPTY, 5 UNKNOWN_POSITION,
-6 CALIBRATING, 7 HOLD, 8 INVALID_ARG, 9 DUPLICATE (replayed result),
-10 TIME_INVALID, 11 PORTION_LIMIT, 12 IGNORED_NTP_ACTIVE (BLE time rejected by
-policy), 13 BLE_TIME_DISABLED.
-
-Sources: 0 schedule, 1 home assistant, 2 BLE, 3 button, 4 one-shot.
-
-### 8.5 Profile writes
-
-Two write types so each fits 20 bytes:
-- Header: `0x00, profile u8, cadence u8, n u8, anchor_day u16, fast_mask u8`
-- Event: `0x01, profile u8, event u8, flags u8 (enabled, anchor type),
-  offset i16, portions u8, days_mask u8`
-
-### 8.6 Idempotency
-
-The device keeps the last 8 sequence numbers and their results. A repeated
-sequence number returns the stored result and does not act, so a client retry
-after a lost response cannot feed twice.
+Changes from the first draft, all deliberate:
+- `HOLD` takes a 32-bit number of minutes (0 cancels, `0xFFFFFFFF` until
+  cancelled), because the hold has no maximum (section 13).
+- Profile records follow the data model that was built: a header
+  (`every_n`, `fast_mask`, `anchor_day`) and events, plus a *query* write that
+  selects the record the next read returns (GATT reads take no parameters). Config
+  and Calibration use the same query-then-read pattern (`key | 0x80`).
+- Writes to Profile, Config and Calibration are answered on Response with `seq 0`
+  and opcodes `0x80` to `0x82`, so a client learns about validation failures.
+- Response is also readable, in case a notification is missed.
+- New result codes 14 (UNSUPPORTED) and 15 (NOT_CALIBRATING).
+- `SET_TIMEZONE` is reserved and answered UNSUPPORTED (section 6: no on-device
+  timezone parser). `SET_TIME` still carries a UTC offset for forward
+  compatibility; the device ignores it.
+- Idempotency: the last 8 commands are remembered for 30 seconds, not forever,
+  and a retry must repeat the *whole* command (sequence number, opcode and
+  arguments). A command that reuses a sequence number with different contents is
+  executed as new, so a client that restarts and reuses numbers is not mistaken
+  for a retry. A replay returns the original answer.
+- Status gained flag bits for hold, reload pause, stale clock, unknown position
+  and empty tray, and reports the clock source and age.
 
 ## 9. Operational behaviour
 
@@ -461,6 +437,14 @@ Importable with ESPHome `packages:` / `github://`.
   an event that is missed (device offline, hold, reload pause, or refused by the
   guard for its whole minute) is skipped, never made up later.
 - Hold has no maximum duration, and can last until cancelled (needs no clock).
+- If memory gets tight, turn on PSRAM; it may become a requirement of the
+  firmware (2026-10-13). Not enabled until measured on hardware.
+- OTA authenticates with the API key; no OTA password; no web-server OTA.
+- One-shot feeds are independent of the Scheduler switch (2026-10-14).
+- While the clock is unknown after a reboot, pre-reboot feeds do not count toward
+  the daily cap (2026-10-14).
+- All feeder logic lives in `FeederCore` with no ESPHome dependencies, so it can be
+  tested on a host (2026-10-14).
 - Periodic reboots and an upcoming-events list are not carried over from the
   original.
 - Clean-room code; PLC/bridge driver lives outside this repo.
@@ -477,16 +461,28 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.1.1, 2026-10-13)
+## 15. Implementation status (v0.2.1, 2026-10-14)
 
-First parity build. **Compiles with no warnings; not yet run on hardware.**
-Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 996 KB,
-54% of the 1.8 MB app partition, 33% RAM. The pure logic (solar maths and
-calendar helpers) is covered by `tests/test_logic.cpp`; there is no C++
-compiler in the authoring environment, so the maths was checked with a
-line-for-line Python port (London and Sydney match published values to the
-minute; Indianapolis agrees with the expected 19:09 EDT sunset). **The C++
-test itself, and all runtime behaviour, still need to be run.**
+**Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
+2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 994 KB (54% of the 1.8 MB app
+partition) without BLE, about 1.32 MB (72%) with it.
+
+What has been run, on a host (a `ziglang` C++ compiler installed with pip into a
+scratch virtualenv; any C++17 compiler works):
+- `tests/test_logic.cpp`: calendar maths and sunrise/sunset for Indianapolis,
+  London and Sydney, plus polar night and midnight sun. Passes.
+- `tests/test_protocol.cpp`: BLE packing, record validation, config ranges, the
+  time-acceptance policy and the retry cache, against golden byte vectors. Passes.
+- `tools/test_precision_feeder_ble.py`: the Python client against the same
+  vectors, and a check that its UUIDs match `packages/ble_gatt.yaml`. Passes.
+- `tests/test_core.cpp` (from v0.2.1): the tray state machine, guard, scheduler,
+  one-shots, hold, reload pause, cadence, fast days, sunset-after-midnight,
+  runway and clock tracking, against a simulated clock with a fixed UTC-5
+  timezone. Passes.
+
+Only compiled, not run: the ESPHome adapter (`precision_feeder.cpp`: real clock,
+PWM, flash, daylight-saving resolution) and the BLE handlers
+(`precision_feeder_ble.cpp`).
 
 | Area | Where | State |
 |---|---|---|
@@ -498,9 +494,12 @@ test itself, and all runtime behaviour, still need to be run.**
 | Calibration (7 offsets), position declaration | component | built |
 | HA entities (status, controls, editor, calibration) | YAML templates | built |
 | Optional button, status LED, web UI, HA time source | YAML packages | built |
-| BLE GATT control plane, `SET_TIME`, time-quality reporting | | **not started** |
+| BLE GATT table, diagnostics package | `ble_gatt.yaml`, `diagnostics.yaml` | built, size benchmarked (section 16) |
+| BLE protocol v1: commands, status, profile/config/calibration records, event log, retry cache | `precision_feeder_ble` component | built, compiled, pure parts tested on a host |
+| Clock: source tracking (NTP, Home Assistant, BLE), `SET_TIME` policy, age and stale flag | core + BLE component | built |
+| Reference client | `tools/precision_feeder_ble.py` | built; pure parts tested, the BLE client class needs a device |
 | Runtime timezone | | **blocked** (section 6 finding) |
-| Duplicate-sequence idempotency | | with BLE |
+| BLE authentication | | not started (section 10) |
 
 Deviations from this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said
@@ -510,6 +509,12 @@ Deviations from this design, all deliberate:
 - Feeds made before the clock is set count toward the daily cap using uptime,
   then are re-stamped when the clock arrives; the cap memory for such feeds is
   dropped on reboot.
+- After a reboot, until the clock is set again, feeds saved before the reboot
+  are not counted toward the daily cap (their age is unknown); they count again
+  once the clock is back (decision 2026-10-14, replacing "count them for 24 h of
+  uptime", which refused manual feeds for a day after a power cut with no
+  network). A feed interrupted by the power cut still counts once the clock is
+  known.
 - The minimum gap uses uptime when available, otherwise the saved epoch.
 - Sunrise/sunset events skip (and flag a fault) when there is no sun event or
   no location set, as proposed.
@@ -528,3 +533,78 @@ Changes in v0.1.1 (cleanup after reviewing the original firmware's behaviour):
 - Hold has no maximum: "Hold Duration" is in hours, 0 means until cancelled, and
   an indefinite hold needs no clock. A "Hold" status sensor shows what is active.
 - The cancel-backlog step on tray reload is gone (nothing to cancel).
+
+Changes in v0.2.1 (review fixes, 2026-10-14):
+- Refactor: all logic moved into `FeederCore` (`feeder_core.h/.cpp`), plain C++
+  with the clock, servo, storage and log behind `hal_*` hooks. `PrecisionFeeder`
+  is now a thin ESPHome adapter. `tests/test_core.cpp` runs the tray, guard and
+  scheduler against a simulated clock (13 test groups).
+- The push button reloads the tray when its position is unknown, not only when
+  empty, so a button-only build can recover from a power cut mid-feed.
+- Scheduled and one-shot feeds refused with BUSY / TOO_SOON / hold are retried
+  silently; the outcome is reported once (section 5.5). Previously every retry
+  logged, changed "Last Result" and sent a BLE event-log notification.
+- The BLE retry cache matches the whole command, not just the sequence number.
+- Daily cap after a reboot without a clock (section 15 deviations).
+- One-shot feeds run with the Scheduler switch off; "Next Feed", runway and the
+  over-capacity flag no longer count recurring events while it is off.
+- The sunrise/sunset fault is evaluated every tick, and clears while the
+  scheduler is off.
+- The reload pause survives a reboot when the clock was known (state version 2;
+  the saved tray state from earlier versions is discarded).
+- "Minutes Since Clock Sync" is unknown until the clock has been set.
+- Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.2.0 (BLE protocol, and the two warnings fixed):
+- BLE protocol v1 implemented (section 8, `docs/PROTOCOL.md`).
+- OTA authenticates with the API encryption key (no separate OTA password), and
+  the web server's own `/update` page is disabled (`ota: false`), because it would
+  accept an image in plaintext. Firmware uploads go through the encrypted ESPHome
+  OTA only.
+- `rgb_order` replaced by `channel_colors` (deprecated in ESPHome).
+- The clock source is tracked and shown in Home Assistant ("Time Source",
+  "Minutes Since Clock Sync").
+
+## 16. BLE benchmark (2026-10-13)
+
+The question was whether BLE fits the 4 MB flash of the ESP32-S3FH4R2. Measured
+by compiling `examples/basic.yaml` and `examples/ble.yaml` (same packages, plus
+`packages/ble_gatt.yaml`, a skeleton of the full planned GATT table whose
+handlers only log) with ESPHome 2026.9.1 / ESP-IDF 5.5.5, Bluedroid, ESP-IDF
+framework, WiFi, API, web server and status LED all enabled.
+
+| Build | Flash (app slot 1,835,008 B) | Static RAM (341,760 B) |
+|---|---|---|
+| No BLE (`basic.yaml`) | 993,835 B (54.2%) | 112,079 B (32.8%) |
+| BLE skeleton | 1,312,107 B (71.5%) | 142,663 B (41.7%) |
+| BLE + diagnostics package | 1,315,179 B (71.7%) | 142,879 B (41.8%) |
+| BLE with the protocol implemented (v0.2.0) | 1,319,791 B (71.9%) | 143,231 B (41.9%) |
+| v0.2.1, no BLE (`basic.yaml`) | 971,847 B (53.0%) | 112,223 B (32.8%) |
+| v0.2.1, BLE + button + HA time + diagnostics | 1,300,123 B (70.9%) | 143,739 B (42.1%) |
+
+- **BLE costs about 318 KB of flash and about 31 KB of static RAM.**
+- **Flash is not a problem.** With BLE the app is 72% of its OTA slot, leaving
+  about 520 KB for the protocol code, which should be a few tens of KB. OTA still
+  needs only one free slot of the same size, so it keeps working.
+- **RAM is the open question.** About 199 KB of static RAM remains, but Bluedroid
+  also allocates working memory from the heap when it starts, and that cannot be
+  measured without running hardware. The `diagnostics` package reports free heap,
+  the largest free block and fragmentation so it can be read on the first boot,
+  with BLE on and off.
+- **PSRAM is not a switch.** ESPHome's `esp32_ble: use_psram` only enables
+  Bluedroid's dynamic environment memory on the S3 (it does not force the stack
+  into PSRAM; the "allocate from SPIRAM first" option applies to the classic
+  ESP32 only), and it needs the `psram` component with the right mode for the
+  module (quad for the H4R2; a wrong mode fails at boot). Not enabled; try it
+  only if the heap numbers say it is needed.
+- Decision rule for the MCU question: flash does not justify a different MCU.
+  Re-evaluate only if measured free heap with WiFi, API, web server and BLE all
+  running leaves too little headroom.
+
+The protocol itself added only about 4.6 KB over the skeleton. If the heap turns
+out tight on real hardware, enabling PSRAM is an accepted fallback and may become
+a requirement of the firmware (decision 2026-10-13); the board's 2 MB of quad
+PSRAM is otherwise unused.
+
+Two ESPHome warnings found while validating were fixed in v0.2.0: the deprecated
+`rgb_order` and the OTA password.
