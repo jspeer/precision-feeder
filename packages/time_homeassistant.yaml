@@ -1,0 +1,14 @@
+# Precision Feeder: Home Assistant as an additional time source (optional).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Useful when the internet (and so NTP) is down but Home Assistant is still
+# reachable. NTP stays the primary source: with both enabled, whichever
+# synchronises last sets the clock, and both are trustworthy. Home Assistant
+# also pushes its own timezone to the device while connected.
+
+time:
+  - platform: homeassistant
+    id: ha_time

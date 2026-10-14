@@ -1,0 +1,38 @@
+# Precision Feeder: optional push button (as in the original firmware).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Include this package only if your build has the button. Wire it between the
+# `button_pin` GPIO and GND (the internal pull-up is used).
+#
+#   short press : feed one portion; if the tray is empty, reload it instead
+#                 (the original firmware's single-button behaviour)
+#   long press  : (3 s or more) turn calibration mode on or off
+
+binary_sensor:
+  - platform: gpio
+    id: feeder_button
+    pin:
+      number: ${button_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on: 50ms
+    on_click:
+      - min_length: 50ms
+        max_length: 2s
+        then:
+          - lambda: |-
+              if (id(feeder).tray_state() == precision_feeder::TrayState::EMPTY) {
+                id(feeder).tray_reload();
+              } else {
+                id(feeder).request_feed(1, precision_feeder::Source::BUTTON);
+              }
+      - min_length: 3s
+        max_length: 15s
+        then:
+          - lambda: id(feeder).set_calibration_mode(!id(feeder).calibration_mode());

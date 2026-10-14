@@ -1,0 +1,18 @@
+# Precision Feeder: built-in web dashboard (the original firmware's web UI).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Browse to http://<name>.local (for example http://precision-feeder.local).
+# Everything on the device is reachable there, so protect it on a shared network:
+# uncomment `auth` and add web_username / web_password to your secrets.yaml.
+# Note: this is HTTP basic authentication over plain HTTP, so it keeps casual
+# visitors out but is not encrypted; do not reuse a password you care about.
+
+web_server:
+  port: 80
+  version: 3
+  # auth:
+  #   username: !secret web_username
+  #   password: !secret web_password

@@ -1,0 +1,40 @@
+# Precision Feeder: a complete configuration for Home Assistant plus the web UI.
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Copy this file, set your timezone, make a secrets.yaml from
+# secrets.example.yaml, and comment packages in or out to suit your build.
+
+substitutions:
+  name: precision-feeder
+  friendly_name: Precision Feeder
+  # Your timezone: daylight saving and sunrise/sunset events depend on it.
+  timezone: America/New_York
+  # Pins default to the Waveshare ESP32-S3-Zero. Change them for another board:
+  # servo_pin: GPIO1
+  # button_pin: GPIO2
+  # NTP is the primary time source. Defaults are the public pool servers; point
+  # at a local server if your network has no internet access:
+  # ntp_server_1: 192.168.1.1
+
+# Where the precision_feeder component lives. When using this repository from
+# GitHub instead of a local copy, replace this with a `type: git` source.
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+packages:
+  # Always include.
+  core: !include ../packages/core.yaml
+  status: !include ../packages/status.yaml
+  controls: !include ../packages/controls.yaml
+  schedule_editor: !include ../packages/schedule_editor.yaml
+  calibration: !include ../packages/calibration.yaml
+  # Optional.
+  web_ui: !include ../packages/web_server.yaml                 # the original's web dashboard
+  status_led: !include ../packages/status_led.yaml             # onboard RGB LED
+  # time_ha: !include ../packages/time_homeassistant.yaml      # use HA as a second time source
+  # button: !include ../packages/button.yaml                   # only if your print has the button

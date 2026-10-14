@@ -1,0 +1,116 @@
+# Precision Feeder: read-only status entities. Safe to include everywhere.
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+
+sensor:
+  - platform: template
+    name: "Tray Position"
+    icon: mdi:rotate-right
+    accuracy_decimals: 0
+    lambda: return id(feeder).position();
+    update_interval: 2s
+
+  - platform: template
+    name: "Portions Remaining"
+    icon: mdi:fish
+    accuracy_decimals: 0
+    lambda: return id(feeder).remaining();
+    update_interval: 2s
+
+  - platform: template
+    name: "Portions Fed Today"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    lambda: return id(feeder).feeds_today();
+    update_interval: 5s
+
+  - platform: template
+    name: "Runway"
+    icon: mdi:calendar-clock
+    unit_of_measurement: d
+    accuracy_decimals: 0
+    # Days until the tray runs out under the active schedule (unknown if more than 30 days).
+    lambda: |-
+      if (id(feeder).runway_days() == 255) return NAN;
+      return id(feeder).runway_days();
+    update_interval: 30s
+
+text_sensor:
+  - platform: template
+    name: "Tray State"
+    icon: mdi:state-machine
+    lambda: return id(feeder).tray_state_text();
+    update_interval: 2s
+
+  - platform: template
+    name: "Next Feed"
+    icon: mdi:clock-outline
+    lambda: return id(feeder).next_event_text();
+    update_interval: 10s
+
+  - platform: template
+    name: "Hold"
+    icon: mdi:pause-circle-outline
+    lambda: return id(feeder).hold_text();
+    update_interval: 10s
+
+  - platform: template
+    name: "Last Feed"
+    icon: mdi:history
+    lambda: return id(feeder).last_feed_text();
+    update_interval: 10s
+
+  - platform: template
+    name: "Last Result"
+    icon: mdi:message-text-outline
+    lambda: return id(feeder).last_result_text();
+    update_interval: 5s
+
+  - platform: template
+    name: "Recent Feeds"
+    icon: mdi:format-list-bulleted
+    lambda: return id(feeder).recent_feeds_text();
+    update_interval: 10s
+
+  - platform: template
+    name: "Active Schedule"
+    icon: mdi:calendar-text
+    lambda: return id(feeder).schedule_summary();
+    update_interval: 10s
+
+  - platform: template
+    name: "One-shot Feeds"
+    icon: mdi:calendar-star
+    lambda: return id(feeder).oneshots_text();
+    update_interval: 10s
+
+  - platform: template
+    name: "Tray Empty On"
+    icon: mdi:calendar-end
+    lambda: return id(feeder).empty_on_text();
+    update_interval: 30s
+
+  - platform: template
+    name: "Faults"
+    icon: mdi:alert-circle-outline
+    lambda: return id(feeder).faults_text();
+    update_interval: 5s
+
+  - platform: template
+    name: "Firmware Version"
+    entity_category: diagnostic
+    lambda: return std::string("${fw_version}");
+    update_interval: 300s
+
+binary_sensor:
+  - platform: template
+    name: "Clock Valid"
+    entity_category: diagnostic
+    lambda: return id(feeder).time_valid();
+
+  - platform: template
+    name: "Schedule Over Capacity"
+    icon: mdi:alert-outline
+    lambda: return id(feeder).schedule_oversubscribed();

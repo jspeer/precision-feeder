@@ -1,0 +1,47 @@
+# Precision Feeder: status LED on the onboard WS2812 (Waveshare ESP32-S3-Zero: GPIO21).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+#   dim green   everything fine
+#   yellow      clock not set yet (scheduled feeding waits for it)
+#   red         tray empty
+#   magenta     tray position unknown (declare it, or reload the tray)
+#   blue        moving
+#   white       calibration mode
+#   dim cyan    hold or reload pause active
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: status_led
+    internal: true
+    pin: ${status_led_pin}
+    num_leds: 1
+    chipset: WS2812
+    rgb_order: GRB
+    default_transition_length: 0s
+
+interval:
+  - interval: 500ms
+    then:
+      - lambda: |-
+          static int last = -1;
+          const int code = id(feeder).led_code();
+          if (code == last) return;
+          last = code;
+          float r = 0, g = 0, b = 0;
+          switch (code) {
+            case 0: g = 0.35f; break;
+            case 1: r = 1; g = 0.6f; break;
+            case 2: r = 1; break;
+            case 3: r = 1; b = 1; break;
+            case 4: b = 1; break;
+            case 5: r = 1; g = 1; b = 1; break;
+            case 6: g = 0.5f; b = 0.5f; break;
+          }
+          auto call = id(status_led).turn_on();
+          call.set_rgb(r, g, b);
+          call.set_brightness(0.25f);
+          call.set_transition_length(0);
+          call.perform();

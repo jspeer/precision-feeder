@@ -1,0 +1,101 @@
+# Precision Feeder: core platform setup. Always include this package.
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Every value below can be overridden from your own YAML by defining the same
+# name under `substitutions:`; the values here are only the defaults.
+
+substitutions:
+  name: precision-feeder
+  friendly_name: Precision Feeder
+  fw_version: "0.1.1"
+
+  # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
+  servo_pin: GPIO1             # servo signal wire
+  button_pin: GPIO2            # optional push button to GND (button package only)
+  status_led_pin: GPIO21       # onboard WS2812 (status LED package only)
+
+  # --- Time ---------------------------------------------------------------
+  # NTP is the primary time source. Leave the pool servers, or point at a
+  # local NTP server if your network has no internet access.
+  ntp_server_1: 0.pool.ntp.org
+  ntp_server_2: 1.pool.ntp.org
+  ntp_server_3: 2.pool.ntp.org
+  # Your timezone, as an IANA name (America/New_York) or a POSIX string.
+  # Daylight saving and sunrise/sunset times depend on this being right.
+  timezone: America/New_York
+
+  # --- Servo and tray (see components/precision_feeder/__init__.py) -------
+  sweep_degrees: "175"         # total servo travel across the 7 tray positions
+  min_pulse: 500us             # pulse width for 0 degrees (MG90S: about 500 us)
+  max_pulse: 2400us            # pulse width for 180 degrees (MG90S: about 2400 us)
+  servo_invert: "false"        # "true" if the servo is mounted the other way round
+  step_time: 1s                # time given to each of the three moves of a feed
+  wiggle: "true"               # shake food loose: forward, back, forward again
+  detach_delay: 1s             # release the servo this long after the last move
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 4MB              # ESP32-S3FH4R2 (Waveshare ESP32-S3-Zero H4R2)
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+# Home Assistant connection. No reboot when it is lost: the feeder keeps feeding on its own.
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # No reboot when WiFi is lost, for the same reason.
+  reboot_timeout: 0s
+  # If it cannot join your network it opens its own access point so you can fix the settings.
+  ap:
+    ssid: ${name}-setup
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: feeder_time
+    timezone: ${timezone}
+    servers:
+      - ${ntp_server_1}
+      - ${ntp_server_2}
+      - ${ntp_server_3}
+
+# The servo signal: a standard 50 Hz hobby-servo PWM.
+output:
+  - platform: ledc
+    id: servo_output
+    pin: ${servo_pin}
+    frequency: 50Hz
+
+precision_feeder:
+  id: feeder
+  output: servo_output
+  time_id: feeder_time
+  sweep_degrees: ${sweep_degrees}
+  min_pulse_width: ${min_pulse}
+  max_pulse_width: ${max_pulse}
+  invert: ${servo_invert}
+  step_time: ${step_time}
+  wiggle: ${wiggle}
+  detach_delay: ${detach_delay}

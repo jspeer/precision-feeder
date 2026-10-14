@@ -1,0 +1,69 @@
+# Precision Feeder: tray calibration and position recovery.
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Setup, as in the original design: turn the tray fully clockwise to its end
+# stop, fit it so slot 0 (the closed slot) lines up with the mark on the base,
+# then use calibration mode to fine-tune each position:
+#   1. Turn "Calibration Mode" on (feeds are refused while it is on).
+#   2. Choose a position with "Calibration Position"; the servo moves there.
+#   3. Adjust "Calibration Offset" until that slot lines up with the opening.
+#   4. Repeat for the other positions, then turn "Calibration Mode" off to save.
+
+switch:
+  - platform: template
+    name: "Calibration Mode"
+    icon: mdi:tune
+    lambda: return id(feeder).calibration_mode();
+    turn_on_action:
+      - lambda: id(feeder).set_calibration_mode(true);
+    turn_off_action:
+      - lambda: id(feeder).set_calibration_mode(false);
+
+select:
+  - platform: template
+    name: "Calibration Position"
+    icon: mdi:numeric
+    options: ["0", "1", "2", "3", "4", "5", "6"]
+    lambda: return std::string(1, (char) ('0' + id(feeder).calibration_position()));
+    set_action:
+      - lambda: id(feeder).calibration_select(x[0] - '0');
+    update_interval: 2s
+
+number:
+  - platform: template
+    name: "Calibration Offset"
+    icon: mdi:angle-acute
+    unit_of_measurement: "°"
+    min_value: -15
+    max_value: 15
+    step: 0.1
+    mode: box
+    # Added to the nominal angle of the selected position. Saved when calibration mode is turned off.
+    lambda: return id(feeder).calibration_offset() / 10.0f;
+    set_action:
+      - lambda: id(feeder).set_calibration_offset((int16_t) std::lround(x * 10.0f));
+    update_interval: 2s
+
+  # --- Position recovery ----------------------------------------------------
+  # After a power loss in the middle of a feed the tray position is "unknown"
+  # and feeding stops. Look at the tray, enter where it really is, and press the button.
+  - platform: template
+    id: declared_position
+    name: "Declared Tray Position"
+    icon: mdi:numeric
+    min_value: 0
+    max_value: 6
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 0
+
+button:
+  - platform: template
+    name: "Declare Tray Position"
+    icon: mdi:map-marker-check
+    on_press:
+      - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);
