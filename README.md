@@ -58,7 +58,8 @@ say where the tray is.
 
 - Waveshare ESP32-S3-Zero (the 4 MB flash / 2 MB PSRAM variant), or another
   ESP32-S3 board with pin changes
-- MG90S servo (or an SG92R)
+- MG90S servo, or the TowerPro SG92R the original firmware was built with (same
+  size and pins; the default pulse range is the original's, tuned on the SG92R)
 - Optional push button between a GPIO and GND
 
 Default pins (all are YAML substitutions): servo `GPIO1`, button `GPIO2`, status

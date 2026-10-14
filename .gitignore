@@ -2,3 +2,7 @@ secrets.yaml
 .esphome/
 __pycache__/
 *.pyc
+# Local Python virtualenv (see CLAUDE.md / README)
+.venv/
+# Per-machine notes for Claude Code sessions; not part of the project
+CLAUDE.md

@@ -98,9 +98,9 @@ substitutions.
 ```
 README.md  LICENSE  DESIGN.md  AGENTS.md
 docs/         PROTOCOL.md, CALIBRATION.md
-components/   precision_feeder/ (feeder_core: tray, guard, scheduler; precision_feeder: ESPHome adapter)
-              and precision_feeder_ble/
-              (optional BLE protocol; protocol.h, calendar.h and solar.h are pure and host-tested)
+components/   precision_feeder/ (feeder_core: tray, guard, scheduler; calendar.h and solar.h,
+              pure and host-tested; precision_feeder: ESPHome adapter)
+              and precision_feeder_ble/ (optional BLE protocol; protocol.h is pure and host-tested)
 packages/     reusable YAML packages
 examples/     basic.yaml, ble.yaml
 tests/        host-side C++ tests (test_core.cpp, test_logic.cpp, test_protocol.cpp)

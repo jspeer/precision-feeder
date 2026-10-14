@@ -30,7 +30,10 @@ own build.*
 
 If your servo moves the wrong way for your mounting, set `servo_invert: "true"`.
 If it buzzes or stalls at the ends of its travel, reduce `sweep_degrees` or
-adjust `min_pulse` / `max_pulse` (an MG90S is typically about 500 to 2400 µs).
+adjust `min_pulse` / `max_pulse`. The defaults, 544 to 2400 µs, are what the
+original firmware drove its TowerPro SG92R with; an MG90S fits the same mount but
+may turn a slightly different amount per microsecond, which shows up as an error
+that grows from slot 1 to slot 6.
 
 ## Loading and the tray position
 
@@ -46,6 +49,7 @@ reloads the tray in this state (it moves to the closed slot), then load it.
 
 ## What still needs bench confirmation
 
-- The servo's real end stops against the 2.5 degree margin.
+- The MG90S's real end stops against the 2.5 degree margin at position 0, and
+  the default 544 to 2400 µs pulse range (the original's, tuned on an SG92R).
 - Whether the tray stays put when the servo is released after a move.
 - Whether the servo twitches at power-up (and whether the 10 kΩ pull-down is needed).

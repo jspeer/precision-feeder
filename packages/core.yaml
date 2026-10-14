@@ -10,7 +10,7 @@
 substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
-  fw_version: "0.2.1"
+  fw_version: "0.2.2"
 
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
   servo_pin: GPIO1             # servo signal wire
@@ -28,9 +28,9 @@ substitutions:
   timezone: America/New_York
 
   # --- Servo and tray (see components/precision_feeder/__init__.py) -------
-  sweep_degrees: "175"         # total servo travel across the 7 tray positions
-  min_pulse: 500us             # pulse width for 0 degrees (MG90S: about 500 us)
-  max_pulse: 2400us            # pulse width for 180 degrees (MG90S: about 2400 us)
+  sweep_degrees: "175"         # angle the 7 slots span; 25 degrees per position
+  min_pulse: 544us             # pulse width for 0 degrees (as the original firmware)
+  max_pulse: 2400us            # pulse width for 180 degrees (as the original firmware)
   servo_invert: "false"        # "true" if the servo is mounted the other way round
   step_time: 1s                # time given to each of the three moves of a feed
   wiggle: "true"               # shake food loose: forward, back, forward again

@@ -32,10 +32,12 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_OUTPUT): cv.use_id(output.FloatOutput),
         # The clock the scheduler follows (sntp, homeassistant, ...).
         cv.Required(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
-        # Total servo travel across the 7 tray positions. The original firmware uses 175.
+        # Angle the tray's 7 slots span (7 x 25 degrees on the Rev2 print); the pitch is
+        # sweep / 7, so the servo turns 6 pitches (150) from position 0 to 6. Original: 175.
         cv.Optional(CONF_SWEEP, default=175.0): cv.float_range(min=90.0, max=180.0),
-        # Servo pulse range that maps to 0 and 180 degrees. MG90S: about 500 to 2400 us.
-        cv.Optional(CONF_MIN_PULSE, default="500us"): cv.positive_time_period_microseconds,
+        # Servo pulse range that maps to 0 and 180 degrees. 544 to 2400 us is what the
+        # original firmware drives (the ESP32Servo library's default), with an SG92R.
+        cv.Optional(CONF_MIN_PULSE, default="544us"): cv.positive_time_period_microseconds,
         cv.Optional(CONF_MAX_PULSE, default="2400us"): cv.positive_time_period_microseconds,
         # Mirror the angle (180 - angle) if your servo is mounted the other way round.
         cv.Optional(CONF_INVERT, default=False): cv.boolean,

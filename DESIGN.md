@@ -1,6 +1,7 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **draft for review, no firmware written yet**. Date: 2026-10-13.
+Status: **firmware v0.2.1 built and host-tested; not yet run on hardware**
+(implementation status in section 15). First written 2026-10-13.
 
 ## 0. Disclosure and licence
 
@@ -71,7 +72,7 @@ a documented protocol.
 | Item | Value |
 |---|---|
 | MCU | Waveshare ESP32-S3-Zero (H4R2 variant), ESP32-S3FH4R2 (4 MB flash, 2 MB quad PSRAM). USB-C, WS2812 RGB LED on GPIO21, BOOT on GPIO0, no USB-UART chip (native USB). |
-| Servo | MG90S (pin and size compatible with SG92R) |
+| Servo | MG90S. The original firmware was built with a TowerPro SG92R; the two are pin and size compatible, but their travel per microsecond may differ (section 3). |
 | Button | **Optional.** Not fitted on every build. |
 | Network | WiFi for OTA and HA; BLE for data |
 | Shell | PET-GF print (builder's choice) |
@@ -99,8 +100,28 @@ Facts taken from the original firmware and the builder's reading of the
 Printables instructions (verify on the physical print):
 
 - 7 tray positions, numbered 0 to 6. Servo sweep 175 degrees, so 25 degrees
-  per position. Angle for position n is `margin + n * 25` degrees, minus a
-  per-position calibration offset (reference margin is 2 degrees at each end).
+  per position (`pitch = sweep / 7`). Angle for position n is
+  `margin + n * pitch` plus a per-position calibration offset, where
+  `margin = (180 - sweep) / 2` = 2.5 degrees. Positions therefore run from
+  2.5 to 152.5 degrees. (The original firmware's margin works out to 2
+  degrees only because it does the division in integer maths; the intent is
+  2.5.)
+- **Measured from the printed model** (`REV2 (Feeding hole, Small) v6` 3MF,
+  2026-10-13): the tray's 7 slots are exactly 25.0 degrees apart around the
+  servo axis and together span 175 degrees (2.5 to 177.5 degrees in the tray's
+  own frame). So "sweep 175" is the tray's slot span, not the servo's travel:
+  going from position 0 to position 6 turns the servo only 150 degrees. The
+  closed slot (solid floor) is the one at the end of the fan. The feeding
+  hole in the base is a sector about 24.3 degrees wide, and the slot openings
+  are about 22.5 degrees between walls, so there is little slack: a few
+  degrees of error starts to cover the hole. The short and tall trays have the
+  same pitch.
+- The original drives the servo with ESP32Servo's default pulse range, 544 to
+  2400 us for 0 to 180 degrees, and this firmware uses the same default (from
+  v0.2.2). The original was built and tuned with a TowerPro **SG92R**; this
+  build uses an **MG90S**, which is pin and size compatible but not
+  necessarily the same degrees per microsecond. That is unknown until the
+  bench test, and any mismatch adds up over the six steps.
 - Position 0 is the **closed slot** (idle and reload position). Positions 1 to
   6 are open slots. **Each feed advances one position, so a full magazine
   holds 6 portions.** At position 6 the magazine is empty.
@@ -143,7 +164,9 @@ States: `LOADED(n)` (position n, 0 to 5), `EMPTY` (position 6), `UNKNOWN`
   The reference used an unsigned type, which can underflow.
 - Settings: sweep, margin, step time, wiggle on/off and amplitude, servo pulse
   range (MG90S end stops may differ from a nominal 0 to 180 degrees; do not
-  assume a 2 degree margin is safe until tested), direction invert.
+  assume the 2.5 degree margin at position 0 is safe until tested), direction
+  invert. The default pulse range is the original's, 544 to 2400 us for 0 to
+  180 degrees (tuned on an SG92R; check it on an MG90S).
 - Calibration mode: jog the servo, save per-position offsets. Scheduled and
   remote feeds are rejected while calibrating.
 
@@ -404,19 +427,25 @@ humidity sensor, no reserved I2C header. Position is open-loop (section 3.1
 describes how an interrupted move is recovered). The optional push button is
 the only add-on, because the original firmware supports it.
 
-## 12. Repository layout (proposed)
+## 12. Repository layout
 
 ```
 precision-feeder/
-  README.md            overview, wiring, disclosure, licence
-  LICENSE
-  DESIGN.md            this document (later split into docs/)
-  docs/PROTOCOL.md     BLE protocol
+  README.md  LICENSE  DESIGN.md  AGENTS.md
+  docs/PROTOCOL.md     BLE protocol (authoritative)
   docs/CALIBRATION.md  setup and calibration walkthrough
-  components/precision_feeder/   external component (C++ core + ESPHome glue)
-  packages/            reusable YAML packages (core, scheduler, ble, time, button, web)
-  examples/            ha-only.yaml, ble-plc.yaml, standalone.yaml
-  tools/               Python bleak example client
+  components/precision_feeder/      feeder_core.* (all logic, plain C++), calendar.h,
+                                    solar.h (pure, host-tested), precision_feeder.*
+                                    (ESPHome adapter: clock, servo, flash, log)
+  components/precision_feeder_ble/  optional BLE protocol: protocol.h (pure,
+                                    host-tested) and the GATT handlers
+  packages/            core, status, controls, schedule_editor, calibration,
+                       status_led, web_server, button, time_homeassistant,
+                       diagnostics, ble_gatt
+  examples/            basic.yaml (HA + web UI), ble.yaml (adds BLE, button,
+                       HA time, diagnostics), secrets.example.yaml
+  tests/               host-side C++ tests (core, logic, protocol)
+  tools/               Python bleak reference client and its tests
 ```
 
 Importable with ESPHome `packages:` / `github://`.
@@ -461,11 +490,11 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.2.1, 2026-10-14)
+## 15. Implementation status (v0.2.2, 2026-10-13)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
-2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 994 KB (54% of the 1.8 MB app
-partition) without BLE, about 1.32 MB (72%) with it.
+2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
+partition) without BLE, about 1.30 MB (71%) with it (section 16).
 
 What has been run, on a host (a `ziglang` C++ compiler installed with pip into a
 scratch virtualenv; any C++17 compiler works):
@@ -555,6 +584,15 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
 
+Changes in v0.2.2 (servo default, 2026-10-13):
+- Default `min_pulse` is 544 us (was 500), the pulse range the original firmware
+  drives (ESP32Servo's default, 544 to 2400 us), so a fresh build starts the tray
+  where the original did. The original was tuned on an SG92R; this build uses an
+  MG90S, so the range still needs the bench check. Existing builds that set
+  `min_pulse` themselves are unaffected; others will see every position shift by
+  up to about 4 degrees and should re-check calibration.
+- Docs: the tray geometry measured from the printed model (section 3).
+
 Changes in v0.2.0 (BLE protocol, and the two warnings fixed):
 - BLE protocol v1 implemented (section 8, `docs/PROTOCOL.md`).
 - OTA authenticates with the API encryption key (no separate OTA password), and
@@ -581,6 +619,8 @@ framework, WiFi, API, web server and status LED all enabled.
 | BLE with the protocol implemented (v0.2.0) | 1,319,791 B (71.9%) | 143,231 B (41.9%) |
 | v0.2.1, no BLE (`basic.yaml`) | 971,847 B (53.0%) | 112,223 B (32.8%) |
 | v0.2.1, BLE + button + HA time + diagnostics | 1,300,123 B (70.9%) | 143,739 B (42.1%) |
+| v0.2.1 rebuilt on the dev machine, no BLE | 971,863 B (53.0%) | 112,223 B (32.8%) |
+| v0.2.1 rebuilt on the dev machine, BLE build | 1,297,611 B (70.7%) | 143,383 B (42.0%) |
 
 - **BLE costs about 318 KB of flash and about 31 KB of static RAM.**
 - **Flash is not a problem.** With BLE the app is 72% of its OTA slot, leaving
