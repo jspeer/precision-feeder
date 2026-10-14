@@ -5,7 +5,7 @@
 // documented in docs/PROTOCOL.md and mirrored by tools/precision_feeder_ble.py.
 // All multi-byte values are little-endian.
 //
-// Part of the Precision Feeder ESPHome firmware (MIT licence).
+// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

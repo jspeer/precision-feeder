@@ -112,11 +112,18 @@ out a package.
 - The 24-hour portion cap is remembered across reboots only if the clock was set
   when the feed happened.
 
-## Credits and licence
+## Credits
 
-MIT licensed (see [LICENSE](LICENSE)). This is an independent, clean-room
-implementation. The hardware is the Printables model linked above, and the
-original firmware by FlyingGyroscope
-([PrecisionFeederRev2](https://github.com/FlyingGyroscope/PrecisionFeederRev2),
-AGPL-3.0) was read only to learn how the mechanism behaves; none of its code is
-used here.
+- Inspired by the Precision Feeder Rev2 by **FlyingGyroscope**: the
+  [original firmware](https://github.com/FlyingGyroscope/PrecisionFeederRev2) and
+  the [Printables model](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2)
+  this firmware drives. This is an independent rewrite; none of the original code
+  is used (it is AGPL-3.0, and was read only to learn how the mechanism behaves).
+- Designed and written with **Claude** (Anthropic's AI), directed and tested on
+  real hardware by a human.
+
+## Licence
+
+Released into the public domain under [The Unlicense](LICENSE). Do anything you
+like with it. This covers this repository's own files only; the Printables model
+has its own licence.

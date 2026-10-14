@@ -10,7 +10,10 @@ Status: **firmware v0.2.1 built and host-tested; not yet run on hardware**
   > (Anthropic's Claude). A human reviewed and directed the work, but the code
   > and documentation may contain mistakes. Test on your own hardware, and do
   > not rely on it as the only means of feeding animals you care about.
-- **Licence:** MIT (proposed; the goal is "as open as possible").
+- **Licence:** public domain, under The Unlicense (owner, 2026-10-14; replaces
+  the MIT proposal). No copyright holder. Credits (FlyingGyroscope as the
+  inspiration, Claude as the author's tool) are in the README; the dedication
+  cannot require them, but they travel with the README.
 - **Provenance:** this is a clean-room ESPHome implementation. The original
   Arduino firmware ([FlyingGyroscope/PrecisionFeederRev2](https://github.com/FlyingGyroscope/PrecisionFeederRev2),
   AGPL-3.0) was read only to learn the mechanism's geometry and behaviour. No
@@ -469,7 +472,7 @@ Importable with ESPHome `packages:` / `github://`.
 - Three profiles, editor-entity pattern, 4 events per profile.
 - Solar anchoring (clock, sunrise, sunset, signed offset) is core.
 - No burst/fry mode.
-- MIT licence, AI disclosure in repo.
+- Public domain (The Unlicense), AI disclosure in repo (licence decided 2026-10-14; was MIT).
 - Time: NTP is the truth; BLE `SET_TIME` is a fallback gated by
   `ble_time_policy`; HA time opt-in; time never restored from flash.
 - No external hardware (RTC, sensors). Optional push button supported.

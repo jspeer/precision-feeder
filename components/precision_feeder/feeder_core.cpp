@@ -1,4 +1,4 @@
-// Part of the Precision Feeder ESPHome firmware (MIT licence).
+// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "feeder_core.h"
