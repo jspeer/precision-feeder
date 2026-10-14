@@ -30,8 +30,8 @@ void PrecisionFeeder::dump_config() {
   ESP_LOGCONFIG(TAG, "Precision Feeder:");
   ESP_LOGCONFIG(TAG, "  Sweep: %.1f deg, pitch %.1f deg, invert: %s", this->sweep_, this->sweep_ / NUM_POSITIONS,
                 YESNO(this->invert_));
-  ESP_LOGCONFIG(TAG, "  Pulse: %u-%u us, step time %u ms, wiggle: %s, detach delay %u ms",
-                (unsigned) this->min_pulse_us_, (unsigned) this->max_pulse_us_, (unsigned) this->step_ms_,
+  ESP_LOGCONFIG(TAG, "  Pulse: %u-%u us (saved), step time %u ms, wiggle: %s, detach delay %u ms",
+                (unsigned) this->cfg.min_pulse_us, (unsigned) this->cfg.max_pulse_us, (unsigned) this->step_ms_,
                 YESNO(this->wiggle_), (unsigned) this->detach_ms_);
   ESP_LOGCONFIG(TAG, "  Tray position: %u (%s), remaining: %u", this->position(), this->tray_state_text().c_str(),
                 this->remaining());
@@ -70,8 +70,8 @@ int64_t PrecisionFeeder::hal_local_to_epoch(int year, int month, int day, int ho
 }
 
 void PrecisionFeeder::hal_servo_write(float angle) {
-  const float span = static_cast<float>(this->max_pulse_us_) - static_cast<float>(this->min_pulse_us_);
-  const float pulse = static_cast<float>(this->min_pulse_us_) + (angle / 180.0f) * span;
+  const float span = static_cast<float>(this->cfg.max_pulse_us) - static_cast<float>(this->cfg.min_pulse_us);
+  const float pulse = static_cast<float>(this->cfg.min_pulse_us) + (angle / 180.0f) * span;
   this->output_->set_level(pulse / SERVO_PERIOD_US);
 }
 

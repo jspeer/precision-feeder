@@ -429,6 +429,46 @@ static void test_clock_tracking() {
   CHECK(f->network_time_age_ms() >= 180000, "network time age");
 }
 
+static void test_pulse_range() {
+  current = "pulse range";
+  Flash flash;
+  {
+    auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+    f->set_default_pulse_range(600, 2600);
+    f->start();
+    CHECK(f->min_pulse_us() == 600 && f->max_pulse_us() == 2600, "fresh device uses the YAML defaults");
+    CHECK(f->set_pulse_range(654, 2770) == Result::OK, "valid range accepted");
+    CHECK(f->set_pulse_range(1500, 1900) == Result::INVALID_ARG, "less than 500 us apart refused");
+    CHECK(f->set_pulse_range(299, 2400) == Result::INVALID_ARG, "min below its limit refused");
+    CHECK(f->set_pulse_range(544, 3001) == Result::INVALID_ARG, "max above its limit refused");
+    CHECK(f->min_pulse_us() == 654 && f->max_pulse_us() == 2770, "refused changes leave the range alone");
+    f->angles.clear();
+    f->set_pulse_range(660, 2770);
+    CHECK(f->angles.empty(), "no move outside calibration mode");
+    f->set_calibration_mode(true);
+    f->calibration_select(3);
+    f->angles.clear();
+    f->set_pulse_range(654, 2770);
+    CHECK(f->angles.size() == 1, "calibration mode: servo moves to the selected position again");
+    f->set_calibration_mode(false);
+    CHECK(flash.have_settings && flash.settings.min_pulse_us == 654 && flash.settings.max_pulse_us == 2770,
+          "saved with the settings");
+  }
+  {
+    auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+    f->set_default_pulse_range(544, 2400);
+    f->start();
+    CHECK(f->min_pulse_us() == 654 && f->max_pulse_us() == 2770, "saved range wins over the YAML defaults");
+  }
+  {
+    flash.settings.min_pulse_us = 0;  // corrupt
+    auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+    f->set_default_pulse_range(544, 2400);
+    f->start();
+    CHECK(f->min_pulse_us() == 544 && f->max_pulse_us() == 2400, "an invalid saved range falls back to the defaults");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -443,6 +483,7 @@ int main() {
   test_cadence_and_fast_days();
   test_projection();
   test_clock_tracking();
+  test_pulse_range();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

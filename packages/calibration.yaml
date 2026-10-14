@@ -11,6 +11,10 @@
 #   2. Choose a position with "Calibration Position"; the servo moves there.
 #   3. Adjust "Calibration Offset" until that slot lines up with the opening.
 #   4. Repeat for the other positions, then turn "Calibration Mode" off to save.
+# If the error grows from slot to slot (each slot needs a bigger offset than the
+# one before), the servo turns a different amount per microsecond than assumed:
+# fix that first with "Servo Max Pulse" (bigger = longer steps), line up slot 0
+# with "Servo Min Pulse", and only then fine-tune the per-slot offsets.
 
 switch:
   - platform: template
@@ -45,6 +49,37 @@ number:
     lambda: return id(feeder).calibration_offset() / 10.0f;
     set_action:
       - lambda: id(feeder).set_calibration_offset((int16_t) std::lround(x * 10.0f));
+    update_interval: 2s
+
+  # --- Servo pulse range ------------------------------------------------------
+  # Pulse widths for 0 and 180 degrees. The YAML min_pulse/max_pulse are only the
+  # starting values; changes here are saved and win from then on. In calibration
+  # mode the servo moves to the selected position again on every change.
+  - platform: template
+    name: "Servo Min Pulse"
+    icon: mdi:pulse
+    entity_category: config
+    unit_of_measurement: "µs"
+    min_value: 300
+    max_value: 1500
+    step: 1
+    mode: box
+    lambda: return id(feeder).min_pulse_us();
+    set_action:
+      - lambda: id(feeder).set_pulse_range((uint16_t) x, id(feeder).max_pulse_us());
+    update_interval: 2s
+  - platform: template
+    name: "Servo Max Pulse"
+    icon: mdi:pulse
+    entity_category: config
+    unit_of_measurement: "µs"
+    min_value: 1500
+    max_value: 3000
+    step: 1
+    mode: box
+    lambda: return id(feeder).max_pulse_us();
+    set_action:
+      - lambda: id(feeder).set_pulse_range(id(feeder).min_pulse_us(), (uint16_t) x);
     update_interval: 2s
 
   # --- Position recovery ----------------------------------------------------

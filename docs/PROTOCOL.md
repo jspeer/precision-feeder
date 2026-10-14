@@ -43,7 +43,7 @@ Base `02dd1dd9-ba75-4bbc-bdea-306d2101xxxx`; `xxxx` is:
 
 Currently `01 | caps | 07 | 03 | 04`. Capability bits: 0 solar anchors,
 1 clock push (`SET_TIME`) available, 2 profile editing, 3 calibration,
-4 hold-until-cancelled. If your client sees a protocol version it does not know,
+4 hold-until-cancelled, 5 servo pulse range settable (Config keys 10 and 11). If your client sees a protocol version it does not know,
 do not send commands.
 
 ## Command (write) and Response (notify)
@@ -176,6 +176,13 @@ get `key, value`. Answered on Response (`seq 0`, opcode `0x81`, detail = key).
 | 7 | scheduler enabled | 0 or 1 |
 | 8 | latitude, 1e-5 degree | -9,000,000 to 9,000,000 |
 | 9 | longitude, 1e-5 degree | -18,000,000 to 18,000,000 |
+| 10 | servo pulse for 0 degrees, µs | 300 to 1500 |
+| 11 | servo pulse for 180 degrees, µs | 1500 to 3000 |
+
+Keys 10 and 11 were added in firmware 0.3.0 (an addition within protocol 1; older
+firmware answers them INVALID_ARG). The two must stay at least 500 µs apart: a write
+that would break that is refused with INVALID_ARG. In calibration mode the servo moves
+to the selected position again after a change.
 
 ## Calibration (read, write)
 
@@ -209,6 +216,7 @@ closes.
 | Profile event: profile 1, event 0, disabled, sunrise -30 min, 1 portion, every day | `01 01 00 02 E2 FF 01 7F` |
 | Config: daily cap = 3 | `05 03 00 00 00` |
 | Config query: latitude | `88` |
+| Config: servo max pulse = 2770 µs | `0B D2 0A 00 00` |
 | Calibration: position 2 = -1.2 degrees | `02 F4 FF` |
 | Event log: a BLE feed of 1 portion at 1760380800, accepted | `80 47 ED 68 02 01 00` |
 

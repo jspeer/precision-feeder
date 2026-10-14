@@ -25,6 +25,7 @@ constexpr uint16_t CAP_TIME_PUSH = 1u << 1;      // SET_TIME is available
 constexpr uint16_t CAP_PROFILE_EDIT = 1u << 2;   // Profile characteristic can edit the schedule
 constexpr uint16_t CAP_CALIBRATION = 1u << 3;    // calibration commands
 constexpr uint16_t CAP_HOLD_FOREVER = 1u << 4;   // HOLD accepts "until cancelled"
+constexpr uint16_t CAP_SERVO_PULSE = 1u << 5;    // Config keys 10 and 11 (servo pulse range) exist
 
 // Layout constants (must match the feeder component; checked in precision_feeder_ble.cpp).
 constexpr uint8_t POSITIONS = 7;
@@ -221,6 +222,8 @@ constexpr uint8_t CFG_MAX_PORTIONS_CMD = 6;
 constexpr uint8_t CFG_SCHEDULER_ENABLED = 7;
 constexpr uint8_t CFG_LATITUDE_E5 = 8;
 constexpr uint8_t CFG_LONGITUDE_E5 = 9;
+constexpr uint8_t CFG_MIN_PULSE_US = 10;  // servo pulse for 0 degrees; at least 500 us below the max
+constexpr uint8_t CFG_MAX_PULSE_US = 11;  // servo pulse for 180 degrees
 constexpr uint8_t QUERY_FLAG = 0x80;  // OR into a key (or index) to ask for it instead of setting it
 constexpr size_t CONFIG_SET_SIZE = 5;  // key u8, value i32
 constexpr size_t QUERY_SIZE = 1;       // key|0x80
@@ -245,12 +248,16 @@ inline bool config_value_ok(uint8_t key, int32_t v) {
       return v >= -9000000 && v <= 9000000;
     case CFG_LONGITUDE_E5:
       return v >= -18000000 && v <= 18000000;
+    case CFG_MIN_PULSE_US:
+      return v >= 300 && v <= 1500;
+    case CFG_MAX_PULSE_US:
+      return v >= 1500 && v <= 3000;
     default:
       return false;
   }
 }
 
-inline bool config_key_known(uint8_t key) { return key >= CFG_MIN_GAP_S && key <= CFG_LONGITUDE_E5; }
+inline bool config_key_known(uint8_t key) { return key >= CFG_MIN_GAP_S && key <= CFG_MAX_PULSE_US; }
 
 // ---- Calibration characteristic -------------------------------------------------------------------
 

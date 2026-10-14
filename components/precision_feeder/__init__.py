@@ -37,8 +37,16 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_SWEEP, default=175.0): cv.float_range(min=90.0, max=180.0),
         # Servo pulse range that maps to 0 and 180 degrees. 544 to 2400 us is what the
         # original firmware drives (the ESP32Servo library's default), with an SG92R.
-        cv.Optional(CONF_MIN_PULSE, default="544us"): cv.positive_time_period_microseconds,
-        cv.Optional(CONF_MAX_PULSE, default="2400us"): cv.positive_time_period_microseconds,
+        # These are only the starting values: the range can be tuned at run time (Home
+        # Assistant "Servo Min/Max Pulse", or BLE), and the saved values then win.
+        cv.Optional(CONF_MIN_PULSE, default="544us"): cv.All(
+            cv.positive_time_period_microseconds,
+            cv.Range(min=cv.TimePeriod(microseconds=300), max=cv.TimePeriod(microseconds=1500)),
+        ),
+        cv.Optional(CONF_MAX_PULSE, default="2400us"): cv.All(
+            cv.positive_time_period_microseconds,
+            cv.Range(min=cv.TimePeriod(microseconds=1500), max=cv.TimePeriod(microseconds=3000)),
+        ),
         # Mirror the angle (180 - angle) if your servo is mounted the other way round.
         cv.Optional(CONF_INVERT, default=False): cv.boolean,
         # How long each of the three tray moves of a feed takes before the next one starts.
@@ -49,6 +57,16 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_DETACH_DELAY, default="1s"): cv.positive_time_period_milliseconds,
     }
 ).extend(cv.COMPONENT_SCHEMA)
+
+
+def _pulse_span(config):
+    span = config[CONF_MAX_PULSE].total_microseconds - config[CONF_MIN_PULSE].total_microseconds
+    if span < 500:
+        raise cv.Invalid(f"{CONF_MAX_PULSE} must be at least 500 us above {CONF_MIN_PULSE}")
+    return config
+
+
+CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, _pulse_span)
 
 
 async def to_code(config):
@@ -62,7 +80,7 @@ async def to_code(config):
 
     cg.add(var.set_sweep(config[CONF_SWEEP]))
     cg.add(
-        var.set_pulse_range(
+        var.set_default_pulse_range(
             config[CONF_MIN_PULSE].total_microseconds,
             config[CONF_MAX_PULSE].total_microseconds,
         )

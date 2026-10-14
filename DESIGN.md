@@ -327,7 +327,8 @@ button. Event time and days are text entities (`HH:MM` or signed `+03:00`;
 `mon,wed,fri` / `weekdays` / `all`). Config: guard settings, gap between
 portions, latitude, longitude, reload pause, refill interval
 (timezone is build-time, see section 6). Calibration: mode switch, position
-select, one offset number, declare-position recovery.
+select, one offset number, servo min/max pulse (saved, tuned at run time),
+declare-position recovery.
 
 ## 8. BLE GATT (secondary control plane)
 
@@ -481,8 +482,9 @@ Importable with ESPHome `packages:` / `github://`.
 ## 14. Open items
 
 1. Polar/no-sun fallback: skip (proposed) or clock-time fallback.
-2. Confirm the physical servo end stops and the slot/position mapping on the
-   printed tray.
+2. ~~Confirm the slot/position mapping on the printed tray.~~ Done on the
+   bench, 2026-10-14 (section 17): all 7 positions line up. Still to watch:
+   whether the servo strains at position 6 in daily use.
 3. Servo (GPIO1) and button (GPIO2) pins chosen; confirm on the bench that the
    servo does not twitch at boot, and whether the pull-down is needed.
 4. Confirm ESPHome `esp32_ble_server`, pairing, multi-`time:` and conditional
@@ -490,7 +492,7 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.2.2, 2026-10-13)
+## 15. Implementation status (v0.3.0, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -584,6 +586,23 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
 
+Changes in v0.3.0 (servo pulse range settable at run time, 2026-10-14):
+- First bench result: the MG90S turned about 12% less per microsecond than the
+  544 to 2400 us range assumes (slot 0 needed +11 degrees, slot 1 +14.5, and an
+  uncalibrated position 6 stopped just past slot 5). The +-15 degree per-slot
+  offsets cannot absorb that, and fixing it in YAML needs a reflash per try.
+- The pulse range is now part of the saved settings and can be changed at run
+  time: Home Assistant "Servo Min Pulse" / "Servo Max Pulse" (calibration
+  package), BLE Config keys 10 and 11, capability bit 5. In calibration mode the
+  servo moves to the selected position after each change. The YAML
+  `min_pulse` / `max_pulse` are the defaults for a fresh device; saved values win.
+  Limits 300 to 1500 / 1500 to 3000 us, at least 500 us apart.
+- Settings version 3: **saved settings from earlier versions are discarded** on
+  the first boot (schedule, guard settings, calibration offsets, location). The
+  tray state is kept.
+- BLE: an addition within protocol 1 (new keys and capability bit); nothing
+  existing changed.
+
 Changes in v0.2.2 (servo default, 2026-10-13):
 - Default `min_pulse` is 544 us (was 500), the pulse range the original firmware
   drives (ESP32Servo's default, 544 to 2400 us), so a fresh build starts the tray
@@ -648,3 +667,42 @@ PSRAM is otherwise unused.
 
 Two ESPHome warnings found while validating were fixed in v0.2.0: the deprecated
 `rgb_order` and the OTA password.
+
+## 17. Bench results
+
+### Calibration, first build (2026-10-14, firmware 0.3.0)
+
+Waveshare ESP32-S3-Zero, MG90S, tray printed from the `REV2 (Feeding hole,
+Small) v6` model. The servo horn was re-seated once so that slot 0 needs a
+positive correction (position 0 is commanded to 2.5 degrees and the firmware
+never goes below 0).
+
+With the default 544 to 2400 us range, slot 0 needed +11 degrees, slot 1 about
++11 and slot 2 +14.5, and an uncalibrated position 6 stopped just past slot 5:
+this MG90S turns less per microsecond than the range (taken from the original's
+SG92R) assumes. The per-slot offsets (+-15) could not absorb it, which is why
+v0.3.0 made the pulse range settable at run time.
+
+Final calibration, every position lined up with the opening:
+
+| Setting | Value |
+|---|---|
+| Servo Min Pulse | 637 us |
+| Servo Max Pulse | 2675 us |
+| Offsets, positions 0 to 6 | 0, 0, 0, +2.8, +3.3, +3.3, 0 degrees |
+
+That is about 283 us per 25 degree step (2038 us span; about 11.3 us per
+degree), against 258 us with the default range, about 10% more. Position 6 is
+driven at about 2364 us. The bump at positions 3 to 5 that returns to 0 at 6 is
+ordinary servo non-linearity; the offsets absorb it.
+
+Conclusions:
+- The pulse range has to be calibrated per servo; the default is only a start.
+  Calibrate the range first (slot 0 with the minimum, slot 6 with the maximum),
+  then the offsets. Written up in docs/CALIBRATION.md.
+- The YAML defaults stay at the original's 544 to 2400 us: one servo is not
+  enough to change them, and the run-time range makes that unnecessary.
+
+Not yet checked: the rest of the bench plan (power-up twitch, wiggle and drift
+after release, power loss mid-feed, heap, BLE, schedules).
+

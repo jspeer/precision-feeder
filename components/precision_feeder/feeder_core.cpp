@@ -66,6 +66,8 @@ void FeederCore::defaults_() {
   this->cfg.max_portions_cmd = 1;
   this->cfg.active_profile = 0;
   this->cfg.scheduler_enabled = 1;
+  this->cfg.min_pulse_us = this->default_min_pulse_us_;
+  this->cfg.max_pulse_us = this->default_max_pulse_us_;
 
   std::memset(&this->state_, 0, sizeof(this->state_));
   this->state_.version = STATE_VERSION;
@@ -88,6 +90,10 @@ void FeederCore::clamp_loaded_() {
   this->cfg.daily_cap = std::min<uint8_t>(std::max<uint8_t>(this->cfg.daily_cap, 1), MAX_PORTIONS);
   this->cfg.max_portions_cmd = std::min<uint8_t>(std::max<uint8_t>(this->cfg.max_portions_cmd, 1), MAX_PORTIONS);
   this->state_.position = std::min<uint8_t>(this->state_.position, MAX_PORTIONS);
+  if (!pulse_range_ok(this->cfg.min_pulse_us, this->cfg.max_pulse_us)) {
+    this->cfg.min_pulse_us = this->default_min_pulse_us_;
+    this->cfg.max_pulse_us = this->default_max_pulse_us_;
+  }
 }
 
 void FeederCore::save_state_(bool flush) { this->hal_save_state(this->state_, flush); }
@@ -382,6 +388,21 @@ void FeederCore::set_calibration_offset_at(uint8_t position, int16_t tenths) {
   this->cfg_changed();
   if (this->calibrating_ && position == this->cal_pos_)
     this->move_to_(position);
+}
+
+Result FeederCore::set_pulse_range(uint16_t min_us, uint16_t max_us) {
+  if (!pulse_range_ok(min_us, max_us)) {
+    this->log_(LogLevel::kWarn, "Servo pulse range %u-%u us refused (limits: min %u-%u, max %u-%u, at least %u apart)",
+               min_us, max_us, PULSE_MIN_LO, PULSE_MIN_HI, PULSE_MAX_LO, PULSE_MAX_HI, PULSE_SPAN_MIN);
+    return Result::INVALID_ARG;
+  }
+  this->cfg.min_pulse_us = min_us;
+  this->cfg.max_pulse_us = max_us;
+  this->cfg_changed();
+  this->log_(LogLevel::kInfo, "Servo pulse range %u-%u us", min_us, max_us);
+  if (this->calibrating_)
+    this->move_to_(this->cal_pos_);
+  return Result::OK;
 }
 
 Result FeederCore::jog_calibration(uint8_t position, int16_t delta_tenths) {

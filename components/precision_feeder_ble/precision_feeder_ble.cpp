@@ -30,7 +30,8 @@ static std::vector<uint8_t> to_vector(const uint8_t *data, size_t n) { return st
 
 void PrecisionFeederBle::setup() {
   // Info: protocol version, capability bits, positions, profiles, events per profile.
-  uint16_t caps = proto::CAP_SOLAR | proto::CAP_PROFILE_EDIT | proto::CAP_CALIBRATION | proto::CAP_HOLD_FOREVER;
+  uint16_t caps = proto::CAP_SOLAR | proto::CAP_PROFILE_EDIT | proto::CAP_CALIBRATION | proto::CAP_HOLD_FOREVER |
+                  proto::CAP_SERVO_PULSE;
   if (this->time_policy_ != proto::TimePolicy::OFF)
     caps |= proto::CAP_TIME_PUSH;
   uint8_t info[6];
@@ -371,6 +372,12 @@ bool PrecisionFeederBle::get_config_(uint8_t key, int32_t &value) const {
     case CFG_LONGITUDE_E5:
       value = static_cast<int32_t>(std::lround(c.longitude * 100000.0f));
       return true;
+    case CFG_MIN_PULSE_US:
+      value = c.min_pulse_us;
+      return true;
+    case CFG_MAX_PULSE_US:
+      value = c.max_pulse_us;
+      return true;
     default:
       return false;
   }
@@ -442,6 +449,17 @@ void PrecisionFeederBle::on_config_write_(std::span<const uint8_t> d) {
     case CFG_LONGITUDE_E5:
       c.longitude = static_cast<float>(v) / 100000.0f;
       break;
+    case CFG_MIN_PULSE_US:
+    case CFG_MAX_PULSE_US: {
+      // The pair must stay at least 500 us apart; the core checks it and moves the servo in calibration mode.
+      const uint16_t lo = key == CFG_MIN_PULSE_US ? static_cast<uint16_t>(v) : c.min_pulse_us;
+      const uint16_t hi = key == CFG_MAX_PULSE_US ? static_cast<uint16_t>(v) : c.max_pulse_us;
+      if (f.set_pulse_range(lo, hi) != Result::OK) {
+        this->respond_write_(OP_CONFIG_WRITE, RES_INVALID_ARG, key);
+        return;
+      }
+      break;
+    }
   }
   f.cfg_changed();
   this->set_config_read_(key);

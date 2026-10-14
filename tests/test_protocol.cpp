@@ -130,7 +130,14 @@ int main() {
   // ---- Config and calibration ranges ----
   {
     CHECK(config_key_known(CFG_MIN_GAP_S) && config_key_known(CFG_LONGITUDE_E5), "known keys");
-    CHECK(!config_key_known(0) && !config_key_known(10), "unknown keys");
+    CHECK(config_key_known(CFG_MIN_PULSE_US) && config_key_known(CFG_MAX_PULSE_US), "pulse keys known");
+    CHECK(!config_key_known(0) && !config_key_known(12), "unknown keys");
+    CHECK(config_value_ok(CFG_MIN_PULSE_US, 300) && config_value_ok(CFG_MIN_PULSE_US, 1500) &&
+              !config_value_ok(CFG_MIN_PULSE_US, 299) && !config_value_ok(CFG_MIN_PULSE_US, 1501),
+          "min pulse range");
+    CHECK(config_value_ok(CFG_MAX_PULSE_US, 1500) && config_value_ok(CFG_MAX_PULSE_US, 3000) &&
+              !config_value_ok(CFG_MAX_PULSE_US, 1499) && !config_value_ok(CFG_MAX_PULSE_US, 3001),
+          "max pulse range");
     CHECK(config_value_ok(CFG_DAILY_CAP, 3) && !config_value_ok(CFG_DAILY_CAP, 0) && !config_value_ok(CFG_DAILY_CAP, 7),
           "daily cap range");
     CHECK(config_value_ok(CFG_MIN_GAP_S, 10) && !config_value_ok(CFG_MIN_GAP_S, 9) && config_value_ok(CFG_MIN_GAP_S, 3600) &&
@@ -164,6 +171,8 @@ int main() {
     CHECK(get_i32(loc + 2) == 3976840 && get_i32(loc + 6) == -8615810, "set_location decodes");
     const uint8_t cfg[] = {0x05, 0x03, 0x00, 0x00, 0x00};
     CHECK(get_i32(cfg + 1) == 3, "config value decodes");
+    const uint8_t pulse[] = {0x0B, 0xD2, 0x0A, 0x00, 0x00};
+    CHECK(pulse[0] == CFG_MAX_PULSE_US && get_i32(pulse + 1) == 2770, "max pulse config decodes");
     const uint8_t cal[] = {0x02, 0xF4, 0xFF};
     CHECK(get_i16(cal + 1) == -12, "calibration offset decodes");
     uint8_t buf[4];

@@ -105,6 +105,8 @@ CONFIG_KEYS = {
     "scheduler_enabled": 7,
     "latitude_e5": 8,
     "longitude_e5": 9,
+    "min_pulse_us": 10,
+    "max_pulse_us": 11,
 }
 QUERY_FLAG = 0x80
 QUERY_HEADER = 0xFF

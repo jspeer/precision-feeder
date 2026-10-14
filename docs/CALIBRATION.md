@@ -18,6 +18,32 @@ own build.*
 
 ## Fine-tuning each position
 
+Do this in two stages: first the servo's scale (pulse range), then the per-slot
+offsets. The offsets are limited to ±15 degrees, enough for small corrections but
+not for a servo that turns a different amount per microsecond than assumed.
+
+### 1. Pulse range
+
+1. Turn **Calibration Mode** on and pick **Calibration Position** `0`.
+2. Adjust **Servo Min Pulse** (µs) until the closed slot lines up with the mark.
+   The servo moves again after every change.
+3. Pick position `6` and adjust **Servo Max Pulse** until slot 6 lines up with the
+   opening. A bigger value makes every step longer. Changing it moves slot 0 a
+   little too, so go back to position 0 and repeat once or twice.
+4. Check positions `1` to `5`. If they are all close, go on to the offsets.
+
+Rough rule: if the offsets you would need grow by *d* degrees per slot, multiply
+the span (max − min) by (25 + *d*) / 25.
+
+The YAML `min_pulse` / `max_pulse` are only the starting values for a fresh
+device. Once you change the range here it is saved and used from then on (a
+reflash does not reset it). The limits are 300 to 1500 µs for the minimum, 1500
+to 3000 µs for the maximum, and at least 500 µs between them. The firmware never
+commands more than about 155 degrees, so a large maximum does not by itself push
+the servo into its end stop; still, listen for buzzing at position 6.
+
+### 2. Per-slot offsets
+
 1. Turn **Calibration Mode** on. Feeds are refused while it is on, and the LED is
    white.
 2. Pick **Calibration Position** `0`. The servo moves there. Adjust
@@ -29,11 +55,14 @@ own build.*
    current position.
 
 If your servo moves the wrong way for your mounting, set `servo_invert: "true"`.
-If it buzzes or stalls at the ends of its travel, reduce `sweep_degrees` or
-adjust `min_pulse` / `max_pulse`. The defaults, 544 to 2400 µs, are what the
-original firmware drove its TowerPro SG92R with; an MG90S fits the same mount but
-may turn a slightly different amount per microsecond, which shows up as an error
-that grows from slot 1 to slot 6.
+The default pulse range, 544 to 2400 µs, is what the original firmware drove its
+TowerPro SG92R with. An MG90S fits the same mount but may turn a different amount
+per microsecond: on the first bench build it needed about 3.5 degrees more per
+step, which is what the pulse range stage above is for.
+
+Position 0 is commanded to 2.5 degrees, and the firmware never goes below 0, so a
+negative offset at slot 0 can only take off 2.5 degrees. Mount the servo horn so
+that slot 0 needs a positive correction (or a higher Servo Min Pulse).
 
 ## Loading and the tray position
 

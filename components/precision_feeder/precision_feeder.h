@@ -24,10 +24,6 @@ class PrecisionFeeder : public Component, public FeederCore {
   // ---- configuration (set from Python) ----
   void set_output(output::FloatOutput *output) { this->output_ = output; }
   void set_time(time::RealTimeClock *time) { this->time_ = time; }
-  void set_pulse_range(uint32_t min_us, uint32_t max_us) {
-    this->min_pulse_us_ = min_us;
-    this->max_pulse_us_ = max_us;
-  }
 
   void setup() override;
   void loop() override { this->core_loop(); }
@@ -50,8 +46,6 @@ class PrecisionFeeder : public Component, public FeederCore {
 
   output::FloatOutput *output_{nullptr};
   time::RealTimeClock *time_{nullptr};
-  uint32_t min_pulse_us_{500};
-  uint32_t max_pulse_us_{2400};
   ESPPreferenceObject pref_settings_;
   ESPPreferenceObject pref_state_;
 };

@@ -81,6 +81,7 @@ class GoldenVectors(unittest.TestCase):
     def test_config_and_calibration(self):
         self.assertEqual(pf.config_set(pf.CONFIG_KEYS["daily_cap"], 3), b(0x05, 0x03, 0x00, 0x00, 0x00))
         self.assertEqual(pf.config_query(pf.CONFIG_KEYS["latitude_e5"]), b(0x88))
+        self.assertEqual(pf.config_set(pf.CONFIG_KEYS["max_pulse_us"], 2770), b(0x0B, 0xD2, 0x0A, 0x00, 0x00))
         self.assertEqual(pf.calibration_set(2, -12), b(0x02, 0xF4, 0xFF))
         self.assertEqual(pf.calibration_query(2), b(0x82))
         self.assertEqual(pf.parse_config(b(0x05, 0x03, 0, 0, 0)), (5, 3))

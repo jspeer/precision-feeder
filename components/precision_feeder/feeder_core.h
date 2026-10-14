@@ -28,8 +28,15 @@ constexpr uint8_t MAX_ONESHOTS = 8;
 constexpr uint8_t HISTORY_SIZE = 8;
 constexpr uint8_t NO_MOVE = 0xFF;
 constexpr uint32_t HOLD_FOREVER = UINT32_MAX;  // State::hold_until marker: until the user cancels it
-constexpr uint32_t SETTINGS_VERSION = 2;       // 2: late-start grace removed
+constexpr uint32_t SETTINGS_VERSION = 3;       // 2: late-start grace removed; 3: servo pulse range
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
+// Servo pulse range limits (microseconds for 0 and 180 degrees). Wide enough for servos that turn less than
+// the nominal amount per microsecond; the firmware never commands more than about 155 degrees.
+constexpr uint16_t PULSE_MIN_LO = 300;
+constexpr uint16_t PULSE_MIN_HI = 1500;
+constexpr uint16_t PULSE_MAX_LO = 1500;
+constexpr uint16_t PULSE_MAX_HI = 3000;
+constexpr uint16_t PULSE_SPAN_MIN = 500;  // max - min
 
 /// Where a feed request came from.
 enum class Source : uint8_t { SCHEDULE = 0, HOME_ASSISTANT = 1, BLE = 2, BUTTON = 3, ONE_SHOT = 4 };
@@ -102,6 +109,8 @@ struct Settings {
   uint8_t max_portions_cmd;    // max portions per manual/remote command
   uint8_t active_profile;
   uint8_t scheduler_enabled;   // recurring profile events; one-shot feeds run regardless
+  uint16_t min_pulse_us;       // servo pulse for 0 degrees (tuned at run time; YAML gives the default)
+  uint16_t max_pulse_us;       // servo pulse for 180 degrees
 };
 
 /// Runtime state that must survive a reboot (flushed to flash on every feed).
@@ -150,6 +159,16 @@ class FeederCore {
   void set_step_time(uint32_t ms) { this->step_ms_ = ms; }
   void set_wiggle(bool wiggle) { this->wiggle_ = wiggle; }
   void set_detach_delay(uint32_t ms) { this->detach_ms_ = ms; }
+  /// The pulse range a fresh device starts with (the YAML values). Saved settings override it.
+  void set_default_pulse_range(uint16_t min_us, uint16_t max_us) {
+    this->default_min_pulse_us_ = min_us;
+    this->default_max_pulse_us_ = max_us;
+  }
+  /// True if a pulse range is within the limits above.
+  static bool pulse_range_ok(uint16_t min_us, uint16_t max_us) {
+    return min_us >= PULSE_MIN_LO && min_us <= PULSE_MIN_HI && max_us >= PULSE_MAX_LO && max_us <= PULSE_MAX_HI &&
+           max_us >= min_us + PULSE_SPAN_MIN;
+  }
 
   /// Start up. Pass what was loaded from storage (nullptr if nothing was): wrong versions are ignored.
   void core_start(const Settings *settings, const State *state);
@@ -190,6 +209,11 @@ class FeederCore {
   Result jog_calibration(uint8_t position, int16_t delta_tenths);
   /// Write the offsets (all settings) to storage now.
   void save_calibration();
+  /// Change the servo pulse range at run time (saved like other settings). In calibration mode the servo
+  /// moves to the selected position again so the effect can be seen. INVALID_ARG if out of range.
+  Result set_pulse_range(uint16_t min_us, uint16_t max_us);
+  uint16_t min_pulse_us() const { return this->cfg.min_pulse_us; }
+  uint16_t max_pulse_us() const { return this->cfg.max_pulse_us; }
 
   // ---- schedule editing (the "editor" selects a profile and event) ----
   Settings cfg{};
@@ -327,6 +351,8 @@ class FeederCore {
   uint32_t step_ms_{1000};
   bool wiggle_{true};
   uint32_t detach_ms_{1000};
+  uint16_t default_min_pulse_us_{544};
+  uint16_t default_max_pulse_us_{2400};
 
   struct SunCache {
     int32_t day_no{INT32_MIN};
