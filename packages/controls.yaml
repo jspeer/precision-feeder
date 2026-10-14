@@ -152,6 +152,23 @@ number:
           id(feeder).cfg_changed();
     update_interval: 5s
 
+  # Debugging and recovery (owner decision 2026-10-14): the number of portions the
+  # daily cap is counting right now (rolling 24 h). Setting it lower forgets the
+  # oldest counted feeds; setting it higher adds an "adjustment" to the feed
+  # history. It never feeds or moves the tray, and every change is logged.
+  - platform: template
+    name: "Portions Counted (24 h)"
+    entity_category: diagnostic
+    icon: mdi:counter
+    min_value: 0
+    max_value: 24
+    step: 1
+    mode: box
+    lambda: return id(feeder).portions_24h();
+    set_action:
+      - lambda: id(feeder).set_portions_24h((uint16_t) x);
+    update_interval: 5s
+
   - platform: template
     name: "Max Portions Per Command"
     entity_category: config

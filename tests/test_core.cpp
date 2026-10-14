@@ -469,6 +469,65 @@ static void test_pulse_range() {
   }
 }
 
+static void test_next_feed_skips_fired_event() {
+  current = "next feed skips an event that already fed today";
+  Flash flash;
+  auto f = boot(flash, T0);
+  enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60);
+  f->advance((5 * 60 + 20) * 1000LL);  // to 08:00:20
+  CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "fired at 08:00");
+  // Move the same event later today: it has fed today, so it next feeds tomorrow at the new time.
+  f->cfg.profiles[0].ev[0].offset_min = 9 * 60;
+  f->cfg_changed();
+  f->advance(3000);
+  CHECK(f->next_event_epoch() == static_cast<uint32_t>(local_epoch(2026, 10, 15, 9, 0)),
+        "Next Feed is tomorrow 09:00, not today");
+  f->advance(61 * 60 * 1000LL);  // past 09:00 today
+  CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "not fed again today");
+}
+
+static void test_clock_kept_across_restart() {
+  current = "clock kept across a restart";
+  Flash flash;
+  auto f = boot(flash, T0, true);
+  CHECK(f->clock_kept() && f->time_source() == TimeSource::NONE, "valid at boot: kept, no source");
+  CHECK(f->time_source_text() == "kept across restart", "shown as kept");
+  CHECK(f->network_time_age_ms() < 0, "no network sync yet, so a BLE clock push is not blocked");
+  f->note_time_sync(TimeSource::NTP);
+  CHECK(f->time_source_text() == "NTP" && f->network_time_age_ms() >= 0, "a real sync takes over");
+  Flash flash2;
+  auto g = boot(flash2, T0, false);
+  CHECK(!g->clock_kept() && g->time_source_text() == "none", "power-on without a clock: not kept");
+}
+
+static void test_edit_portions_24h() {
+  current = "edit the 24 h count";
+  Flash flash;
+  auto f = boot(flash, T0);
+  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed 1");
+  f->advance(61000);
+  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed 2");
+  f->advance(61000);
+  CHECK(f->portions_24h() == 2, "two portions counted");
+  f->set_portions_24h(0);
+  CHECK(f->portions_24h() == 0, "lowered to 0");
+  CHECK(f->position() == 2, "the tray did not move");
+  f->set_portions_24h(3);
+  CHECK(f->portions_24h() == 3, "raised to 3");
+  CHECK(f->recent_feeds_text().find("adjustment") != std::string::npos, "adjustment shown in the history");
+  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "3 + 1 is within the cap of 4");
+  f->advance(61000);
+  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::DAILY_CAP, "4 counted: refused");
+  f->set_portions_24h(2);  // takes 2 of the 3 adjustment portions (oldest first)
+  CHECK(f->portions_24h() == 2, "lowered to 2 (partial entry)");
+  CHECK(flash.have_state, "saved");
+  int adjustments = 0;
+  for (const auto &r : f->records)
+    if (r.source == static_cast<uint8_t>(Source::ADJUSTMENT))
+      adjustments++;
+  CHECK(adjustments == 0, "an adjustment is never reported as a feed");
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -484,6 +543,9 @@ int main() {
   test_projection();
   test_clock_tracking();
   test_pulse_range();
+  test_next_feed_skips_fired_event();
+  test_clock_kept_across_restart();
+  test_edit_portions_24h();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

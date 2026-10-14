@@ -135,8 +135,14 @@ or a feed request. 20 bytes:
 | 11 | portions fed today | u8 |
 | 12 | next scheduled feed epoch (0 = none) | u32 |
 | 16 | runway in days (255 = more than 30) | u8 |
-| 17 | clock source: 0 none, 1 BLE, 2 NTP, 3 Home Assistant | u8 |
+| 17 | clock source: 0 none, 1 BLE, 2 NTP, 3 Home Assistant (0 with flag 0 set: the clock was kept across a restart, see below) | u8 |
 | 18 | minutes since the clock was last set (saturating) | u16 |
+
+Clock source 0 with flag bit 0 (clock valid) set means the clock survived a soft
+restart (OTA update, crash, reflash: the chip's RTC keeps counting) but no source has
+set it since. The time is good; `SET_TIME` is accepted under `fallback_only` until
+NTP or Home Assistant syncs (firmware 0.3.1 and later; before that, such a clock was
+wrongly reported as NTP).
 
 Flags: bit 0 clock valid, 1 hold, 2 calibrating, 3 moving, 4 scheduler enabled,
 5 reload pause, 6 sunrise/sunset unavailable, 7 schedule needs more portions than

@@ -73,6 +73,9 @@ signal line to GND.
 1. Install [ESPHome](https://esphome.io) and copy this repository.
 2. Copy `examples/secrets.example.yaml` to `examples/secrets.yaml` and fill it in.
 3. Copy `examples/basic.yaml`, set `timezone`, and comment packages in or out.
+   Or keep the examples as they are and make an `examples/local.yaml` (git-ignored)
+   that includes one with `packages: {base: !include ble.yaml}` and overrides
+   only your own `substitutions:` (timezone, pins).
 4. First flash over USB-C (hold BOOT while plugging in the board), then
    `esphome run basic.yaml`. Later updates go over WiFi.
 5. Calibrate the tray ([docs/CALIBRATION.md](docs/CALIBRATION.md)).

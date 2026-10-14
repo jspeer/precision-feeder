@@ -227,6 +227,13 @@ class Status:
     time_age_min: int
 
     @property
+    def clock_text(self) -> str:
+        if self.time_source == 0:
+            # Source 0 with a valid clock: the RTC kept it across a soft reset; no source has set it since boot.
+            return "kept across restart" if self.flags & 1 else "not set"
+        return f"{TIME_SOURCES.get(self.time_source, '?')}, {self.time_age_min} min ago"
+
+    @property
     def flag_names(self) -> list[str]:
         return [name for bit, name in FLAGS.items() if self.flags & (1 << bit)]
 
@@ -245,7 +252,7 @@ class Status:
                 f"feeds today:   {self.feeds_today}",
                 f"next event:    {when(self.next_event_epoch)}",
                 f"runway:        {runway}",
-                f"clock:         {TIME_SOURCES.get(self.time_source, '?')}, {self.time_age_min} min ago",
+                f"clock:         {self.clock_text}",
             ]
         )
 

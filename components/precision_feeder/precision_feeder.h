@@ -25,6 +25,10 @@ class PrecisionFeeder : public Component, public FeederCore {
   void set_output(output::FloatOutput *output) { this->output_ = output; }
   void set_time(time::RealTimeClock *time) { this->time_ = time; }
 
+  /// Wired to the sntp time platform's on_time_sync. ESPHome also fires that trigger once at boot when the clock
+  /// is already valid (kept by the RTC across a soft reset); only a real SNTP synchronisation counts as NTP.
+  void note_sntp_sync();
+
   void setup() override;
   void loop() override { this->core_loop(); }
   void dump_config() override;

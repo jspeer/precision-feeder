@@ -35,6 +35,12 @@ not for a servo that turns a different amount per microsecond than assumed.
 Rough rule: if the offsets you would need grow by *d* degrees per slot, multiply
 the span (max − min) by (25 + *d*) / 25.
 
+**MG90S:** its datasheet gives 500 to 2500 µs for 0 to 180 degrees (neutral
+1500 µs, ±3 degrees), so start the range there rather than at the defaults. The
+first bench build ended at 637 to 2675 µs: the same scale within 2%, shifted by
+where the horn sits on its spline. Increasing pulse turns it counter-clockwise,
+so slot 0 is at the clockwise end, as the setup above expects.
+
 The YAML `min_pulse` / `max_pulse` are only the starting values for a fresh
 device. Once you change the range here it is saved and used from then on (a
 reflash does not reset it). The limits are 300 to 1500 µs for the minimum, 1500
@@ -43,6 +49,12 @@ commands more than about 155 degrees, so a large maximum does not by itself push
 the servo into its end stop; still, listen for buzzing at position 6.
 
 ### 2. Per-slot offsets
+
+Hobby servos have a deadband (3 degrees on the MG90S): within it the servo does
+not correct, so where it stops depends a little on the direction it came from.
+Feeds always arrive at a slot from the lower position (the wiggle ends with a
+forward move), so check each position after arriving from position 0's side:
+select the position below it first, then the position itself.
 
 1. Turn **Calibration Mode** on. Feeds are refused while it is on, and the LED is
    white.

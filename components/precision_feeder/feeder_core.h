@@ -39,7 +39,10 @@ constexpr uint16_t PULSE_MAX_HI = 3000;
 constexpr uint16_t PULSE_SPAN_MIN = 500;  // max - min
 
 /// Where a feed request came from.
-enum class Source : uint8_t { SCHEDULE = 0, HOME_ASSISTANT = 1, BLE = 2, BUTTON = 3, ONE_SHOT = 4 };
+enum class Source : uint8_t { SCHEDULE = 0, HOME_ASSISTANT = 1, BLE = 2, BUTTON = 3, ONE_SHOT = 4,
+                              // A hand edit of the 24 h count (set_portions_24h). Only ever in the feed history:
+                              // never a feed request, never sent over BLE.
+                              ADJUSTMENT = 5 };
 
 /// Result of a request (values match the BLE protocol, docs/PROTOCOL.md).
 enum class Result : uint8_t {
@@ -240,6 +243,9 @@ class FeederCore {
   TimeSource time_source() const { return this->last_time_source_; }
   std::string time_source_text() const;
   bool time_ever_synced() const { return this->last_time_source_ != TimeSource::NONE; }
+  /// True if the clock was already valid at boot: the RTC kept it across a soft reset (OTA, crash, flashing).
+  /// The time is good, but no source has set it since this boot, so the source stays NONE.
+  bool clock_kept() const { return this->clock_kept_; }
   /// Minutes since the clock was last set by any source (saturating); 0 if never.
   uint16_t time_age_min();
   /// Milliseconds since NTP or Home Assistant last set the clock; negative if neither ever did.
@@ -261,6 +267,12 @@ class FeederCore {
   TrayState tray_state() const;
   std::string tray_state_text() const;
   uint16_t feeds_today();
+  /// Portions the daily cap currently counts (the rolling 24 h window).
+  uint16_t portions_24h();
+  /// Debugging and recovery (owner decision 2026-10-14): set the number of portions the daily cap counts.
+  /// Lowering it drops the oldest counted portions from the feed history; raising it adds an "adjustment"
+  /// entry stamped now. Logged as a warning. Never feeds and never moves the tray.
+  void set_portions_24h(uint16_t portions);
   /// Whole days of feeding left in the tray under the active schedule; 255 = more than the planning horizon.
   uint8_t runway_days() const { return this->runway_days_; }
   bool schedule_oversubscribed() const { return this->oversubscribed_; }
@@ -376,6 +388,7 @@ class FeederCore {
 
   std::function<void(const FeedRecord &)> feed_listener_;
   TimeSource last_time_source_{TimeSource::NONE};
+  bool clock_kept_{false};
   int64_t last_sync_ms_[4]{-1, -1, -1, -1};  // uptime of the last sync per TimeSource, -1 = never
 
   Result last_result_{Result::NONE};

@@ -7,6 +7,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include <esp_sntp.h>
 #include <esp_timer.h>
 #include <sys/time.h>
 
@@ -35,6 +36,16 @@ void PrecisionFeeder::dump_config() {
                 YESNO(this->wiggle_), (unsigned) this->detach_ms_);
   ESP_LOGCONFIG(TAG, "  Tray position: %u (%s), remaining: %u", this->position(), this->tray_state_text().c_str(),
                 this->remaining());
+}
+
+void PrecisionFeeder::note_sntp_sync() {
+  // ESP-IDF marks its sync status before calling the notification hook, and nothing else reads it (reading a
+  // completed status resets it). RESET here means ESPHome's own boot-time check, not a reply from a server.
+  if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET) {
+    ESP_LOGD(TAG, "Clock valid at boot (kept across a restart); waiting for a real NTP sync");
+    return;
+  }
+  this->note_time_sync(TimeSource::NTP);
 }
 
 uint32_t PrecisionFeeder::hal_millis() { return millis(); }

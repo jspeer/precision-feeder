@@ -177,7 +177,7 @@ Every feed request, whatever its source, goes through one gate:
 | Rule | Default | Notes |
 |---|---|---|
 | Minimum gap between feeds | 60 s | the reference also paused 1 min after each feed |
-| Rolling 24 h cap | 4 portions | configurable 1 to 6 |
+| Rolling 24 h cap | 4 portions | configurable 1 to 6. The count it uses can be edited in Home Assistant for debugging and recovery (decision 2026-10-14, section 13) |
 | Max portions per command | 1 | configurable 1 to 6 ("drop all" is opt-in) |
 | Tray state | must be `LOADED` | empty or unknown rejects |
 | Calibration lockout | on | |
@@ -243,7 +243,10 @@ every_2nd); C "Growout" (3 events/day, short runway warning).
 ### 5.3 Dedupe across reboot
 
 Persist `today` and a fired-events bitmask. After reboot, an event already
-fired today is not repeated.
+fired today is not repeated. The same rule means each event feeds at most once
+per day: an event that already fed today and is then moved later in the day
+next feeds tomorrow. "Next Feed" and the runway follow the same rule (fixed in
+0.3.1; before that they showed the moved event as due today).
 
 ### 5.4 Runway
 
@@ -299,6 +302,14 @@ path.
   sync age. A BLE-set clock that has aged is flagged "time stale" and keeps
   running. The clock free-runs at a few seconds of drift per day, so a week
   without sync is harmless for feeding.
+- **Clock kept across a soft reset.** After an OTA update, a crash or a
+  reflash (not a power cut) the chip's RTC still has the right time, so the
+  clock is valid at boot and scheduling carries on. The source is shown as
+  "kept across restart" until NTP, Home Assistant or BLE sets it; BLE
+  `SET_TIME` is accepted meanwhile. (Found on the bench: ESPHome's SNTP
+  component fires its sync trigger once at boot when the clock is already valid,
+  which 0.3.0 wrongly counted as an NTP sync. From 0.3.1 only a real SNTP reply
+  counts, checked with ESP-IDF's sync status.)
 - **Time is never restored from flash** after power loss: it would be wrong by
   the length of the outage. Scheduled feeds wait for a valid source; manual
   feeds still work.
@@ -478,6 +489,15 @@ Importable with ESPHome `packages:` / `github://`.
 - Periodic reboots and an upcoming-events list are not carried over from the
   original.
 - Clean-room code; PLC/bridge driver lives outside this repo.
+- **The 24 h feed count is editable in Home Assistant (owner, 2026-10-14).**
+  This reverses part of "nothing bypasses the guard": the guard still checks
+  every feed, but the count it checks against can be set by hand, for
+  debugging and recovery by the owner and future developers. Home Assistant
+  only (diagnostic entity "Portions Counted (24 h)"), not BLE; every change is
+  logged as a warning and raising it shows as an "adjustment" in the feed
+  history. AGENTS.md is updated to match.
+- Each event feeds at most once per day, also when it is moved later after it
+  fed (2026-10-14; the safe side).
 
 ## 14. Open items
 
@@ -485,14 +505,14 @@ Importable with ESPHome `packages:` / `github://`.
 2. ~~Confirm the slot/position mapping on the printed tray.~~ Done on the
    bench, 2026-10-14 (section 17): all 7 positions line up. Still to watch:
    whether the servo strains at position 6 in daily use.
-3. Servo (GPIO1) and button (GPIO2) pins chosen; confirm on the bench that the
-   servo does not twitch at boot, and whether the pull-down is needed.
+3. ~~Servo (GPIO1) and button (GPIO2) pins.~~ Done on the bench (section 17):
+   no servo twitch at boot, pull-down not needed; button works on GPIO2.
 4. Confirm ESPHome `esp32_ble_server`, pairing, multi-`time:` and conditional
    package behaviour against current docs; check flash size.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.3.0, 2026-10-14)
+## 15. Implementation status (v0.3.1, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -585,6 +605,20 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
   the saved tray state from earlier versions is discarded).
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.3.1 (bench fixes, 2026-10-14):
+- "Next Feed" and the runway no longer include an event that already fed today
+  (it could be moved later in the day, then shown as due while it would not
+  feed). Test: `test_next_feed_skips_fired_event`.
+- A clock kept by the RTC across a soft reset is no longer reported as an NTP
+  sync (section 6). It shows as "kept across restart" (BLE: source 0 with the
+  clock-valid flag) and does not block BLE `SET_TIME`. The sntp hook now calls
+  `note_sntp_sync()`, which checks ESP-IDF's SNTP sync status.
+- New Home Assistant diagnostic number "Portions Counted (24 h)": shows and
+  sets the count the daily cap uses (decision log, 2026-10-14). New history
+  source "adjustment" (internal; never sent over BLE).
+- Docs: MG90S datasheet values and the deadband in docs/CALIBRATION.md;
+  `examples/local*.yaml` for personal overrides (git-ignored).
 
 Changes in v0.3.0 (servo pulse range settable at run time, 2026-10-14):
 - First bench result: the MG90S turned about 12% less per microsecond than the
@@ -703,6 +737,84 @@ Conclusions:
 - The YAML defaults stay at the original's 544 to 2400 us: one servo is not
   enough to change them, and the run-time range makes that unnecessary.
 
-Not yet checked: the rest of the bench plan (power-up twitch, wiggle and drift
-after release, power loss mid-feed, heap, BLE, schedules).
+### Other bench checks (2026-10-14)
+
+- Power-up: no servo twitch on GPIO1, so the 10 kOhm pull-down is not needed on
+  this build (open item 3, servo part).
+- Release: outside calibration mode the servo goes limp after the detach delay
+  (the LEDC output at level 0 stops the pulses). In calibration mode it keeps
+  holding, by design, so the slot being adjusted stays put.
+- A one-portion feed runs the wiggle as designed: 0 -> 1 -> 0 -> 1.
+- No drift after release: the tray stays at its position once the servo goes
+  limp (empty tray; recheck with food in it).
+
+- Power loss mid-feed: after power was pulled during a feed, the device booted
+  with the tray position Unknown and feeding blocked, and the owner recovered it
+  (the persisted-intent design in section 3.1 works on hardware).
+
+- Heap with WiFi, API, web server and BLE all running (`ble.yaml`, diagnostics
+  package): free 154.5 KB, largest free block 110.6 KB, fragmentation about 28%.
+  Comfortable; PSRAM is not needed (section 16's open RAM question is answered
+  for this build). Loop time is normally about 30 ms; a peak of 394 ms was seen,
+  probably at boot or WiFi connect; keep an eye on it.
+- BLE, from a Linux PC with the reference client (bleak): Info (protocol 1,
+  capability bit 5), Status, Config writes and reads (including the pulse keys,
+  out-of-range and too-close pulse pairs refused), SET_TIME ignored while NTP is
+  fresh, SET_TIMEZONE and unknown opcodes UNSUPPORTED, wrong length INVALID_ARG.
+  Retry: an exact repeat replays the stored answer without acting (one event-log
+  record), and the same seq with different arguments is a new command.
+- Retry of an *accepted* BLE feed: the first run was refused with DAILY_CAP (six
+  portions already in the 24 h window). With the owner's permission, a temporary
+  debug build allowed a daily cap of up to 12 over BLE (one line in
+  `protocol.h`, never committed); with the cap at 7 the feed was accepted (tray
+  0 -> 1, "ok, 1 portion") and the exact retry replayed that answer without
+  moving the tray, one event-log record. The cap was set back to 4, the source
+  reverted, the committed firmware reflashed, and the device then refused a cap
+  of 7 again.
+
+### Full BLE and schedule run (2026-10-14, firmware 0.3.0 + temporary debug builds)
+
+With the owner's approval, temporary builds (never committed, since reverted)
+allowed a daily cap of up to 12 over BLE, and one had no reachable WiFi.
+Tray empty; owner settings saved first and restored afterwards (checked).
+
+- Every command, success and refusal: FEED (OK; BUSY, TOO_SOON,
+  PORTION_LIMIT, DAILY_CAP, CALIBRATING, UNKNOWN_POSITION, EMPTY,
+  INVALID_ARG), TRAY_RELOAD (OK; CALIBRATING, INVALID_ARG), SET_PROFILE,
+  HOLD (minutes, until cancelled, cancel; INVALID_ARG; TIME_INVALID without a
+  clock), STOP (mid-feed -> position unknown; INVALID_ARG), SET_TIME (OK
+  without network time; IGNORED_NTP_ACTIVE; before 2019 and wrong length
+  INVALID_ARG), SET_LOCATION, CALIBRATE, JOG (OK; NOT_CALIBRATING,
+  INVALID_ARG), SAVE_CALIBRATION, SET_POSITION (OK; CALIBRATING,
+  INVALID_ARG), SET_TIMEZONE (UNSUPPORTED). Profile, Config and Calibration
+  records written, read back and refused when out of range. All pass.
+- Status updates at most every 500 ms (as PROTOCOL.md says); a client must not
+  expect it to change the instant a command is answered.
+- Schedules on NTP time: a clock event and a sunset event (a test location,
+  offset -131 min onto the test minute) each fed once, inside their minute,
+  and not again. An event due during a hold was refused (HOLD), reported once
+  when its minute ended, and never made up.
+- Real power cut with no WiFi (build with an unknown SSID): clock unset at
+  boot, timed HOLD refused TIME_INVALID, indefinite hold and manual feed work,
+  SET_TIME accepted, source BLE, and a scheduled event then fed on the BLE
+  clock. No reboot from the missing WiFi.
+- Found: Next Feed showed an event that had already fed today (fixed in 0.3.1);
+  a clock kept by the RTC across a soft reset was reported as NTP (fixed in
+  0.3.1); faking the NTP server names does not take network time away on the
+  owner's network (something answers NTP anyway, probably a firewall
+  redirect), so "no network" tests need WiFi removed.
+
+0.3.1 on hardware (2026-10-14): after the soft reset of the flash the clock
+showed "kept across restart", then "NTP" about 30 s later; a daily cap of 7 was
+refused again; "Portions Counted (24 h)" set from 8 to 0 in Home Assistant,
+logged as a warning ("set by hand: 8 -> 0").
+
+Push button (GPIO2 to GND, `packages/button.yaml`, 2026-10-14): a short press
+fed one portion; presses inside the minimum gap were refused (TOO_SOON) without
+moving; a 3 s press turned calibration mode on and another turned it off; a
+short press after the gap fed again. Some refusals came in pairs 0.3 to 0.4 s
+apart (double presses or release bounce; harmless behind the minimum gap, to be
+confirmed).
+
+Not yet checked: drift with food in the tray.
 

@@ -26,9 +26,9 @@ static constexpr uint8_t NO_PENDING = static_cast<uint8_t>(Result::NONE);
 
 static const char *const DAY_NAMES[7] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
 static const char *const DAY_ABBR[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-static const char *const SOURCE_NAMES[5] = {"schedule", "home assistant", "ble", "button", "one-shot"};
+static const char *const SOURCE_NAMES[6] = {"schedule", "home assistant", "ble", "button", "one-shot", "adjustment"};
 
-static const char *source_name(Source s) { return SOURCE_NAMES[static_cast<uint8_t>(s) % 5]; }
+static const char *source_name(Source s) { return SOURCE_NAMES[static_cast<uint8_t>(s) % 6]; }
 
 // ---------------------------------------------------------------------------------------------
 // Start-up, persistence, logging
@@ -122,6 +122,9 @@ void FeederCore::core_start(const Settings *settings, const State *state) {
     this->log_(LogLevel::kInfo, "No saved tray state, assuming a freshly loaded tray at position 0");
   }
   this->clamp_loaded_();
+  this->clock_kept_ = this->hal_time_valid();
+  if (this->clock_kept_)
+    this->log_(LogLevel::kInfo, "Clock kept across a restart (valid at boot, not a fresh sync)");
 
   for (auto &row : this->pending_)
     for (auto &p : row)
@@ -450,6 +453,44 @@ uint16_t FeederCore::portions_24h_(int64_t now_epoch, bool time_ok) {
       total += this->state_.hist_n[i];
   }
   return total;
+}
+
+uint16_t FeederCore::portions_24h() {
+  const bool time_ok = this->time_valid();
+  return this->portions_24h_(time_ok ? this->hal_epoch() : 0, time_ok);
+}
+
+void FeederCore::set_portions_24h(uint16_t portions) {
+  const bool time_ok = this->time_valid();
+  const int64_t now = time_ok ? this->hal_epoch() : 0;
+  const uint16_t before = this->portions_24h_(now, time_ok);
+  if (portions == before)
+    return;
+  if (portions > before) {
+    this->record_history_(static_cast<uint8_t>(std::min<uint16_t>(portions - before, 255)), Source::ADJUSTMENT);
+  } else {
+    // Remove counted portions, oldest first, until the count is right.
+    uint16_t excess = before - portions;
+    for (int i = HISTORY_SIZE - 1; i >= 0 && excess > 0; i--) {
+      if (this->state_.hist_n[i] == 0)
+        continue;
+      const uint16_t total = this->portions_24h_(now, time_ok);
+      const uint8_t keep = this->state_.hist_n[i];
+      this->state_.hist_n[i] = 0;
+      const uint16_t removed = total - this->portions_24h_(now, time_ok);  // 0 if this entry was not counted
+      if (removed == 0) {
+        this->state_.hist_n[i] = keep;
+        continue;
+      }
+      const uint16_t take = std::min<uint16_t>(removed, excess);
+      this->state_.hist_n[i] = static_cast<uint8_t>(keep - take);
+      excess -= take;
+    }
+  }
+  this->save_state_(true);
+  this->project_dirty_ = true;
+  this->log_(LogLevel::kWarn, "Portions counted in the last 24 h set by hand: %u -> %u", before,
+             this->portions_24h_(now, time_ok));
 }
 
 void FeederCore::record_history_(uint8_t portions, Source source) {
@@ -871,13 +912,19 @@ void FeederCore::project_() {
   std::vector<Item> items;
   items.reserve(64);
   if (this->cfg.scheduler_enabled) {
-    const Profile &p = this->cfg.profiles[this->cfg.active_profile];
+    const uint8_t ap = this->cfg.active_profile;
+    const Profile &p = this->cfg.profiles[ap];
     for (int off = -1; off <= HORIZON_DAYS; off++) {
       const DayCtx d = this->make_day_(today + off);
       if (!this->day_active_(p, d))
         continue;
-      for (const Event &ev : p.ev) {
+      for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
+        const Event &ev = p.ev[e];
         if (!ev.enabled || !(ev.days & (1 << d.wday)))
+          continue;
+        // Each event feeds at most once per (anchor) day. One that already fed today and was then moved later
+        // in the day does not feed again until tomorrow, so it is not "next" either.
+        if (this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no))
           continue;
         int minutes;
         if (!this->resolve_minutes_(ev, d, minutes))
@@ -942,6 +989,8 @@ void FeederCore::set_system_time(uint32_t epoch) {
 }
 
 std::string FeederCore::time_source_text() const {
+  if (this->last_time_source_ == TimeSource::NONE && this->clock_kept_)
+    return "kept across restart";
   switch (this->last_time_source_) {
     case TimeSource::BLE:
       return "BLE";

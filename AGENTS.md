@@ -46,7 +46,10 @@ substitutions.
 
 ### Safety behaviour (do not weaken)
 - Every feed, from every source (schedule, HA, BLE, button), goes through the
-  one feed guard. Never add a path that bypasses it.
+  one feed guard. Never add a path that bypasses it. The one owner-approved
+  exception (2026-10-14): the 24 h count the cap checks against can be edited
+  by hand in Home Assistant for debugging and recovery, logged as a warning.
+  Do not extend it (for example to BLE) without a new decision.
 - BLE commands are idempotent via sequence numbers. A retry must never feed
   twice.
 - Time is never restored from flash. Scheduled feeds wait for a valid clock;

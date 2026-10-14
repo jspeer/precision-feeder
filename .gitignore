@@ -6,3 +6,5 @@ __pycache__/
 .venv/
 # Per-machine notes for Claude Code sessions; not part of the project
 CLAUDE.md
+# Per-machine ESPHome configs (personal overrides, debug builds)
+examples/local*.yaml
