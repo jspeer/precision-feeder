@@ -589,6 +589,31 @@ precision-feeder/
   - Dual-stack networking with full IPv6 readiness: everything local works on an
     IPv6-only network; only outside services (GitHub is IPv4-only) may fail, gracefully.
   - No BLE packet change (protocol 2).
+- **Appliance (owner, 2026-10-15; planned for 2.0.0, [docs/plans/2.0.0-appliance.md](docs/plans/2.0.0-appliance.md)):**
+  prebuilt GitHub binaries that are set up in a browser. Planned, not built yet:
+  - Binaries: full and no-BLE, each a factory and an OTA image, for a generic
+    ESP32-S3 with 4 MB flash. An 8 MB BLE variant only if BLE does not fit.
+  - Runtime settings in a new saved "Device" record: GPIO pins (servo, button, LED),
+    Wi-Fi, hostname, timezone (our own POSIX parser), API key (kept in flash through
+    ESPHome's provisioning, `encryption: {}`), BLE key.
+  - A setup wizard and a browser install page.
+  - Update checks run in the browser, not the feeder. The browser reads a manifest
+    from GitHub Pages; the user downloads the image and uploads it. A failed check
+    only shows a link to the releases page. The feeder makes no update requests
+    and has no HTTPS client.
+  - Web auth is not required. A settings password (none by default) protects
+    Wi-Fi, hostname, pins, keys, the password, firmware, factory reset, guard
+    limits and calibration; never the schedule or feeding. Holding BOOT for 10 s
+    after startup clears it.
+  - The BLE and API keys are admin credentials, so BLE keeps its access, gated by
+    two protected toggles (guard limits, calibration; both default on).
+  - A blank BLE key refuses AUTH.
+  - Refusals use NOT_AUTHORIZED detail values 6 and 7. This stays protocol 2:
+    checked that 1.x clients do not break.
+  - YAML builds stay as the advanced path; their values become defaults.
+  - When built, this reverses "no web-server OTA" and "every pin is a
+    substitution", and drops the build-time-only timezone (sections 6 and 13,
+    AGENTS.md); each is updated in the change that builds it.
 
 ## 14. Open items
 
@@ -641,6 +666,25 @@ precision-feeder/
    a snapshot and names any that changed (found and handled in 1.1.0 M9; reproduced only by moving the cursor
    continuously). A complete fix needs a firmware change, for example a write-only text entity taking a whole
    event at once ("A 2 1c405/2/7e"). Not planned yet (2026-10-15).
+10. Checks for 2.0.0 (milestone N0 in [docs/plans/2.0.0-appliance.md](docs/plans/2.0.0-appliance.md)):
+    - ESPHome:
+      - `encryption: {}` with `save_noise_psk()` called from our component, and OTA
+        with the provisioned key.
+      - Whether the captive portal is active only while the fallback access point
+        is up.
+      - Starting BLE at runtime.
+      - Excluding a single entity from the web server.
+      - Improv serial with ESP Web Tools.
+      - Runtime setup of the servo PWM, LED and button.
+    - Hardware and hosting:
+      - Reading GPIO0 (BOOT) after startup.
+      - GitHub Pages CORS for the update manifest.
+      - The flash budget of both variants against 4 MB.
+11. Roadmap after 2.0.0 (owner, 2026-10-15), not planned in detail yet:
+    - 2.1.x: more 3D-printed feeder models driven by a servo (other trays and geometries).
+    - 2.2.x (maybe; needs hardware to test): auger-style feeders, which portion by motor time or steps, not tray
+      slots, and may need a continuous-rotation servo or a stepper. That needs explicit decisions against the
+      "no external hardware" rule (section 11, AGENTS.md) and the 6-slot magazine model (section 3).
 
 ## 15. Implementation status (v1.1.0)
 
