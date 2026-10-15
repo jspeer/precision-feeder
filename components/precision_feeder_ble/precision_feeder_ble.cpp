@@ -192,7 +192,13 @@ void PrecisionFeederBle::on_command_(std::span<const uint8_t> data) {
   }
   this->session_.accept(seq);
 
-  result = this->execute_(opcode, command + 2, n - 2 - crypto::TAG_SIZE, detail);
+  if (n < 2 + crypto::TAG_SIZE) {
+    // Signed, but no room for an opcode: what looked like the opcode is the tag's first byte.
+    result = proto::RES_INVALID_ARG;
+    detail = 0;
+  } else {
+    result = this->execute_(opcode, command + 2, n - 2 - crypto::TAG_SIZE, detail);
+  }
   response[0] = seq;
   response[1] = opcode;
   response[2] = result;

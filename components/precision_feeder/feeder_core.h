@@ -395,6 +395,7 @@ class FeederCore {
   void commit_step_();
   void run_motion_();
   void abort_motion_();
+  void uncount_portions_(uint8_t portions);
   bool moving_() const;
 
   // guard
@@ -415,6 +416,8 @@ class FeederCore {
   bool sun_cached_(const DayCtx &d, double &rise, double &set);
   void on_time_valid_();
   void project_();
+  /// Scheduled feeds before this epoch are skipped (hold or reload pause); 0 = nothing blocks them.
+  int64_t blocked_until_(int64_t now);
   int32_t today_();
   std::string format_local_(int64_t epoch, bool with_date = true);
   std::string profile_summary_(uint8_t profile);

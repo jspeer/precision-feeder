@@ -1,6 +1,7 @@
 // Host-side tests for the feeder logic (components/precision_feeder/feeder_core.*), with a simulated clock.
 // Build and run:
 //   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp -o /tmp/test_core && /tmp/test_core
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -33,6 +34,7 @@ struct Flash {
   Calibration calibration{};
   legacy::SettingsV3 v3{};
   int settings_saves{0};
+  bool settings_flushed{false};
   bool state_flushed{false};  // whether the last state save asked for an immediate flush
 };
 
@@ -110,8 +112,9 @@ class FakeFeeder : public FeederCore {
   int64_t hal_local_to_epoch(int y, int mo, int d, int h, int mi) override { return local_epoch(y, mo, d, h, mi); }
   void hal_servo_write(float angle) override { this->angles.push_back(angle); }
   void hal_servo_release() override { this->releases++; }
-  void hal_save_settings(const Settings &s, bool) override {
+  void hal_save_settings(const Settings &s, bool flush) override {
     flash_.settings_saves++;
+    flash_.settings_flushed = flush;
     flash_.settings = s;
     flash_.have_settings = true;
   }
@@ -742,6 +745,70 @@ static void test_settings_migration() {
   }
 }
 
+static void test_bug_batch_b() {
+  current = "bug batch B2-B6";
+  {
+    // B2: an event inside the reload pause is not shown as Next Feed (it will be skipped).
+    Flash flash;
+    auto f = boot(flash, T0);  // 07:55
+    enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60);
+    enable_event(*f, 0, 1, Anchor::CLOCK, 9 * 60);
+    f->tray_reload();  // pause until 08:05
+    f->advance(3000);
+    CHECK(f->next_event_epoch() == static_cast<uint32_t>(local_epoch(2026, 10, 14, 9, 0)),
+          "Next Feed skips 08:00 (inside the pause) and shows 09:00");
+    f->advance(70 * 60 * 1000LL);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "08:00 skipped, 09:00 fed");
+  }
+  {
+    // B3: settings edits are flushed, not left for ESPHome's write interval.
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->cfg.daily_cap = 3;
+    f->cfg_changed();
+    f->advance(3000);
+    CHECK(flash.settings_flushed && flash.settings.daily_cap == 3, "settings save is flushed");
+  }
+  {
+    // B5: a 2-portion feed stopped after the first portion counts 1, and the history says x1.
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->cfg.max_portions_cmd = 2;
+    CHECK(f->request_feed(2, Source::ESPHOME) == Result::OK, "2-portion feed");
+    f->advance(3500);  // first portion done, in the gap
+    f->stop();
+    CHECK(f->position() == 1 && f->portions_24h() == 1, "counts the one portion that dropped");
+    CHECK(f->recent_feeds_text().find("x1 ESPHome") != std::string::npos, "history says x1");
+    CHECK(flash.state.hist_n[0] == 1, "saved");
+    // Stopped in the middle of the second step: that step counts, nothing after it.
+    Flash flash2;
+    auto g = boot(flash2, T0);
+    g->cfg.max_portions_cmd = 3;
+    g->cfg.portion_gap_s = 1;
+    CHECK(g->request_feed(3, Source::ESPHOME) == Result::OK, "3-portion feed");
+    g->advance(3000 + 1000 + 500);  // first portion, the gap, half a second into the second step
+    g->stop();
+    CHECK(g->position_unknown() && g->portions_24h() == 2, "mid-step stop: 2 counted (1 done, 1 maybe), 1 never started");
+  }
+  {
+    // B6: out-of-range guard settings are clamped on load.
+    Flash flash;
+    {
+      auto f = boot(flash, T0);
+      f->cfg.min_gap_s = 0;
+      f->cfg.portion_gap_s = 0;
+      f->cfg.refill_interval_days = 99;
+      f->cfg.latitude = NAN;
+      f->cfg_changed();
+      f->advance(3000);
+    }
+    auto g = boot(flash, T0 + 60);
+    CHECK(g->cfg.min_gap_s == 10 && g->cfg.portion_gap_s == 1 && g->cfg.refill_interval_days == 30 &&
+              g->cfg.latitude == 0.0f,
+          "clamped on load");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -765,6 +832,7 @@ int main() {
   test_polar_fallback();
   test_review_fixes();
   test_settings_migration();
+  test_bug_batch_b();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

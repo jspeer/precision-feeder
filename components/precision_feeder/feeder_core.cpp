@@ -77,6 +77,15 @@ void FeederCore::clamp_loaded_() {
   for (auto &c : this->calib.offsets)
     c = std::min<int16_t>(std::max<int16_t>(c, -150), 150);
   this->cfg.active_profile = std::min<uint8_t>(this->cfg.active_profile, NUM_PROFILES - 1);
+  this->cfg.min_gap_s = std::min<uint16_t>(std::max<uint16_t>(this->cfg.min_gap_s, 10), 3600);
+  this->cfg.portion_gap_s = std::min<uint16_t>(std::max<uint16_t>(this->cfg.portion_gap_s, 1), 60);
+  this->cfg.reload_pause_min = std::min<uint16_t>(this->cfg.reload_pause_min, 60);
+  this->cfg.refill_interval_days = std::min<uint16_t>(std::max<uint16_t>(this->cfg.refill_interval_days, 1), 30);
+  this->cfg.scheduler_enabled = this->cfg.scheduler_enabled ? 1 : 0;
+  if (!(this->cfg.latitude >= -90.0f && this->cfg.latitude <= 90.0f))  // also catches NaN
+    this->cfg.latitude = 0.0f;
+  if (!(this->cfg.longitude >= -180.0f && this->cfg.longitude <= 180.0f))
+    this->cfg.longitude = 0.0f;
   this->cfg.daily_cap = std::min<uint8_t>(std::max<uint8_t>(this->cfg.daily_cap, 1), MAX_PORTIONS);
   this->cfg.max_portions_cmd = std::min<uint8_t>(std::max<uint8_t>(this->cfg.max_portions_cmd, 1), MAX_PORTIONS);
   this->state_.position = std::min<uint8_t>(this->state_.position, MAX_PORTIONS);
@@ -184,8 +193,10 @@ void FeederCore::core_loop() {
   this->run_motion_();
   const uint32_t now = this->hal_millis();
   if (this->cfg_dirty_ && now - this->cfg_dirty_since_ >= CFG_SAVE_DELAY_MS) {
-    this->hal_save_settings(this->cfg, false);
-    this->hal_save_calibration(this->calib, false);  // the platform skips writing records that did not change
+    // Flushed: otherwise ESPHome holds the write for up to its flash_write_interval (60 s by default), and a power
+    // cut in that time would lose the edit. Records that did not change are not rewritten.
+    this->hal_save_settings(this->cfg, true);
+    this->hal_save_calibration(this->calib, true);
     this->cfg_dirty_ = false;
   }
   if (now - this->last_tick_ >= 1000) {
@@ -287,8 +298,11 @@ void FeederCore::abort_motion_() {
     case Phase::STEP_A:
     case Phase::STEP_B:
     case Phase::STEP_C:
-      // Interrupted mid-step: nobody knows whether the tray advanced.
+      // Interrupted mid-step: nobody knows whether the tray advanced. The step in progress still counts as fed
+      // (the safe side for the daily cap); later portions of the same feed never started.
       this->log_(LogLevel::kWarn, "Motion aborted mid-step: tray position is now UNKNOWN");
+      if (this->queue_ > 1)
+        this->uncount_portions_(this->queue_ - 1);
       this->state_.unknown = 1;
       this->state_.moving_to = NO_MOVE;
       this->save_state_(true);
@@ -297,7 +311,10 @@ void FeederCore::abort_motion_() {
       this->hal_servo_release();
       break;
     case Phase::GAP:
+      // Between portions of one feed: the remaining ones never dropped.
+      this->uncount_portions_(this->queue_);
       this->queue_ = 0;
+      this->save_state_(true);
       this->phase_ = Phase::SETTLE;
       this->phase_start_ = this->hal_millis();
       break;
@@ -305,6 +322,16 @@ void FeederCore::abort_motion_() {
       this->queue_ = 0;
       break;
   }
+}
+
+void FeederCore::uncount_portions_(uint8_t portions) {
+  // The newest history entry is the feed being cut short (it was recorded, with all its portions, before the tray
+  // moved). Take off the portions that never dropped.
+  if (portions == 0 || this->state_.hist_n[0] == 0)
+    return;
+  this->state_.hist_n[0] = static_cast<uint8_t>(this->state_.hist_n[0] > portions ? this->state_.hist_n[0] - portions : 0);
+  this->project_dirty_ = true;
+  this->log_(LogLevel::kInfo, "Feed cut short: %u portion(s) did not drop", portions);
 }
 
 void FeederCore::stop() {

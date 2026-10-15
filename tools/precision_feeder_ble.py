@@ -214,11 +214,23 @@ def jog_args(position: int, delta_tenths: int) -> bytes:
     return struct.pack("<Bh", position, delta_tenths)
 
 
+_FULL_DAYS = ("sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday")
+
+
+def day_index(name: str) -> int:
+    """0 = Sunday. Three letters or the full name, plural allowed ("mon", "monday", "mondays"), as the firmware."""
+    word = name.strip().lower()
+    for i, (short, full) in enumerate(zip(WEEKDAYS, _FULL_DAYS)):
+        if word in (short, full, full + "s"):
+            return i
+    raise ValueError(f"unknown day {name!r} (use mon, monday, ...)")
+
+
 def days_mask(*days: str) -> int:
     """days_mask("mon", "wed") -> bit mask with bit0 = Sunday."""
     mask = 0
     for d in days:
-        mask |= 1 << WEEKDAYS.index(d.lower()[:3])
+        mask |= 1 << day_index(d)
     return mask
 
 
@@ -520,7 +532,8 @@ def parse_event_time(anchor: str, text: str) -> int:
 
 def parse_day_list(text: str) -> int:
     """'all', 'none', 'weekdays', 'weekend' or day names ('mon,wed,fri')."""
-    words = {"all": 0x7F, "none": 0, "weekdays": 0x3E, "weekend": 0x41}
+    words = {"all": 0x7F, "daily": 0x7F, "everyday": 0x7F, "none": 0, "off": 0, "weekdays": 0x3E, "weekend": 0x41,
+             "weekends": 0x41}
     mask = 0
     for word in text.replace(" ", ",").lower().split(","):
         if word:
@@ -539,8 +552,9 @@ def describe_event(ev: dict) -> str:
 
 
 async def selftest(feeder: FeederClient) -> list[tuple[str, bool, str]]:
-    """Check the protocol against a real feeder without feeding: reads, writes of the same values back, a hold that
-    is cancelled again, retries, and refusals of stale, tampered and misdirected writes."""
+    """Check the protocol against a real feeder without changing anything: reads, writes of the same values back,
+    re-selecting the active profile (the retry test), and refusals of stale, tampered and misdirected writes. It never
+    feeds and never touches a hold."""
     results = []
 
     def check(name, ok, detail=""):
@@ -566,25 +580,30 @@ async def selftest(feeder: FeederClient) -> list[tuple[str, bool, str]]:
     check("Calibration readable", all(-150 <= o <= 150 for o in offsets), str(offsets))
     r = await feeder.command(OP_SET_TIMEZONE)
     check("reserved opcode answered UNSUPPORTED", r.result == 14, r.result_text)
-    body = command(feeder._next(), OP_HOLD, hold_args(HOLD_FOREVER))
+    # Re-selecting the profile that is already active changes nothing, so it is safe to send, retry and replay.
+    same = struct.pack("<B", status.active_profile)
+    body = command(feeder._next(), OP_SET_PROFILE, same)
     data = signed(feeder._session, CHANNEL_COMMAND, body)
-    first = await feeder._send(OP_HOLD, data)
-    again = await feeder._send(OP_HOLD, data)
-    check("HOLD, and its exact retry gets the same answer", first.ok and (again.result, again.detail) == (first.result, first.detail))
-    r = await feeder.command(OP_HOLD, hold_args(0))
-    check("hold cancelled again", r.ok, r.result_text)
-    stale = signed(feeder._session, CHANNEL_COMMAND, command(body[0], OP_HOLD, hold_args(1)))
-    r = await feeder._send(OP_HOLD, stale)
+    first = await feeder._send(OP_SET_PROFILE, data)
+    again = await feeder._send(OP_SET_PROFILE, data)
+    check("a command, and its exact retry gets the same answer",
+          first.ok and (again.result, again.detail) == (first.result, first.detail))
+    # A different command under the sequence number just used: correctly signed, but not new.
+    stale = signed(feeder._session, CHANNEL_COMMAND, command(body[0], OP_SET_TIMEZONE))
+    r = await feeder._send(OP_SET_TIMEZONE, stale)
     check("a new write with an old sequence number is refused", r.result == 16 and r.detail == 2, f"detail {r.detail}")
-    tampered = bytearray(signed(feeder._session, CHANNEL_COMMAND, command(feeder._next(), OP_HOLD, hold_args(0))))
+    tampered = bytearray(signed(feeder._session, CHANNEL_COMMAND, command(feeder._next(), OP_SET_PROFILE, same)))
     tampered[2] ^= 1
-    r = await feeder._send(OP_HOLD, bytes(tampered))
+    r = await feeder._send(OP_SET_PROFILE, bytes(tampered))
     check("a tampered write is refused", r.result == 16 and r.detail == 1, f"detail {r.detail}")
-    moved = signed(feeder._session, CHANNEL_CONFIG, command(feeder._next(), OP_HOLD, hold_args(0)))
-    r = await feeder._send(OP_HOLD, moved)
+    moved = signed(feeder._session, CHANNEL_CONFIG, command(feeder._next(), OP_SET_PROFILE, same))
+    r = await feeder._send(OP_SET_PROFILE, moved)
     check("a write signed for another characteristic is refused", r.result == 16 and r.detail == 1, f"detail {r.detail}")
-    r = await feeder.command(OP_HOLD, hold_args(0))
+    r = await feeder.command(OP_SET_PROFILE, same)
     check("commands still work afterwards", r.ok, r.result_text)
+    after = await feeder.status()
+    check("nothing changed on the feeder (profile, hold)",
+          after.active_profile == status.active_profile and (after.flags & 2) == (status.flags & 2))
     return results
 
 
@@ -754,7 +773,10 @@ def main() -> None:
     args = parser.parse_args(rest)
     args.address = address
     args.key = key
-    asyncio.run(_run(args))
+    try:
+        asyncio.run(_run(args))
+    except ValueError as err:  # bad input (a day name, a time, a key): say what, without a traceback
+        raise SystemExit(f"error: {err}") from None
 
 
 if __name__ == "__main__":

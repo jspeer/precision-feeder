@@ -136,6 +136,11 @@ class GoldenVectors(unittest.TestCase):
         with self.assertRaises(ValueError):
             pf.parse_event_time("sunset", "+13:00")
         self.assertEqual(pf.parse_day_list("weekdays"), 0x3E)
+        self.assertEqual(pf.parse_day_list("monday, wednesdays fri"), 0x2A)
+        with self.assertRaisesRegex(ValueError, "unknown day 'sunshine'"):
+            pf.parse_day_list("sunshine")
+        with self.assertRaises(ValueError):
+            pf.days_mask("mo")
         self.assertEqual(pf.parse_day_list("mon,wed fri"), 0x2A)
         ev = {"event": 0, "enabled": True, "anchor": "sunset", "offset_min": -30, "portions": 2, "days": 0x3E}
         self.assertEqual(pf.describe_event(ev), "event 1: on  sunset-00:30 x2 (mon,tue,wed,thu,fri)")

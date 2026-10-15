@@ -230,3 +230,11 @@ In normal running both re-sync every 15 minutes within seconds of each other, so
   HOLD: refused as stale (NOT_AUTHORIZED detail 2), hold still off. Before the
   fix the replayed HOLD would have run again.
 
+## Firmware 0.5.1 on hardware (2026-10-14)
+
+- `selftest` with an indefinite hold set: 14/14 and "nothing changed on the
+  feeder"; Status still showed the hold afterwards (0.5.0's selftest would have
+  cancelled it).
+- Client input errors: `profile A event ... sunshine` answers "unknown day
+  'sunshine'" without touching the feeder.
+

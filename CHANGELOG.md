@@ -6,6 +6,22 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 0.5.1: bug sweep (2026-10-14)
+
+- `selftest` (Python client) no longer cancels an existing hold: it tests
+  retries by re-selecting the active profile, and checks that nothing changed.
+- Next Feed (and Needs Food, runway) skip events inside the reload pause, as the
+  scheduler does; they used to be shown and then skipped.
+- Settings saves are flushed to flash (ESPHome otherwise waits up to 60 s, and a
+  power cut in that time lost the edit).
+- BLE: a signed command too short to hold an opcode is answered INVALID_ARG
+  (the length arithmetic underflowed; harmless, but wrong).
+- A multi-portion feed that is stopped part-way records only the portions that
+  dropped (the step in progress counts; later ones do not).
+- Guard settings are range-checked when loaded.
+- Python client: day names are strict ("sunshine" is not Sunday), and bad input
+  gives a one-line error instead of a traceback.
+
 ## 0.5.0: review fixes, publish on change, settings migration (2026-10-14)
 
 - **BLE fix (found by the owner):** repeating a valid AUTH on an authenticated

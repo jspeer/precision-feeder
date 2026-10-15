@@ -309,6 +309,24 @@ void FeederCore::fire_due_() {
     this->cfg_changed();
 }
 
+int64_t FeederCore::blocked_until_(int64_t now) {
+  int64_t until = 0;
+  if (this->state_.hold_until == HOLD_FOREVER)
+    return INT64_MAX;
+  if (this->state_.hold_until != 0)
+    until = static_cast<int64_t>(this->state_.hold_until);
+  if (this->reload_pause_active()) {
+    int64_t pause_end = this->state_.reload_until != 0 ? static_cast<int64_t>(this->state_.reload_until) : 0;
+    if (this->reload_pause_ms_active_) {
+      const int32_t left_ms = static_cast<int32_t>(this->reload_pause_until_ms_ - this->hal_millis());
+      if (left_ms > 0)
+        pause_end = std::max<int64_t>(pause_end, now + (left_ms + 999) / 1000);
+    }
+    until = std::max(until, pause_end);
+  }
+  return until;
+}
+
 void FeederCore::project_() {
   this->project_dirty_ = false;
   this->last_project_ = this->hal_millis();
@@ -322,6 +340,8 @@ void FeederCore::project_() {
 
   const int64_t now = this->hal_epoch();
   const int32_t today = this->today_();
+  // Events inside a hold or the reload pause are skipped by fire_due_, so they are not "next" either.
+  const int64_t blocked_until = this->blocked_until_(now);
 
   struct Item {
     int64_t epoch;
@@ -350,7 +370,7 @@ void FeederCore::project_() {
         const int64_t fire = this->wall_to_epoch_(d.day_no, minutes);
         if (fire <= now)
           continue;
-        if (this->state_.hold_until != 0 && fire < static_cast<int64_t>(this->state_.hold_until))
+        if (fire < blocked_until)
           continue;
         items.push_back({fire, ev.portions});
       }
@@ -359,7 +379,7 @@ void FeederCore::project_() {
   for (const OneShot &os : this->cfg.oneshots) {
     if (os.epoch == 0 || os.done || static_cast<int64_t>(os.epoch) <= now)
       continue;
-    if (this->state_.hold_until != 0 && os.epoch < this->state_.hold_until)
+    if (static_cast<int64_t>(os.epoch) < blocked_until)
       continue;
     items.push_back({static_cast<int64_t>(os.epoch), os.portions});
   }
