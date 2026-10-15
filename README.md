@@ -348,6 +348,10 @@ over-fed tank:
   Writes need the shared `ble_key`; answers are not signed, so a client should
   pair (encrypted link) if it must trust what it reads. Leave the BLE package out
   if you do not need it. Details: [PROTOCOL.md](docs/PROTOCOL.md), Authentication.
+- **A few browsers at a time.** The feeder's web server has only a handful of
+  connections; with more than about four pages open at once they take turns and
+  reconnect. A page left in the background gives its connection back after 30
+  seconds and takes it again when you return to it.
 - **IPv6-only networks need a static IPv4 address.** The feeder runs dual stack (IPv4
   and IPv6) and works on IPv4-only networks, but ESPHome's Wi-Fi only counts as
   connected once it has an IPv4 address. On a network with no DHCPv4, set one with

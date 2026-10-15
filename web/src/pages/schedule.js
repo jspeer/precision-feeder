@@ -20,10 +20,47 @@ function sameEvent(a, b) {
          a.portions === b.portions && (a.days & 0x7f) === (b.days & 0x7f);
 }
 
-/** Point the firmware's editor at profile p (0..2) and, if given, event e (0..3). */
+/** Point the firmware's editor at profile p (0..2) and, if given, event e (0..3). Cheap when it already is, so it
+ *  is called again before every field write: Home Assistant shares this editor and may have moved it meanwhile. */
 async function editorAt(p, e) {
-  await api.setAndConfirm(E.editProfile, PROFILE_KEYS[p]);
-  if (e !== undefined) await api.setAndConfirm(E.editEvent, String(e + 1));
+  if (store.text(E.editProfile) !== PROFILE_KEYS[p]) await api.setAndConfirm(E.editProfile, PROFILE_KEYS[p]);
+  if (e !== undefined && store.text(E.editEvent) !== String(e + 1)) await api.setAndConfirm(E.editEvent, String(e + 1));
+}
+
+/** Everything other than event e of profile p (e = -1: profile p's own settings) that differs from `before`. */
+function othersChanged(before, p, e) {
+  const after = parseScheduleData(store.text(E.scheduleData));
+  const moved = [];
+  if (!before || !after) return moved;
+  before.forEach((prof, pi) => {
+    if (pi !== p && (prof.everyN !== after[pi].everyN || prof.fast !== after[pi].fast)) moved.push(`profile ${PROFILE_KEYS[pi]} settings`);
+    prof.events.forEach((ev, ei) => {
+      if ((pi !== p || ei !== e) && !sameEvent(ev, after[pi].events[ei])) moved.push(`profile ${PROFILE_KEYS[pi]} event ${ei + 1}`);
+    });
+  });
+  return moved;
+}
+
+function collisionMessage(moved) {
+  return `Someone else used the schedule editor at the same time, and ${moved.join(', ')} changed too. ` +
+         'Check it before relying on the schedule.';
+}
+
+/** Run a schedule save, then make sure nothing else changed: Home Assistant shares the editor, and if it moved the
+ *  editor in the middle of the save a write may have landed on another event. That is reported by name, also when
+ *  the save itself failed (a write that landed elsewhere is not confirmed where it was meant to go). */
+async function guardedSave(p, e, task) {
+  const before = parseScheduleData(store.text(E.scheduleData));
+  try {
+    await task();
+  } catch (err) {
+    // Give a stray write's result time to show in Schedule Data (published within about a second).
+    await api.waitForChange([E.scheduleData], () => othersChanged(before, p, e).length > 0, 1500);
+    const moved = othersChanged(before, p, e);
+    throw moved.length ? new Error(`${err.message} ${collisionMessage(moved)}`) : err;
+  }
+  const moved = othersChanged(before, p, e);
+  if (moved.length) throw new Error(collisionMessage(moved));
 }
 
 PAGES.schedule = {
@@ -185,10 +222,14 @@ PAGES.schedule = {
 
   async toggleEvent(i, on) {
     const p = this.view;
-    this.run(async () => {
+    this.run(() => guardedSave(p, i, async () => {
       await editorAt(p, i);
       await api.turnAndConfirm(E.eventEnabled, on);
-    }, `Event ${i + 1} ${on ? 'on' : 'off'}`);
+      await api.waitFor(E.scheduleData, x => {
+        const s = parseScheduleData(x.value);
+        return s && s[p].events[i].enabled === on;
+      }, 4000).catch(() => { throw new Error(`Event ${i + 1} did not end up ${on ? 'on' : 'off'}. Check it and try again.`); });
+    }), `Event ${i + 1} ${on ? 'on' : 'off'}`);
   },
 
   async editEvent(i) {
@@ -250,25 +291,30 @@ PAGES.schedule = {
     if (!ok) return;
     const want = wanted();
     if (sameEvent(cur, want)) return;
-    this.run(async () => {
-      await editorAt(p, i);
+    this.run(() => guardedSave(p, i, async () => {
+      // Each write re-points the shared editor first (see editorAt).
+      const write = async step => {
+        await editorAt(p, i);
+        await step();
+      };
       // The editor applies each field at once. Switch a live event off before moving it, so it can never fire
       // half-changed; a failure part-way then leaves it off (the safe side), not wrong.
       const moves = cur.anchor !== want.anchor || cur.offset !== want.offset || cur.days !== want.days;
-      if (cur.enabled && moves) await api.turnAndConfirm(E.eventEnabled, false);
-      if (cur.anchor !== want.anchor) await api.setAndConfirm(E.eventAnchor, want.anchor);
+      if (cur.enabled && moves) await write(() => api.turnAndConfirm(E.eventEnabled, false));
+      if (cur.anchor !== want.anchor) await write(() => api.setAndConfirm(E.eventAnchor, want.anchor));
       // A new anchor resets the time on the device, so write the time whenever either changed.
       if (cur.anchor !== want.anchor || cur.offset !== want.offset) {
-        await api.setAndConfirm(E.eventTime, eventTimeText(want.anchor, want.offset));
+        await write(() => api.setAndConfirm(E.eventTime, eventTimeText(want.anchor, want.offset)));
       }
-      if (cur.days !== want.days) await api.setAndConfirm(E.eventDays, daysText(want.days));
-      if (cur.portions !== want.portions) await api.setAndConfirm(E.eventPortions, want.portions);
+      if (cur.days !== want.days) await write(() => api.setAndConfirm(E.eventDays, daysText(want.days)));
+      if (cur.portions !== want.portions) await write(() => api.setAndConfirm(E.eventPortions, want.portions));
+      await editorAt(p, i);
       if (store.bool(E.eventEnabled) !== want.enabled) await api.turnAndConfirm(E.eventEnabled, want.enabled);
       await api.waitFor(E.scheduleData, x => {
         const s = parseScheduleData(x.value);
         return s && sameEvent(s[p].events[i], want);
       }, 4000).catch(() => { throw new Error(`Event ${i + 1} did not end up as set. Check it and try again.`); });
-    }, `Event ${i + 1} saved`);
+    }), `Event ${i + 1} saved`);
   },
 
   async editProfile() {
@@ -297,16 +343,24 @@ PAGES.schedule = {
     if (!ok) return;
     const everyN = +every.value;
     if (everyN === cur.everyN && fast.mask === cur.fast && !restart.checked) return;
-    this.run(async () => {
-      await editorAt(p);
-      if (everyN !== cur.everyN) await api.setAndConfirm(E.everyNDays, everyN);
-      if (fast.mask !== cur.fast) await api.setAndConfirm(E.fastDays, daysText(fast.mask));
-      if (restart.checked && everyN > 1) await api.press(E.restartCycle);
+    this.run(() => guardedSave(p, -1, async () => {
+      if (everyN !== cur.everyN) {
+        await editorAt(p);
+        await api.setAndConfirm(E.everyNDays, everyN);
+      }
+      if (fast.mask !== cur.fast) {
+        await editorAt(p);
+        await api.setAndConfirm(E.fastDays, daysText(fast.mask));
+      }
+      if (restart.checked && everyN > 1) {
+        await editorAt(p);
+        await api.press(E.restartCycle);
+      }
       await api.waitFor(E.scheduleData, x => {
         const s = parseScheduleData(x.value);
         return s && s[p].everyN === everyN && s[p].fast === fast.mask;
       }, 4000).catch(() => { throw new Error('The profile did not end up as set. Check it and try again.'); });
-    }, `Profile ${PROFILE_KEYS[p]} saved`);
+    }), `Profile ${PROFILE_KEYS[p]} saved`);
   },
 
   renderOneshots() {

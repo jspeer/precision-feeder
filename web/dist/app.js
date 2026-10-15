@@ -3,6 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
+const BUILD_ID = '62188d452326';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -310,11 +311,12 @@ function addressKind(addr) {
 
 const LOG_MAX = 300;
 const STALE_MS = 25000;  // no ping for this long: the connection is dead even if the browser has not noticed
+const HIDDEN_RELEASE_MS = 30000;  // a page hidden this long gives its connection back (see start())
 
 const store = {
   entities: new Map(),  // "domain/Name" -> the latest JSON the device sent for it (full detail kept)
   title: '',
-  status: 'connecting',  // connecting | online | offline
+  status: 'connecting',  // connecting | online | offline | paused (page hidden, connection given back)
   everOnline: false,
   lastNewEntity: 0,      // Date.now() when an entity was last seen for the first time
   logLines: [],          // {at, text}, newest last
@@ -402,6 +404,8 @@ const store = {
         const d = JSON.parse(ev.data);
         if (typeof d.title === 'string') this.title = d.title;
         if (typeof d.uptime === 'number') {
+          // Uptime going backwards means the feeder restarted (a power cut, or an update).
+          if (this.uptimeS !== null && d.uptime + 5 < this.uptime()) this._mark('*restart');
           this.uptimeS = d.uptime;
           this.uptimeAt = Date.now();
         }
@@ -440,6 +444,25 @@ const store = {
         this._es.onerror();  // treat silence as a dropped connection
       }
     }, 5000);
+    // The feeder's web server has only a few sockets, and drops the least recently used connection when they run
+    // out (measured: about four open pages at once). So a page hidden for a while (a background tab, a phone in a
+    // pocket) lets go of its connection, and takes a new one, with everything current, as soon as it is shown.
+    let hiddenTimer = 0;
+    document.addEventListener('visibilitychange', () => {
+      clearTimeout(hiddenTimer);
+      if (document.hidden) {
+        hiddenTimer = setTimeout(() => {
+          if (!this._es) return;
+          this._es.close();
+          this._es = null;
+          this.status = 'paused';
+          this._mark('*status');
+        }, HIDDEN_RELEASE_MS);
+      } else if (!this._es) {
+        this._retry = 0;
+        this.connect();
+      }
+    });
   },
 };
 
@@ -597,6 +620,7 @@ const ICONS = {
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM12 11v6M12 7.5h.01',
   search: 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 1 0 0-13zM15.5 15.5L20 20',
   copy: 'M9 9h11v11H9zM5 15V4h11',
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
 };
 
 function icon(name, size = 20) {
@@ -798,13 +822,13 @@ function entityControl(id) {
   const domain = e.domain || id.slice(0, id.indexOf('/'));
   const label = e.name || id;
   if (domain === 'button') {
-    return h('button', { class: 'btn btn-small', onclick: async () => {
+    return h('button', { class: 'btn btn-small', 'aria-label': `Press ${label}`, onclick: async () => {
       if (!await confirmDialog({ title: `Press "${label}"?`, body: 'This acts on the feeder straight away.', ok: 'Press' })) return;
       api.press(id).then(() => toast(`Pressed ${label}`, 'ok'), toastError);
     } }, 'Press');
   }
   if (domain === 'switch') {
-    const btn = h('button', { class: 'btn btn-small', role: 'switch', onclick: () => {
+    const btn = h('button', { class: 'btn btn-small', role: 'switch', 'aria-label': label, onclick: () => {
       const on = !store.bool(id);
       api.turn(id, on).then(() => api.waitFor(id, x => x.value === on)).catch(toastError);
     } });
@@ -853,7 +877,7 @@ function entityControl(id) {
     input._update();
     const wrap = h('span', { class: 'field' }, input,
                    e.uom ? h('span', { class: 'unit' }, e.uom) : null,
-                   h('button', { class: 'btn btn-small', onclick: save }, 'Set'), err);
+                   h('button', { class: 'btn btn-small', 'aria-label': `Set ${label}`, onclick: save }, 'Set'), err);
     wrap._update = () => input._update();
     return wrap;
   }
@@ -943,10 +967,31 @@ function holdWords(hold) {
 /** The faults the banners below already explain, so they are not listed twice. */
 const COVERED_FAULTS = ['clock not set', 'tray position unknown', 'tray empty', 'next feed needs more portions'];
 
+/** After the feeder restarts, check whether it now serves a different app (it was updated); if so, offer a reload. */
+const appUpdate = {
+  available: false,
+  check() {
+    fetch(`${location.origin}/0.js`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.text() : ''))
+      .then(text => {
+        if (text && !text.includes(`const BUILD_ID = '${BUILD_ID}'`)) {
+          this.available = true;
+          banners.update();
+        }
+      })
+      .catch(() => { /* checked again after the next restart */ });
+  },
+};
+
 function currentBanner() {
-  if (store.everOnline && store.status !== 'online') {
+  if (store.everOnline && store.status !== 'online' && store.status !== 'paused') {
     return { kind: 'neutral', icon: 'wifiOff', title: 'Connection lost',
              text: 'Reconnecting… The feeder keeps running on its own schedule.' };
+  }
+  if (appUpdate.available) {
+    return { kind: 'info', icon: 'refresh', title: 'The feeder was updated',
+             text: 'Reload this page to use the new version of the app.',
+             actions: [{ label: 'Reload', run: () => location.reload() }] };
   }
   if (!store.has(E.trayState)) return null;
   const tray = store.text(E.trayState);
@@ -1366,10 +1411,47 @@ function sameEvent(a, b) {
          a.portions === b.portions && (a.days & 0x7f) === (b.days & 0x7f);
 }
 
-/** Point the firmware's editor at profile p (0..2) and, if given, event e (0..3). */
+/** Point the firmware's editor at profile p (0..2) and, if given, event e (0..3). Cheap when it already is, so it
+ *  is called again before every field write: Home Assistant shares this editor and may have moved it meanwhile. */
 async function editorAt(p, e) {
-  await api.setAndConfirm(E.editProfile, PROFILE_KEYS[p]);
-  if (e !== undefined) await api.setAndConfirm(E.editEvent, String(e + 1));
+  if (store.text(E.editProfile) !== PROFILE_KEYS[p]) await api.setAndConfirm(E.editProfile, PROFILE_KEYS[p]);
+  if (e !== undefined && store.text(E.editEvent) !== String(e + 1)) await api.setAndConfirm(E.editEvent, String(e + 1));
+}
+
+/** Everything other than event e of profile p (e = -1: profile p's own settings) that differs from `before`. */
+function othersChanged(before, p, e) {
+  const after = parseScheduleData(store.text(E.scheduleData));
+  const moved = [];
+  if (!before || !after) return moved;
+  before.forEach((prof, pi) => {
+    if (pi !== p && (prof.everyN !== after[pi].everyN || prof.fast !== after[pi].fast)) moved.push(`profile ${PROFILE_KEYS[pi]} settings`);
+    prof.events.forEach((ev, ei) => {
+      if ((pi !== p || ei !== e) && !sameEvent(ev, after[pi].events[ei])) moved.push(`profile ${PROFILE_KEYS[pi]} event ${ei + 1}`);
+    });
+  });
+  return moved;
+}
+
+function collisionMessage(moved) {
+  return `Someone else used the schedule editor at the same time, and ${moved.join(', ')} changed too. ` +
+         'Check it before relying on the schedule.';
+}
+
+/** Run a schedule save, then make sure nothing else changed: Home Assistant shares the editor, and if it moved the
+ *  editor in the middle of the save a write may have landed on another event. That is reported by name, also when
+ *  the save itself failed (a write that landed elsewhere is not confirmed where it was meant to go). */
+async function guardedSave(p, e, task) {
+  const before = parseScheduleData(store.text(E.scheduleData));
+  try {
+    await task();
+  } catch (err) {
+    // Give a stray write's result time to show in Schedule Data (published within about a second).
+    await api.waitForChange([E.scheduleData], () => othersChanged(before, p, e).length > 0, 1500);
+    const moved = othersChanged(before, p, e);
+    throw moved.length ? new Error(`${err.message} ${collisionMessage(moved)}`) : err;
+  }
+  const moved = othersChanged(before, p, e);
+  if (moved.length) throw new Error(collisionMessage(moved));
 }
 
 PAGES.schedule = {
@@ -1531,10 +1613,14 @@ PAGES.schedule = {
 
   async toggleEvent(i, on) {
     const p = this.view;
-    this.run(async () => {
+    this.run(() => guardedSave(p, i, async () => {
       await editorAt(p, i);
       await api.turnAndConfirm(E.eventEnabled, on);
-    }, `Event ${i + 1} ${on ? 'on' : 'off'}`);
+      await api.waitFor(E.scheduleData, x => {
+        const s = parseScheduleData(x.value);
+        return s && s[p].events[i].enabled === on;
+      }, 4000).catch(() => { throw new Error(`Event ${i + 1} did not end up ${on ? 'on' : 'off'}. Check it and try again.`); });
+    }), `Event ${i + 1} ${on ? 'on' : 'off'}`);
   },
 
   async editEvent(i) {
@@ -1596,25 +1682,30 @@ PAGES.schedule = {
     if (!ok) return;
     const want = wanted();
     if (sameEvent(cur, want)) return;
-    this.run(async () => {
-      await editorAt(p, i);
+    this.run(() => guardedSave(p, i, async () => {
+      // Each write re-points the shared editor first (see editorAt).
+      const write = async step => {
+        await editorAt(p, i);
+        await step();
+      };
       // The editor applies each field at once. Switch a live event off before moving it, so it can never fire
       // half-changed; a failure part-way then leaves it off (the safe side), not wrong.
       const moves = cur.anchor !== want.anchor || cur.offset !== want.offset || cur.days !== want.days;
-      if (cur.enabled && moves) await api.turnAndConfirm(E.eventEnabled, false);
-      if (cur.anchor !== want.anchor) await api.setAndConfirm(E.eventAnchor, want.anchor);
+      if (cur.enabled && moves) await write(() => api.turnAndConfirm(E.eventEnabled, false));
+      if (cur.anchor !== want.anchor) await write(() => api.setAndConfirm(E.eventAnchor, want.anchor));
       // A new anchor resets the time on the device, so write the time whenever either changed.
       if (cur.anchor !== want.anchor || cur.offset !== want.offset) {
-        await api.setAndConfirm(E.eventTime, eventTimeText(want.anchor, want.offset));
+        await write(() => api.setAndConfirm(E.eventTime, eventTimeText(want.anchor, want.offset)));
       }
-      if (cur.days !== want.days) await api.setAndConfirm(E.eventDays, daysText(want.days));
-      if (cur.portions !== want.portions) await api.setAndConfirm(E.eventPortions, want.portions);
+      if (cur.days !== want.days) await write(() => api.setAndConfirm(E.eventDays, daysText(want.days)));
+      if (cur.portions !== want.portions) await write(() => api.setAndConfirm(E.eventPortions, want.portions));
+      await editorAt(p, i);
       if (store.bool(E.eventEnabled) !== want.enabled) await api.turnAndConfirm(E.eventEnabled, want.enabled);
       await api.waitFor(E.scheduleData, x => {
         const s = parseScheduleData(x.value);
         return s && sameEvent(s[p].events[i], want);
       }, 4000).catch(() => { throw new Error(`Event ${i + 1} did not end up as set. Check it and try again.`); });
-    }, `Event ${i + 1} saved`);
+    }), `Event ${i + 1} saved`);
   },
 
   async editProfile() {
@@ -1643,16 +1734,24 @@ PAGES.schedule = {
     if (!ok) return;
     const everyN = +every.value;
     if (everyN === cur.everyN && fast.mask === cur.fast && !restart.checked) return;
-    this.run(async () => {
-      await editorAt(p);
-      if (everyN !== cur.everyN) await api.setAndConfirm(E.everyNDays, everyN);
-      if (fast.mask !== cur.fast) await api.setAndConfirm(E.fastDays, daysText(fast.mask));
-      if (restart.checked && everyN > 1) await api.press(E.restartCycle);
+    this.run(() => guardedSave(p, -1, async () => {
+      if (everyN !== cur.everyN) {
+        await editorAt(p);
+        await api.setAndConfirm(E.everyNDays, everyN);
+      }
+      if (fast.mask !== cur.fast) {
+        await editorAt(p);
+        await api.setAndConfirm(E.fastDays, daysText(fast.mask));
+      }
+      if (restart.checked && everyN > 1) {
+        await editorAt(p);
+        await api.press(E.restartCycle);
+      }
       await api.waitFor(E.scheduleData, x => {
         const s = parseScheduleData(x.value);
         return s && s[p].everyN === everyN && s[p].fast === fast.mask;
       }, 4000).catch(() => { throw new Error('The profile did not end up as set. Check it and try again.'); });
-    }, `Profile ${PROFILE_KEYS[p]} saved`);
+    }), `Profile ${PROFILE_KEYS[p]} saved`);
   },
 
   renderOneshots() {
@@ -2366,7 +2465,10 @@ const app = {
       h('div', { class: 'container' }, this.bannerEl, this.pageEl),
       h('div', { id: 'toasts', class: 'toasts', 'aria-live': 'polite' }));
     banners.mount(this.bannerEl);
-    window.addEventListener('hashchange', () => this.route());
+    window.addEventListener('hashchange', () => {
+      this.navigated = true;  // the user chose a page: move focus to it once it is shown
+      this.route();
+    });
     store.subscribe(changed => this.update(changed));
     store.start();
     this.update(new Set(['*all']));
@@ -2388,6 +2490,7 @@ const app = {
   },
 
   update(changed) {
+    if (changed.has('*restart')) appUpdate.check();
     this.updateHeader();
     this.updateTabs();
     banners.update();
@@ -2398,12 +2501,13 @@ const app = {
   updateHeader() {
     const title = store.title || 'Precision Feeder';
     setText(this.titleEl, title);
-    if (document.title !== title) document.title = title;
+    const pageTitle = this.current ? `${(TABS.find(t => t.id === this.current.id) || {}).title} · ${title}` : title;
+    if (document.title !== pageTitle) document.title = pageTitle;
     const t = parseDeviceTime(store.text(E.deviceTime)) || parseLocalDateTime(store.text(E.deviceTime));
     setText(this.clockEl, t ? formatClock(t.hour, t.minute) : '');
-    const online = store.status === 'online';
-    setText(this.connEl, online ? 'Online' : store.everOnline ? 'Offline' : 'Connecting');
-    this.connEl.className = `pill ${online ? 'pill-ok' : store.everOnline ? 'pill-danger' : 'pill-muted'}`;
+    const online = store.status === 'online', paused = store.status === 'paused';
+    setText(this.connEl, online ? 'Online' : paused ? 'Paused' : store.everOnline ? 'Offline' : 'Connecting');
+    this.connEl.className = `pill ${online ? 'pill-ok' : store.everOnline && !paused ? 'pill-danger' : 'pill-muted'}`;
   },
 
   updateTabs() {
@@ -2444,8 +2548,16 @@ const app = {
     if (this.current && this.current.page.unmount) this.current.page.unmount();
     clear(this.pageEl);
     this.current = { id: tab.id, sub, page: PAGES[tab.id] };
+    // Every page starts with its name as a heading, for screen readers (the tab bar shows it to everyone else).
+    this.pageEl.appendChild(h('h1', { class: 'sr-only' }, tab.title));
     this.current.page.mount(this.pageEl, sub);
     this.updateTabs();
+    document.title = `${tab.title} · ${store.title || 'Precision Feeder'}`;
+    if (this.navigated) {
+      this.navigated = false;
+      this.pageEl.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+    }
   },
 
   showLoading() {

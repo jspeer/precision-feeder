@@ -5,11 +5,12 @@
 
 const LOG_MAX = 300;
 const STALE_MS = 25000;  // no ping for this long: the connection is dead even if the browser has not noticed
+const HIDDEN_RELEASE_MS = 30000;  // a page hidden this long gives its connection back (see start())
 
 const store = {
   entities: new Map(),  // "domain/Name" -> the latest JSON the device sent for it (full detail kept)
   title: '',
-  status: 'connecting',  // connecting | online | offline
+  status: 'connecting',  // connecting | online | offline | paused (page hidden, connection given back)
   everOnline: false,
   lastNewEntity: 0,      // Date.now() when an entity was last seen for the first time
   logLines: [],          // {at, text}, newest last
@@ -97,6 +98,8 @@ const store = {
         const d = JSON.parse(ev.data);
         if (typeof d.title === 'string') this.title = d.title;
         if (typeof d.uptime === 'number') {
+          // Uptime going backwards means the feeder restarted (a power cut, or an update).
+          if (this.uptimeS !== null && d.uptime + 5 < this.uptime()) this._mark('*restart');
           this.uptimeS = d.uptime;
           this.uptimeAt = Date.now();
         }
@@ -135,5 +138,24 @@ const store = {
         this._es.onerror();  // treat silence as a dropped connection
       }
     }, 5000);
+    // The feeder's web server has only a few sockets, and drops the least recently used connection when they run
+    // out (measured: about four open pages at once). So a page hidden for a while (a background tab, a phone in a
+    // pocket) lets go of its connection, and takes a new one, with everything current, as soon as it is shown.
+    let hiddenTimer = 0;
+    document.addEventListener('visibilitychange', () => {
+      clearTimeout(hiddenTimer);
+      if (document.hidden) {
+        hiddenTimer = setTimeout(() => {
+          if (!this._es) return;
+          this._es.close();
+          this._es = null;
+          this.status = 'paused';
+          this._mark('*status');
+        }, HIDDEN_RELEASE_MS);
+      } else if (!this._es) {
+        this._retry = 0;
+        this.connect();
+      }
+    });
   },
 };

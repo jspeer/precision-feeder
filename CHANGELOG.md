@@ -69,6 +69,15 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
   networks need a static IPv4 address (an ESPHome limit; see the README).
 - The web app waits for the device's entities to settle before showing a page, so a link straight to a page
   (for example `#diagnostics`) no longer misses the parts of the build that arrive last.
+- Web app hardening:
+  - After the feeder restarts with a different app (an update), an open page offers a reload. The build stamps
+    each app with an id; a page checks it only when the device's uptime goes backwards.
+  - A page hidden for 30 seconds gives its connection back (the web server has only a few) and reconnects when
+    shown.
+  - Schedule saves re-point the shared editor before every write, and say by name if another client's use of the
+    editor changed a different event.
+  - Page headings and titles for screen readers, focus moves to the page on navigation, and every Set, Press and
+    switch control is named after its setting.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,

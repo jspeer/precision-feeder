@@ -68,10 +68,31 @@ function holdWords(hold) {
 /** The faults the banners below already explain, so they are not listed twice. */
 const COVERED_FAULTS = ['clock not set', 'tray position unknown', 'tray empty', 'next feed needs more portions'];
 
+/** After the feeder restarts, check whether it now serves a different app (it was updated); if so, offer a reload. */
+const appUpdate = {
+  available: false,
+  check() {
+    fetch(`${location.origin}/0.js`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.text() : ''))
+      .then(text => {
+        if (text && !text.includes(`const BUILD_ID = '${BUILD_ID}'`)) {
+          this.available = true;
+          banners.update();
+        }
+      })
+      .catch(() => { /* checked again after the next restart */ });
+  },
+};
+
 function currentBanner() {
-  if (store.everOnline && store.status !== 'online') {
+  if (store.everOnline && store.status !== 'online' && store.status !== 'paused') {
     return { kind: 'neutral', icon: 'wifiOff', title: 'Connection lost',
              text: 'Reconnecting… The feeder keeps running on its own schedule.' };
+  }
+  if (appUpdate.available) {
+    return { kind: 'info', icon: 'refresh', title: 'The feeder was updated',
+             text: 'Reload this page to use the new version of the app.',
+             actions: [{ label: 'Reload', run: () => location.reload() }] };
   }
   if (!store.has(E.trayState)) return null;
   const tray = store.text(E.trayState);

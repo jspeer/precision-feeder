@@ -632,6 +632,12 @@ precision-feeder/
 8. Profile names: section 5.1 lists a per-profile `name`, but the `Profile` record
    has none, so profiles show as A, B and C. Adding one changes the saved Settings
    layout (new version, key and migration); deferred (2026-10-15).
+9. The schedule editor (Edit Profile / Edit Event plus field entities) is one cursor shared by every client.
+   If Home Assistant moves it while the web app is saving, a field write can land on another event. The app
+   re-points the editor before every write and, after a save (or a failed one), compares every other event with
+   a snapshot and names any that changed (found and handled in 1.1.0 M9; reproduced only by moving the cursor
+   continuously). A complete fix needs a firmware change, for example a write-only text entity taking a whole
+   event at once ("A 2 1c405/2/7e"). Not planned yet (2026-10-15).
 
 ## 15. Implementation status (v1.0.1)
 

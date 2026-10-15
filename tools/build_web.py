@@ -18,6 +18,7 @@ reviewed by a human, but it may still contain mistakes.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import pathlib
 import sys
 
@@ -63,14 +64,18 @@ CSS_HEADER = """\
 
 
 def build() -> dict[str, str]:
-    js = [HEADER]
+    body = []
     for name in SOURCES:
-        js.append(f"\n// ---- {name} ----\n")
-        js.append((SRC / name).read_text())
+        body.append(f"\n// ---- {name} ----\n")
+        body.append((SRC / name).read_text())
     css = [CSS_HEADER]
     for name in STYLES:
         css.append((SRC / name).read_text())
-    return {"app.js": "".join(js), "app.css": "".join(css)}
+    css_text = "".join(css)
+    # An id for this exact app, so an open page can tell when the feeder now serves a different one (an update).
+    build_id = hashlib.sha256(("".join(body) + css_text).encode()).hexdigest()[:12]
+    js = HEADER + f"const BUILD_ID = '{build_id}';\n" + "".join(body)
+    return {"app.js": js, "app.css": css_text}
 
 
 def main() -> int:

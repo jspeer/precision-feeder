@@ -336,3 +336,15 @@ ULA prefix), reached from a computer on another subnet of the same network.
 - **IPv4-only and IPv6-only networks** were not tried (the fallback for IPv6-only is a static IPv4 address;
   README, Limits).
 
+## Several browsers at once (2026-10-15, firmware 1.1.0 in progress, M8 build)
+
+Measured on the same board from one browser page plus extra `/events` connections opened from it.
+
+- **Heap:** about 0.8 KB per extra connection (146.6 KB free with the page alone, 144.1 KB with three more).
+  Memory is not the limit.
+- **Connections:** ESPHome configures the ESP-IDF HTTP server to close the least recently used connection when
+  its sockets run out. With the page plus six extra event streams, only about half stayed connected at a time;
+  the rest kept being closed and reconnecting. Page loads still answered (74 ms), and the app's own stream stayed
+  online. In practice about four pages can stay connected at once. Since M9 a page hidden for 30 s releases its
+  connection.
+

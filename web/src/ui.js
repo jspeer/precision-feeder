@@ -59,6 +59,7 @@ const ICONS = {
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM12 11v6M12 7.5h.01',
   search: 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 1 0 0-13zM15.5 15.5L20 20',
   copy: 'M9 9h11v11H9zM5 15V4h11',
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
 };
 
 function icon(name, size = 20) {
@@ -260,13 +261,13 @@ function entityControl(id) {
   const domain = e.domain || id.slice(0, id.indexOf('/'));
   const label = e.name || id;
   if (domain === 'button') {
-    return h('button', { class: 'btn btn-small', onclick: async () => {
+    return h('button', { class: 'btn btn-small', 'aria-label': `Press ${label}`, onclick: async () => {
       if (!await confirmDialog({ title: `Press "${label}"?`, body: 'This acts on the feeder straight away.', ok: 'Press' })) return;
       api.press(id).then(() => toast(`Pressed ${label}`, 'ok'), toastError);
     } }, 'Press');
   }
   if (domain === 'switch') {
-    const btn = h('button', { class: 'btn btn-small', role: 'switch', onclick: () => {
+    const btn = h('button', { class: 'btn btn-small', role: 'switch', 'aria-label': label, onclick: () => {
       const on = !store.bool(id);
       api.turn(id, on).then(() => api.waitFor(id, x => x.value === on)).catch(toastError);
     } });
@@ -315,7 +316,7 @@ function entityControl(id) {
     input._update();
     const wrap = h('span', { class: 'field' }, input,
                    e.uom ? h('span', { class: 'unit' }, e.uom) : null,
-                   h('button', { class: 'btn btn-small', onclick: save }, 'Set'), err);
+                   h('button', { class: 'btn btn-small', 'aria-label': `Set ${label}`, onclick: save }, 'Set'), err);
     wrap._update = () => input._update();
     return wrap;
   }

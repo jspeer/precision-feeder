@@ -39,7 +39,10 @@ const app = {
       h('div', { class: 'container' }, this.bannerEl, this.pageEl),
       h('div', { id: 'toasts', class: 'toasts', 'aria-live': 'polite' }));
     banners.mount(this.bannerEl);
-    window.addEventListener('hashchange', () => this.route());
+    window.addEventListener('hashchange', () => {
+      this.navigated = true;  // the user chose a page: move focus to it once it is shown
+      this.route();
+    });
     store.subscribe(changed => this.update(changed));
     store.start();
     this.update(new Set(['*all']));
@@ -61,6 +64,7 @@ const app = {
   },
 
   update(changed) {
+    if (changed.has('*restart')) appUpdate.check();
     this.updateHeader();
     this.updateTabs();
     banners.update();
@@ -71,12 +75,13 @@ const app = {
   updateHeader() {
     const title = store.title || 'Precision Feeder';
     setText(this.titleEl, title);
-    if (document.title !== title) document.title = title;
+    const pageTitle = this.current ? `${(TABS.find(t => t.id === this.current.id) || {}).title} · ${title}` : title;
+    if (document.title !== pageTitle) document.title = pageTitle;
     const t = parseDeviceTime(store.text(E.deviceTime)) || parseLocalDateTime(store.text(E.deviceTime));
     setText(this.clockEl, t ? formatClock(t.hour, t.minute) : '');
-    const online = store.status === 'online';
-    setText(this.connEl, online ? 'Online' : store.everOnline ? 'Offline' : 'Connecting');
-    this.connEl.className = `pill ${online ? 'pill-ok' : store.everOnline ? 'pill-danger' : 'pill-muted'}`;
+    const online = store.status === 'online', paused = store.status === 'paused';
+    setText(this.connEl, online ? 'Online' : paused ? 'Paused' : store.everOnline ? 'Offline' : 'Connecting');
+    this.connEl.className = `pill ${online ? 'pill-ok' : store.everOnline && !paused ? 'pill-danger' : 'pill-muted'}`;
   },
 
   updateTabs() {
@@ -117,8 +122,16 @@ const app = {
     if (this.current && this.current.page.unmount) this.current.page.unmount();
     clear(this.pageEl);
     this.current = { id: tab.id, sub, page: PAGES[tab.id] };
+    // Every page starts with its name as a heading, for screen readers (the tab bar shows it to everyone else).
+    this.pageEl.appendChild(h('h1', { class: 'sr-only' }, tab.title));
     this.current.page.mount(this.pageEl, sub);
     this.updateTabs();
+    document.title = `${tab.title} · ${store.title || 'Precision Feeder'}`;
+    if (this.navigated) {
+      this.navigated = false;
+      this.pageEl.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+    }
   },
 
   showLoading() {
