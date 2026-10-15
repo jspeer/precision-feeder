@@ -342,6 +342,22 @@ a { color: var(--accent); }
 .event-off .event-when, .event-off .event-sub, .event-off .chips { opacity: 0.5; }
 .oneshots { margin-bottom: 12px; }
 
+/* ---- settings ---- */
+.setting { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 12px 0; border-top: 1px solid var(--border); }
+.setting:first-of-type { border-top: none; }
+.setting-text { flex: 1 1 220px; min-width: 0; }
+.setting-label { font-weight: 550; }
+.setting-control { margin-left: auto; }
+
+/* ---- maintenance ---- */
+.cal-status { color: var(--muted); }
+.cal-on { color: var(--warn); font-weight: 600; }
+.cal-work { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.nudge { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.offset-value { min-width: 5ch; text-align: center; font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.advanced { margin-top: 14px; }
+.advanced summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+
 /* ---- phones: tabs become a bottom bar ---- */
 @media (max-width: 720px) {
   body { font-size: 15px; }

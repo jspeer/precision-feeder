@@ -48,7 +48,15 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
     Each save writes the editor fields in the documented order, each confirmed by the device. A live event is
     switched off before it moves, so a half-applied change can never fire. The end result is checked against
     Schedule Data.
-  - The Configuration, Maintenance and Bluetooth pages follow.
+  - Configuration: the feeding safety limits, reload pause and refill interval, location, and the device's time
+    zone, clock and network, each with the device's own limits and units, confirmed when saved.
+  - Maintenance:
+    - a calibration walkthrough (start; pick a slot and the servo goes there; nudge it by 0.1 or 1 degree;
+      next slot; finish and save);
+    - the servo pulse range;
+    - declaring the tray position or reloading;
+    - the 24 h count edit for debugging, behind its explanation.
+  - The Bluetooth page follows.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,

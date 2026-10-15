@@ -7,6 +7,11 @@ each position needs a small correction.
 *Written with the assistance of an AI (Anthropic's Claude); verify against your
 own build.*
 
+**In the built-in web app** (firmware 1.1.0 and later), Maintenance has the same steps
+as a walkthrough: start calibration, pick a slot, nudge its offset by 0.1 or 1 degree,
+go to the next slot, then finish and save. The servo pulse range is under "Servo pulse
+range (advanced)" there.
+
 ## First-time setup
 
 1. Wire the servo (signal to `servo_pin`, 5 V, GND) and power the board.

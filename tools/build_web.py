@@ -35,6 +35,8 @@ SOURCES = [
     "banners.js",    # the warning banner
     "pages/dashboard.js",
     "pages/schedule.js",
+    "pages/configuration.js",
+    "pages/maintenance.js",
     "pages/diagnostics.js",
     "app.js",        # the shell: header, tabs, routing; starts everything
 ]

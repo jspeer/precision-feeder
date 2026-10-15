@@ -487,6 +487,14 @@ class Feeder:
                 self.profiles[self.edit_profile]["every_n"] = int(x)
             elif name == "Calibration Offset":
                 self.offsets[self.cal_pos] = round(x, 1)
+            elif name == "Portions Counted (24 h)":  # as set_portions_24h: an adjustment, or forget the oldest
+                diff = int(x) - self.fed_24h()
+                if diff > 0:
+                    self.history.insert(0, (time.time(), diff, "adjustment"))
+                while diff < 0 and self.history:
+                    t, n, src = self.history.pop()
+                    diff += n
+                self.log("W", "precision_feeder", f"24 h count set by hand to {int(x)}")
             else:
                 self.set("number", name, round(x, e.decimals) if e.decimals else int(x))
         elif domain == "text" and action == "set":

@@ -321,3 +321,15 @@ function entityControl(id) {
   }
   return null;
 }
+
+/** A settings row: label, explanation, and the entity's own control (limits and unit from the device). Nothing if
+ *  the entity is not in this build. Returns the row; its control keeps itself current through ._update. */
+function setting(label, hint, id) {
+  const control = entityControl(id);
+  if (!control) return null;
+  const el = h('div', { class: 'setting' },
+    h('div', { class: 'setting-text' }, h('div', { class: 'setting-label' }, label), hint ? h('div', { class: 'hint' }, hint) : null),
+    h('div', { class: 'setting-control' }, control));
+  el._update = () => { if (control._update) control._update(); };
+  return el;
+}

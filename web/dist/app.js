@@ -848,6 +848,18 @@ function entityControl(id) {
   return null;
 }
 
+/** A settings row: label, explanation, and the entity's own control (limits and unit from the device). Nothing if
+ *  the entity is not in this build. Returns the row; its control keeps itself current through ._update. */
+function setting(label, hint, id) {
+  const control = entityControl(id);
+  if (!control) return null;
+  const el = h('div', { class: 'setting' },
+    h('div', { class: 'setting-text' }, h('div', { class: 'setting-label' }, label), hint ? h('div', { class: 'hint' }, hint) : null),
+    h('div', { class: 'setting-control' }, control));
+  el._update = () => { if (control._update) control._update(); };
+  return el;
+}
+
 // ---- banners.js ----
 // The banner under the header: the most important thing wrong right now, with what you can do about it. One at a
 // time, most severe first. Everything here comes from what the device reports (Tray State, Faults, Clock Valid,
@@ -1677,6 +1689,230 @@ PAGES.schedule = {
     if (!await confirmDialog({ title: 'Clear all one-shot feeds?', body: 'Every one-shot feed still waiting is removed.',
                                ok: 'Clear all', danger: true })) return;
     this.run(() => api.press(E.clearOneshots).then(() => api.waitFor(E.oneshots, x => x.value === 'none')), 'One-shot feeds cleared');
+  },
+};
+
+// ---- pages/configuration.js ----
+// Configuration: the feeder's settings, each with the device's own limits and unit, saved when you press Set (or
+// Enter) and confirmed by the device. The feed guard's limits are the device's: this page only changes them.
+
+PAGES.configuration = {
+  mount(root) {
+    this.rows = [];
+    const group = (title, intro, items) => {
+      const rows = items.filter(Boolean);
+      if (!rows.length) return null;
+      this.rows.push(...rows);
+      return card(title, intro ? h('p', { class: 'hint' }, intro) : null, rows);
+    };
+
+    const safety = group('Feeding safety',
+      'Every feed, from the schedule, this app, Home Assistant, Bluetooth or the button, is checked against these.', [
+        setting('Minimum gap between feeds', 'No feed starts sooner than this after the last one.', E.minGap),
+        setting('Daily portion cap', 'Most portions in any 24 hours, scheduled ones included.', E.dailyCap),
+        setting('Most portions per command', 'For feeds by hand or remote; 1 means one portion per press.', E.maxPerCommand),
+        setting('Gap between portions', 'Pause between the portions of one feed.', E.portionGap),
+      ]);
+    const tray = group('Tray and refills', null, [
+      setting('Reload pause', 'After Tray reload, scheduled feeding waits this long so you can load food. Feeds due ' +
+              'in that time are skipped.', E.reloadPause),
+      setting('Refill interval', 'How often you expect to refill. The schedule is flagged when it needs more than the ' +
+              'tray holds before then.', E.refillInterval),
+    ]);
+
+    // Location and time
+    const loc = card('Location and time',
+      h('p', { class: 'hint' }, 'The location is only needed for sunrise and sunset events. Decimal degrees: north and ' +
+                                 'east are positive, south and west negative. Both 0 means not set.'));
+    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude)].filter(Boolean)) {
+      this.rows.push(r);
+      loc.appendChild(r);
+    }
+    this.timeRows = [];
+    const add = (label, fn) => this.timeRows.push(boundRow(loc, label, fn));
+    add('Time zone', () => {
+      const t = parseDeviceTime(store.text(E.deviceTime));
+      return t ? `UTC${t.offset}, set in the YAML (or by Home Assistant)` : 'Set in the YAML (or by Home Assistant)';
+    });
+    add('Clock', () => {
+      if (store.bool(E.clockValid) === false) return 'Not set';
+      const age = store.num(E.clockAge);
+      return [store.text(E.timeSource), isNaN(age) ? '' : `synced ${formatDuration(age * 60) || 'just now'} ago`]
+        .filter(Boolean).join(', ');
+    });
+
+    // Device
+    const dev = card('Device');
+    const d = (label, fn) => this.timeRows.push(boundRow(dev, label, fn));
+    d('Name', () => store.title || location.hostname);
+    d('Address', () => location.host);
+    if (store.has(E.wifiNetwork)) d('Wi-Fi network', () => store.text(E.wifiNetwork));
+    if (store.has(E.wifiSignal)) {
+      d('Signal', () => {
+        const s = store.num(E.wifiSignal);
+        return isNaN(s) ? '' : `${s} dBm (${s >= -60 ? 'good' : s >= -70 ? 'fair' : 'weak'})`;
+      });
+    }
+    d('Firmware', () => store.text(E.firmware));
+    dev.appendChild(h('p', { class: 'hint' }, 'Wi-Fi, the name and the time zone are set in your YAML configuration. ' +
+                                              'Diagnostics shows every address and the live log.'));
+
+    append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev));
+    this.update();
+  },
+
+  update() {
+    for (const r of this.rows) r._update();
+    for (const u of this.timeRows) u();
+  },
+};
+
+// ---- pages/maintenance.js ----
+// Maintenance: calibrating the tray positions, the servo's pulse range, recovering the tray position, and the
+// owner-approved debugging edit of the 24 h count (DESIGN.md section 13, 2026-10-14). Every step is a request the
+// device carries out; feeds are refused while calibration mode is on (the device's own rule).
+
+PAGES.maintenance = {
+  mount(root) {
+    this.keys = {};
+    this.rows = [];
+    this.busy = false;
+    const parts = [];
+
+    if (store.has(E.calibrationMode)) {
+      this.calStatus = h('p', { class: 'cal-status' });
+      this.calStart = h('button', { class: 'btn btn-primary', onclick: () => this.startCalibration() }, 'Start calibration');
+      this.calFinish = h('button', { class: 'btn btn-primary', onclick: finishCalibration }, 'Finish and save');
+      this.slots = h('div', { class: 'slot-picker', role: 'group', 'aria-label': 'Slot to adjust' },
+        [0, 1, 2, 3, 4, 5, 6].map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
+          onclick: () => this.pickSlot(i) }, String(i))));
+      this.offsetValue = h('span', { class: 'offset-value', 'aria-live': 'polite' });
+      const nudge = (delta, text) => h('button', { class: 'btn', 'aria-label': `Offset ${text}`, onclick: () => this.nudge(delta) }, text);
+      this.workArea = h('div', { class: 'cal-work' },
+        h('div', { class: 'form-label' }, 'Slot'), this.slots,
+        h('div', { class: 'form-label' }, 'Offset of this slot'),
+        h('div', { class: 'nudge' }, nudge(-1, '−1°'), nudge(-0.1, '−0.1°'), this.offsetValue,
+          nudge(0.1, '+0.1°'), nudge(1, '+1°')),
+        h('div', { class: 'actions' },
+          this.nextBtn = h('button', { class: 'btn', onclick: () => this.pickSlot(this.slot() + 1) }, 'Next slot'),
+          this.calFinish));
+      const pulses = [setting('Servo min pulse', 'Pulse width for 0°.', E.servoMinPulse),
+                      setting('Servo max pulse', 'Pulse width for 180°. Bigger means longer steps.', E.servoMaxPulse)].filter(Boolean);
+      this.rows.push(...pulses);
+      parts.push(card('Calibration',
+        h('p', { class: 'hint' }, 'Line each slot up with the opening in the base. Fit the tray turned fully clockwise, ' +
+          'with slot 0 (the closed one) on the mark. Feeding is refused until you finish.'),
+        this.calStatus,
+        h('div', { class: 'actions' }, this.calStart),
+        this.workArea,
+        pulses.length ? h('details', { class: 'advanced' },
+          h('summary', {}, 'Servo pulse range (advanced)'),
+          h('p', { class: 'hint' }, 'If the error grows from slot to slot (each needs a bigger offset than the one ' +
+            'before), fix that here first: Servo max pulse changes the step length, Servo min pulse lines up slot 0. ' +
+            'Then fine-tune each slot. The two must stay at least 500 µs apart.'), pulses) : null));
+    }
+
+    // Recovery
+    this.posRow = row('Tray', '');
+    parts.push(card('Tray position',
+      this.posRow.row,
+      h('p', { class: 'hint' }, 'After a power cut in the middle of a feed the feeder no longer knows where the tray ' +
+        'is and stops feeding. Tell it which slot is over the opening, or reload the tray (it turns back to the ' +
+        'closed slot, which is always safe).'),
+      h('div', { class: 'actions' },
+        store.has(E.declarePosition) && store.has(E.declaredPosition)
+          ? h('button', { class: 'btn', onclick: recoverPositionFlow }, 'Declare position') : null,
+        h('button', { class: 'btn', onclick: trayReloadFlow }, 'Tray reload'))));
+
+    // The 24 h count (owner decision 2026-10-14: debugging and recovery only)
+    if (store.has(E.portions24h)) {
+      this.countRow = row('Portions counted in the last 24 h', '');
+      parts.push(card('Daily cap count',
+        this.countRow.row,
+        h('p', { class: 'hint' }, 'The number of portions the daily cap is counting right now. Changing it is for ' +
+          'debugging and recovery: it never feeds or moves the tray, and every change is logged.'),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => this.editCount() }, 'Change the count'))));
+    }
+
+    append(root, ...parts);
+    this.update();
+  },
+
+  slot() {
+    return parseInt(store.text(E.calibrationPosition), 10) || 0;
+  },
+
+  update() {
+    for (const r of this.rows) r._update();
+    const state = store.text(E.trayState);
+    setText(this.posRow.value, state === 'unknown' ? 'Position unknown' : `Slot ${store.num(E.trayPosition)}, ${state}`);
+    if (this.countRow) {
+      const cap = store.num(E.dailyCap);
+      setText(this.countRow.value, `${store.num(E.portions24h)}${isNaN(cap) ? '' : ` (cap ${cap})`}`);
+    }
+    if (!this.calStatus) return;
+    const on = store.bool(E.calibrationMode);
+    setText(this.calStatus, on ? 'Calibration mode is on: the servo follows the slot below.' : 'Calibration mode is off.');
+    this.calStatus.className = on ? 'cal-status cal-on' : 'cal-status';
+    this.calStart.hidden = !!on;
+    this.workArea.hidden = !on;
+    const slot = this.slot();
+    this.slots.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', i === slot ? 'true' : 'false'));
+    this.nextBtn.hidden = slot >= 6;
+    const off = parseFloat(store.get(E.calibrationOffset) ? store.get(E.calibrationOffset).value : NaN);
+    setText(this.offsetValue, isNaN(off) ? '' : `${off > 0 ? '+' : ''}${off.toFixed(1)}°`);
+  },
+
+  async run(task, done) {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await task();
+      if (done) toast(done, 'ok');
+    } catch (err) {
+      toastError(err);
+    } finally {
+      this.busy = false;
+    }
+  },
+
+  async startCalibration() {
+    if (!await confirmDialog({ title: 'Start calibration?',
+      body: 'The servo moves to the tray’s current slot, and every feed is refused until you finish. Scheduled ' +
+            'feeds due meanwhile are skipped.', ok: 'Start' })) return;
+    this.run(() => api.turnAndConfirm(E.calibrationMode, true));
+  },
+
+  pickSlot(i) {
+    if (i < 0 || i > 6) return;
+    this.run(() => api.setAndConfirm(E.calibrationPosition, String(i)));
+  },
+
+  nudge(delta) {
+    const e = store.get(E.calibrationOffset);
+    if (!e) return;
+    const lo = parseFloat(e.min_value), hi = parseFloat(e.max_value);
+    const next = Math.round(Math.min(hi, Math.max(lo, parseFloat(e.value) + delta)) * 10) / 10;
+    this.run(() => api.setAndConfirm(E.calibrationOffset, next));
+  },
+
+  async editCount() {
+    const e = store.get(E.portions24h);
+    const input = h('input', { type: 'number', class: 'input input-num', min: e.min_value, max: e.max_value, step: 1,
+                               value: store.num(E.portions24h), 'aria-label': 'Portions counted' });
+    const ok = await formDialog({
+      title: 'Change the 24 h count',
+      body: [h('p', {}, 'Lower: the oldest counted feeds are forgotten, so more feeds are allowed. Higher: an ' +
+                        '"adjustment" is added to the feed history, so fewer are allowed. Nothing is fed.'),
+             field('Portions counted', input)],
+      ok: 'Change',
+      validate: () => {
+        const v = Number(input.value);
+        return Number.isInteger(v) && v >= +e.min_value && v <= +e.max_value ? '' : `A whole number from ${e.min_value} to ${e.max_value}.`;
+      },
+    });
+    if (!ok) return;
+    this.run(() => api.setAndConfirm(E.portions24h, Number(input.value)), 'Count changed');
   },
 };
 
