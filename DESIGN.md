@@ -293,8 +293,9 @@ path.
     correct device clock, and lets a PLC push time on every connect.
   - `always`: accepted any time.
   - `off`: rejected.
-- **Home Assistant time** is an opt-in source (off by default), useful when the
-  internet is down but HA is up. With NTP and HA both enabled, last sync wins;
+- **Home Assistant time** is a second source, enabled in both examples (decision
+  2026-10-14), useful when the internet is down but HA is up. By default HA also
+  pushes its timezone; a build can pin its own (packages/time_homeassistant.yaml). With NTP and HA both enabled, last sync wins;
   the policy gate applies only to BLE.
 - **Timezone:** a build-time YAML substitution (IANA name or POSIX string), or
   pushed by Home Assistant when the HA time package is enabled. **Finding
@@ -507,7 +508,7 @@ Importable with ESPHome `packages:` / `github://`.
 - No burst/fry mode.
 - Public domain (The Unlicense), AI disclosure in repo (licence decided 2026-10-14; was MIT).
 - Time: NTP is the truth; BLE `SET_TIME` is a fallback gated by
-  `ble_time_policy`; HA time opt-in; time never restored from flash.
+  `ble_time_policy`; HA time a second source (on in the examples since 2026-10-14); time never restored from flash.
 - No external hardware (RTC, sensors). Optional push button supported.
 - Features are YAML packages and build options, documented in comments.
 - **No catch-up feeding (2026-10-13, replaces "configurable grace, default off"):**
@@ -536,6 +537,8 @@ Importable with ESPHome `packages:` / `github://`.
   fed (2026-10-14; the safe side).
 - Polar days (no sunrise or sunset): sun events fall back to 06:00 / 18:00 plus
   their offset, with a fault shown (owner, 2026-10-14; was "skip").
+- The Home Assistant time package ships enabled in both examples (owner,
+  2026-10-14), after it was seen setting the clock on hardware.
 - BLE security: application-layer authentication with a shared key (protocol 2),
   plus LE Secure Connections pairing when the client pairs (owner, 2026-10-14;
   section 10).
@@ -551,9 +554,9 @@ Importable with ESPHome `packages:` / `github://`.
 4. Confirm ESPHome `esp32_ble_server`, pairing, multi-`time:` and conditional
    package behaviour against current docs; check flash size.
 5. Check the Printables model licence before shipping derived files.
-6. Confirm whether the HA-time package should ship in v1.
+6. ~~HA-time package in v1.~~ Decided 2026-10-14: enabled in both examples.
 
-## 15. Implementation status (v0.4.0, 2026-10-14)
+## 15. Implementation status (v0.4.1, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -646,6 +649,10 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
   the saved tray state from earlier versions is discarded).
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.4.1 (HA time on by default, 2026-10-14):
+- `examples/basic.yaml` and `examples/ble.yaml` include the
+  `time_homeassistant` package (it was commented out). No code change.
 
 Changes in v0.4.0 (BLE protocol 2: authentication, 2026-10-14):
 - Every BLE write must be authenticated with the shared `ble_key` (section 10,

@@ -132,14 +132,14 @@ you switch a feature on or off by adding or removing one line.
 | `web_server` | a dashboard at `http://precision-feeder.local` | recommended; leave it out to save memory, or turn on its password on a shared network |
 | `status_led` | colour-coded state on the board's LED | recommended if your board has the LED |
 | `button` | a physical button: short press feeds (or reloads when empty), long press toggles calibration | only if you fitted one |
-| `time_homeassistant` | Home Assistant as a second clock source | if you use Home Assistant: keeps the clock right when the internet is down but Home Assistant is up |
+| `time_homeassistant` | Home Assistant as a second clock source | **on in both examples**: keeps the clock right when the internet is down but Home Assistant is up (harmless without Home Assistant). It also uses Home Assistant's timezone unless you pin yours (see the package's comment) |
 | `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](docs/PROTOCOL.md)) | only if a PLC, app or script will talk to it over BLE. Costs about 320 KB of flash and 30 KB of RAM |
 | `diagnostics` | free memory and loop time sensors | only for troubleshooting or development |
 
 **Two ready-made configurations** are in [`examples/`](examples/):
 
-- [`basic.yaml`](examples/basic.yaml): Home Assistant and the web dashboard, no
-  BLE. The right start for most people.
+- [`basic.yaml`](examples/basic.yaml): Home Assistant (including its time) and the
+  web dashboard, no BLE. The right start for most people.
 - [`ble.yaml`](examples/ble.yaml): the same plus the BLE interface and
   diagnostics, for a feeder driven by a PLC or other BLE controller.
 
@@ -163,7 +163,6 @@ your packages and settings on top:
 packages:
   base: !include ble.yaml                       # or basic.yaml
   button: !include ../packages/button.yaml      # extra packages
-  time_ha: !include ../packages/time_homeassistant.yaml
 
 substitutions:                                  # your settings (see below)
   timezone: Europe/London
