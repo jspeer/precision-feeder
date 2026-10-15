@@ -20,8 +20,8 @@ in [docs/BENCH.md](docs/BENCH.md). First written 2026-10-13.
   AGPL-3.0) was read only to learn the mechanism's geometry and behaviour. No
   code is copied. The README credits it and the Printables model
   (<https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2>).
-  The model's own licence should be checked before the repo ships any
-  derived files.
+  The model is CC BY-NC-SA 4.0 (checked 2026-10-14); the repository ships
+  none of its files.
 
 ## 1. Goals and non-goals
 
@@ -521,7 +521,10 @@ precision-feeder/
 3. ~~Servo (GPIO1) and button (GPIO2) pins.~~ Done on the bench (docs/BENCH.md).
 4. ~~ESPHome BLE server, pairing, two time sources, packages, flash size.~~
    Checked in ESPHome's source and on the bench (section 10, docs/BENCH.md).
-5. Check the Printables model licence before shipping derived files.
+5. ~~Check the Printables model licence.~~ Checked 2026-10-14: CC BY-NC-SA 4.0
+   (attribution, non-commercial, share-alike). The repository ships none of the
+   model's files, credits the author, and the README states the model's licence;
+   `.gitignore` keeps 3MF/STL files out.
 6. ~~HA-time package in v1.~~ Decided 2026-10-14: enabled in both examples.
 
 ## 15. Implementation status (v1.0.0)

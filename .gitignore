@@ -8,3 +8,8 @@ __pycache__/
 CLAUDE.md
 # Per-machine ESPHome configs (personal overrides, debug builds)
 examples/local*.yaml
+# The printed model's files (CC BY-NC-SA 4.0, not this repository's licence) never go in the repo
+*.3mf
+*.stl
+*.STL
+*.step

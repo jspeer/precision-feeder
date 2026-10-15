@@ -378,5 +378,12 @@ to Home Assistant and the web UI.
 ## Licence
 
 Released into the public domain under [The Unlicense](LICENSE). Do anything you
-like with it. This covers this repository's own files only; the Printables model
-has its own licence.
+like with it. This covers this repository's own files only.
+
+The feeder itself, the [Printables model](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2)
+by FlyingGyroscope, is licensed separately under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): credit the
+author, no commercial use, and share remixes under the same licence. This
+repository contains none of its files (no STL, 3MF or images); if you print,
+remix or sell anything made from the model, its licence applies to that, not this
+one.
