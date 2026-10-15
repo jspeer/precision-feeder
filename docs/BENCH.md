@@ -26,6 +26,8 @@ framework, WiFi, API, web server and status LED all enabled.
 | v0.2.1 rebuilt on the dev machine, BLE build | 1,297,611 B (70.7%) | 143,383 B (42.0%) |
 | v1.0.1, no BLE (`basic.yaml`) | 979,947 B (53.4%) | 115,055 B (33.7%) |
 | v1.0.1, BLE build (`ble.yaml`) | 1,309,291 B (71.4%) | 145,903 B (42.7%) |
+| v1.1.0 in progress (M7), no BLE (`basic.yaml`) | 1,025,135 B (55.9%) | 115,703 B (33.9%) |
+| v1.1.0 in progress (M7), BLE build (`ble.yaml`) | 1,358,551 B (74.0%) | 146,775 B (42.9%) |
 
 - **BLE costs about 318 KB of flash and about 31 KB of static RAM.**
 - **Flash is not a problem.** With BLE the app is 72% of its OTA slot, leaving
@@ -272,3 +274,39 @@ layout: no warnings; flash 979,947 B (53.4%, no BLE) and 1,309,291 B (71.4%,
 BLE) of the 1.8 MB app slot; static RAM 33.7% / 42.7%, the same as 1.0.0. Not
 watched on hardware: the "Clock set by ..." lines now being DEBUG (they come
 once per 15-minute sync; the change is a log level only).
+
+## The web app on hardware (2026-10-15, firmware 1.1.0 in progress, after M7)
+
+A second board, new from the box: an ESP32-S3 with 4 MB embedded flash and 2 MB PSRAM (the same chip as the
+Waveshare ESP32-S3-Zero H4R2), a bare MG90S servo on GPIO1, no printed tray. `examples/ble.yaml` built with
+ESPHome 2026.9.1 and flashed over USB (native USB Serial/JTAG). Joined a private IPv4 network on another subnet
+from the computer used for testing.
+
+- **Boot:** no saved data (expected on a new board), Wi-Fi connected, the clock set by NTP about 20 s after
+  boot, scheduler running.
+- **Serving:** the index page is ESPHome's, loading `/0.css` and `/0.js`; the app arrives gzipped (33 KB of
+  script, 5 KB of styles), with no internet involved. `/events` sends the config ping and every entity.
+- **Every page in a browser on the device:**
+  - Feed now (the servo moved, the dial went to the next slot, the guard went from "Ready to feed" to "Too soon").
+  - An immediate second feed, refused with "too soon".
+  - An event edited and then restored (ordered writes, each confirmed, the result checked against Schedule
+    Data); Today's Feeds showed the edited event as next.
+  - A one-shot in the past refused by the feeder, one for the next day added, then cleared.
+  - The calibration walkthrough (start, slots 3 and 4, nudges of 1 and 0.1 degree, back to 0, finish and
+    save), with the servo following each step.
+  - Configuration, Maintenance and Diagnostics showing the device's values.
+  - Bluetooth showing the BLE build waiting for a client, with counters at zero and the activity endpoint
+    answering.
+  - The "schedule needs more portions than the tray holds" banner when a test event made it true.
+- **Response times:** a switch change appears on `/events` about 0.1 to 0.2 s after the request. An event edit
+  (editor, time, portions, enabled, final check) took about 4 s.
+- **Found:**
+  - Heap fragmentation is reported with decimals; it is now rounded on the page.
+  - ESPHome refuses a POST with no body and no Content-Length (411); browsers always send the length, so the
+    app is not affected.
+- **Seen once, not reproduced:** in the first calibration run, the page still showed calibration on several
+  seconds after Finish, with no confirmation toast. In two later runs both came within 0.1 s. To watch in M9.
+- **Not checked:** BLE with a client. The test machine's shell could not use Bluetooth, so the BLE selftest,
+  the client details and the activity log with real entries still need a run from a computer that can.
+  Also not checked: IPv6 (M8), web auth on the device, and a phone.
+

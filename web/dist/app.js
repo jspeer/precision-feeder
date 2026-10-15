@@ -2139,8 +2139,8 @@ PAGES.diagnostics = {
       const m = (label, fn) => this.updaters.push(boundRow(mem, label, fn));
       m('Free heap', kb(E.freeHeap));
       m('Largest free block', kb(E.largestBlock));
-      m('Fragmentation', () => isNaN(store.num(E.fragmentation)) ? '' : `${store.num(E.fragmentation)} %`);
-      m('Longest loop', () => isNaN(store.num(E.loopTime)) ? '' : `${store.num(E.loopTime)} ms`);
+      m('Fragmentation', () => isNaN(store.num(E.fragmentation)) ? '' : `${Math.round(store.num(E.fragmentation))} %`);
+      m('Longest loop', () => isNaN(store.num(E.loopTime)) ? '' : `${Math.round(store.num(E.loopTime))} ms`);
     }
 
     // Log
