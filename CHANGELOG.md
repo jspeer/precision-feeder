@@ -6,7 +6,7 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 1.1.0: local first (in progress)
+## 1.1.0: local first (2026-10-15)
 
 The built-in web app, so the feeder is fully usable from a browser with no Home
 Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-local-first.md)).
@@ -78,6 +78,8 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
     editor changed a different event.
   - Page headings and titles for screen readers, focus moves to the page on navigation, and every Set, Press and
     switch control is named after its setting.
+- Docs: the README leads with the local-first idea; new [docs/WEB_UI.md](docs/WEB_UI.md); bench results for the
+  web app, BLE diagnostics, IPv6 and web auth in docs/BENCH.md.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,

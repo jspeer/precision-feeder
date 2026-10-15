@@ -348,3 +348,24 @@ Measured on the same board from one browser page plus extra `/events` connection
   online. In practice about four pages can stay connected at once. Since M9 a page hidden for 30 s releases its
   connection.
 
+## Web auth on hardware, and the 1.1.0 bench status (2026-10-15)
+
+A test build of the 1.1.0 firmware with `web_server: auth:` added (the package keeps it commented out), updated
+over Wi-Fi, then the normal build put back.
+
+- With auth on (basic, ESPHome 2026.9.1's default): every route answered 401 without credentials or with a wrong
+  password, and 200 with the right ones. That includes the index, the app files, writes, `/events` (which
+  streamed every entity) and the BLE activity endpoint `/feeder/ble` (registered with `add_handler()`, so it
+  sits behind auth as intended).
+- 1.1.0 has been checked on hardware:
+  - every page;
+  - BLE with a client;
+  - a dual-stack network with IPv6, and mDNS;
+  - encrypted OTA;
+  - several browsers at once;
+  - web auth.
+- **Still for the owner to check** (they need changes to the home network or Home Assistant):
+  - an IPv4-only network;
+  - an IPv6-only network with a static IPv4 address;
+  - Home Assistant connected and adopting the feeder, alongside the web app.
+

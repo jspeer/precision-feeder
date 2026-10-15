@@ -10,10 +10,16 @@ servo-driven tray.
 
 **This firmware:** <https://github.com/jspeer/precision-feeder>
 
-It runs the feeder on its own: the schedule lives on the device, so the fish
-are fed with no Home Assistant, no internet and no app, once the clock is set.
-On top of that you get full **Home Assistant** control, a **web dashboard**, and
-an optional **Bluetooth (BLE) interface** for a PLC or another controller.
+**Local first.** The feeder is a complete appliance on its own: the schedule lives
+on the device, and its **built-in web app** runs the whole feeder from any browser,
+on a computer or a phone. No Home Assistant, no internet, no app to install, no
+account. Open `http://precision-feeder.local` (or its IP address) on your own
+network and you have the dashboard, the schedule, the settings, calibration and
+diagnostics. Nothing is loaded from the internet: the app is stored in the firmware.
+
+Everything else is optional, on top: full **Home Assistant** control, and a
+**Bluetooth (BLE) interface** for a PLC or another controller. Leave them out
+and nothing is missing. See the [web app guide](docs/WEB_UI.md).
 
 It does everything the
 [original Arduino firmware](https://github.com/FlyingGyroscope/PrecisionFeederRev2)
@@ -21,10 +27,11 @@ does, then adds minute-accurate scheduling with sunrise and sunset events,
 three switchable schedule profiles, and a feed guard that protects the fish
 from being over-fed.
 
-> **Status: version 1.0.1, tested on a bench build.** One complete feeder
+> **Status: version 1.1.0, tested on a bench build.** One complete feeder
 > (Waveshare ESP32-S3-Zero, MG90S servo) has been calibrated and tested on real
-> hardware: feeding, schedules, power cuts, Home Assistant and BLE. It has not
-> yet had months of daily use. Test it on your own build, watch it for a few
+> hardware: feeding, schedules, power cuts, Home Assistant and BLE. The 1.1.0 web
+> app was tested on a second ESP32-S3 board with a bare servo
+> ([docs/BENCH.md](docs/BENCH.md)). It has not yet had months of daily use. Test it on your own build, watch it for a few
 > days, and do not rely on it as the only way your animals get fed.
 
 > **Written with AI.** This project was designed and written with the assistance
@@ -230,6 +237,12 @@ packages, where they override what the packages set.
 
 ## Everyday use
 
+**In the web app** (`http://precision-feeder.local`): the Dashboard has Feed now, Tray
+reload and Hold; the Schedule page edits profiles, events and one-shot feeds;
+Maintenance calibrates and recovers the tray position. The
+[web app guide](docs/WEB_UI.md) walks through every page. The same controls exist as
+entities, for Home Assistant:
+
 | To | Use |
 |---|---|
 | Feed now | **Feed One Portion**, or **Manual Portions** + **Feed Selected Portions**, or a short button press |
@@ -365,6 +378,7 @@ over-fed tank:
 
 | Document | For |
 |---|---|
+| [docs/WEB_UI.md](docs/WEB_UI.md) | the built-in web app, page by page |
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | building schedule profiles |
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | lining up the tray |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the BLE protocol, for controller and app developers |

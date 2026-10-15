@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **firmware v1.0.1, tested on a bench build** (section 15). This is the
+Status: **firmware v1.1.0, tested on a bench build** (section 15). This is the
 current design; history is in [CHANGELOG.md](CHANGELOG.md) and hardware results
 in [docs/BENCH.md](docs/BENCH.md). First written 2026-10-13.
 
@@ -30,6 +30,8 @@ Goals
   does is supported (section 1.1), then extended.
 - ESPHome firmware (ESP-IDF framework) for the Precision Feeder Rev2 hardware.
 - On-board scheduler, so feeding continues with no HA, PLC or network.
+- **Local first (1.1.0):** a complete built-in web app, served from the firmware, so the
+  feeder is usable from any browser with no HA, internet or app.
 - Three control planes onto one core: on-board schedule, Home Assistant (native
   API), and BLE GATT (for a PLC/bridge or any other client).
 - One firmware serves both deployments (HA-driven and BLE/PLC-driven).
@@ -501,6 +503,7 @@ precision-feeder/
   docs/SCHEDULING.md   building schedule profiles
   docs/CALIBRATION.md  setup and calibration walkthrough
   docs/BENCH.md        hardware test results
+  docs/WEB_UI.md       the built-in web app, page by page
   docs/plans/          release plans: milestones and the decisions behind them
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
@@ -639,7 +642,7 @@ precision-feeder/
    continuously). A complete fix needs a firmware change, for example a write-only text entity taking a whole
    event at once ("A 2 1c405/2/7e"). Not planned yet (2026-10-15).
 
-## 15. Implementation status (v1.0.1)
+## 15. Implementation status (v1.1.0)
 
 Everything in sections 3 to 10 is built. On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
