@@ -71,3 +71,67 @@ function parseLogLine(line) {
   if (!m) return { level: '', tag: '', text: clean };
   return { level: m[1], tag: m[2].replace(/:\d+$/, ''), text: m[3] };
 }
+
+/** Today's Feeds: "08:30 x1 fed; 17:30 x2 next one-shot" -> {items: [{hour, minute, time, portions, status,
+ *  oneshot}], note}. With none, items is empty and note is the reason ("fast day", ...) or ''. null if unreadable. */
+function parseTodaysFeeds(text) {
+  const t = String(text || '').trim();
+  const none = /^none(?: \((.*)\))?$/.exec(t);
+  if (none) return { items: [], note: none[1] || '' };
+  if (t === 'clock not set') return { items: [], note: 'clock not set' };
+  const items = [];
+  for (const part of t.split(';').map(s => s.trim()).filter(Boolean)) {
+    if (part === '...') continue;
+    const m = /^(\d{2}):(\d{2}) x(\d+) (fed|skipped|due|next|later|held)( one-shot)?$/.exec(part);
+    if (!m) return null;
+    items.push({ hour: +m[1], minute: +m[2], time: `${m[1]}:${m[2]}`, portions: +m[3], status: m[4], oneshot: !!m[5] });
+  }
+  return { items, note: '' };
+}
+
+/** Recent Feeds: "10-15 08:30 x1 schedule; unknown time x1 button" -> [{month, day, hour, minute, portions,
+ *  source}] (month null for "unknown time"). Unreadable entries are skipped. */
+function parseRecentFeeds(text) {
+  const out = [];
+  for (const part of parseList(text)) {
+    const m = /^(?:(\d{2})-(\d{2}) (\d{2}):(\d{2})|unknown time) x(\d+) (.+)$/.exec(part);
+    if (!m) continue;
+    out.push({ month: m[1] ? +m[1] : null, day: m[2] ? +m[2] : null, hour: m[3] ? +m[3] : null,
+               minute: m[4] ? +m[4] : null, portions: +m[5], source: m[6] });
+  }
+  return out;
+}
+
+/** Last Feed: "Thu 2026-10-15 09:28 (ESPHome)" -> {when: parts, source}; "never" / "clock was not set" -> {when:
+ *  null, source: null, note}. */
+function parseLastFeed(text) {
+  const t = String(text || '').trim();
+  const when = parseLocalDateTime(t);
+  if (!when) return { when: null, source: null, note: t };
+  const m = /\(([^)]*)\)$/.exec(t);
+  return { when, source: m ? m[1] : null, note: '' };
+}
+
+/** The words a feed source has in the device's texts, for people. */
+function sourceLabel(source) {
+  return { schedule: 'schedule', ESPHome: 'web or Home Assistant', ble: 'Bluetooth', button: 'the button',
+           'one-shot': 'one-shot', adjustment: 'count adjusted' }[source] || source || '';
+}
+
+/** "today", "tomorrow", "yesterday" or null, for a device date against the device's today. */
+function relativeDay(parts, today) {
+  if (!parts || !today) return null;
+  const a = Date.UTC(parts.year, parts.month - 1, parts.day), b = Date.UTC(today.year, today.month - 1, today.day);
+  const diff = Math.round((a - b) / 86400000);
+  return { 0: 'today', 1: 'tomorrow', '-1': 'yesterday' }[diff] || null;
+}
+
+/** Hold: "none" -> null; "until cancelled" -> {until: null}; "until Thu 2026-10-15 17:30" -> {until: parts};
+ *  "active (clock not set)" -> {until: null, note}. */
+function parseHold(text) {
+  const t = String(text || '').trim();
+  if (!t || t === 'none') return null;
+  if (t === 'until cancelled') return { until: null, note: '' };
+  const until = parseLocalDateTime(t.replace(/^until /, ''));
+  return until ? { until, note: '' } : { until: null, note: t };
+}

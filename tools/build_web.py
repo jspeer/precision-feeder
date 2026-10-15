@@ -33,6 +33,7 @@ SOURCES = [
     "api.js",        # writes, one at a time, and waiting for the device's echo
     "ui.js",         # DOM helpers, icons, dialogs, toasts, form controls
     "banners.js",    # the warning banner
+    "pages/dashboard.js",
     "pages/diagnostics.js",
     "app.js",        # the shell: header, tabs, routing; starts everything
 ]

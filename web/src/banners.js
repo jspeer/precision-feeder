@@ -19,11 +19,50 @@ async function trayReloadFlow() {
   api.press(E.trayReload).then(() => toast('Tray going back to the closed slot', 'ok'), toastError);
 }
 
+/** After a power cut mid-feed: say which slot the tray is really on (Declared Tray Position, then Declare). */
+async function recoverPositionFlow() {
+  let chosen = null;
+  const buttons = [0, 1, 2, 3, 4, 5, 6].map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
+    onclick: () => {
+      chosen = i;
+      for (const b of buttons) b.setAttribute('aria-pressed', b === buttons[i] ? 'true' : 'false');
+    } }, String(i)));
+  const ok = await confirmDialog({
+    title: 'Where is the tray?',
+    body: h('div', {},
+      h('p', {}, 'Look at the feeder and choose the slot that is over the opening. Slot 0 is the closed one; ' +
+                 'each feed moves one slot further, up to 6.'),
+      h('div', { class: 'slot-picker' }, buttons),
+      h('p', {}, 'Not sure? Cancel and use Tray reload instead: it returns to the closed slot, which is always safe.')),
+    ok: 'Set position',
+  });
+  if (!ok) return;
+  if (chosen === null) {
+    toast('Choose a slot first', 'error');
+    return;
+  }
+  try {
+    await api.setAndConfirm(E.declaredPosition, chosen);
+    await api.press(E.declarePosition);
+    await api.waitFor(E.trayState, e => e.value !== 'unknown', 3500);
+    toast(`Tray set to slot ${chosen}`, 'ok');
+  } catch (err) {
+    toastError(err);
+  }
+}
+
 /** Turn calibration mode off, which saves the offsets. */
 function finishCalibration() {
   api.turn(E.calibrationMode, false)
     .then(() => api.waitFor(E.calibrationMode, x => x.value === false))
     .then(() => toast('Calibration saved', 'ok'), toastError);
+}
+
+/** A hold in words: "Until you resume it", "Until Sat, Oct 17 2:28 PM". */
+function holdWords(hold) {
+  if (hold.until) return `Until ${formatDate(hold.until)} ${formatClock(hold.until.hour, hold.until.minute)}`;
+  if (hold.note) return hold.note[0].toUpperCase() + hold.note.slice(1);
+  return 'Until you resume it';
 }
 
 /** The faults the banners below already explain, so they are not listed twice. */
@@ -40,8 +79,8 @@ function currentBanner() {
     return { kind: 'danger', icon: 'alert', title: 'Tray position unknown',
              text: 'Feeding is off until you tell the feeder where the tray is, or reload it.',
              actions: [
-               store.has(E.declarePosition) && PAGES.maintenance
-                 ? { label: 'Recover position', run: () => { location.hash = '#maintenance/recover'; } } : null,
+               store.has(E.declarePosition) && store.has(E.declaredPosition)
+                 ? { label: 'Recover position', run: recoverPositionFlow } : null,
                { label: 'Tray reload', run: trayReloadFlow },
              ] };
   }
@@ -62,10 +101,10 @@ function currentBanner() {
              text: `${store.num(E.portionsRemaining)} left. Refill before ${store.text(E.nextFeed)}.`,
              actions: [{ label: 'Tray reload', run: trayReloadFlow }] };
   }
-  const hold = store.text(E.hold);
-  if (hold && hold !== 'none') {
+  const hold = parseHold(store.text(E.hold));
+  if (hold) {
     return { kind: 'info', icon: 'pause', title: 'Scheduled feeding on hold',
-             text: `${hold[0].toUpperCase()}${hold.slice(1)}. Missed feeds are skipped, not made up.`,
+             text: `${holdWords(hold)}. Missed feeds are skipped, not made up.`,
              actions: store.has(E.cancelHold) ? [{ label: 'Resume now', run: () => api.press(E.cancelHold)
                .then(() => toast('Scheduled feeding resumed', 'ok'), toastError) }] : [] };
   }

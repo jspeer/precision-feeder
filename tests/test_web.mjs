@@ -13,7 +13,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8');
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
-  formatDuration, parseLogLine };`, ctx);
+  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -64,4 +64,48 @@ test('log lines', () => {
   assert.deepEqual(plain(l), { level: 'I', tag: 'precision_feeder', text: 'Feeding 1 portion(s)' });
   assert.equal(P.parseLogLine('[W][schedule_editor]: Days not understood').level, 'W');
   assert.deepEqual(plain(P.parseLogLine('plain text')), { level: '', tag: '', text: 'plain text' });
+});
+
+test("Today's Feeds", () => {
+  const t = P.parseTodaysFeeds('08:00 x1 fed; 12:00 x1 next one-shot; 20:00 x2 later');
+  assert.equal(t.items.length, 3);
+  assert.deepEqual(plain(t.items[1]), { hour: 12, minute: 0, time: '12:00', portions: 1, status: 'next', oneshot: true });
+  assert.equal(t.items[2].portions, 2);
+  for (const s of ['fed', 'skipped', 'due', 'next', 'later', 'held']) assert.equal(P.parseTodaysFeeds(`09:15 x1 ${s}`).items[0].status, s);
+  assert.deepEqual(plain(P.parseTodaysFeeds('none')), { items: [], note: '' });
+  assert.equal(P.parseTodaysFeeds('none (fast day)').note, 'fast day');
+  assert.equal(P.parseTodaysFeeds('none (not a feeding day)').note, 'not a feeding day');
+  assert.equal(P.parseTodaysFeeds('clock not set').note, 'clock not set');
+  assert.equal(P.parseTodaysFeeds('08:00 x1 fed; ...').items.length, 1);
+  assert.equal(P.parseTodaysFeeds('something else'), null);
+});
+
+test('Recent Feeds and Last Feed', () => {
+  const r = P.parseRecentFeeds('10-15 08:30 x1 schedule; unknown time x2 button; 10-14 17:00 x1 one-shot');
+  assert.equal(r.length, 3);
+  assert.deepEqual(plain(r[0]), { month: 10, day: 15, hour: 8, minute: 30, portions: 1, source: 'schedule' });
+  assert.equal(r[1].month, null);
+  assert.equal(r[1].source, 'button');
+  assert.equal(r[2].source, 'one-shot');
+  assert.deepEqual(plain(P.parseRecentFeeds('none')), []);
+  const l = P.parseLastFeed('Thu 2026-10-15 09:28 (ESPHome)');
+  assert.equal(l.source, 'ESPHome');
+  assert.equal(l.when.time, '09:28');
+  assert.equal(P.parseLastFeed('never').note, 'never');
+  assert.equal(P.sourceLabel('ble'), 'Bluetooth');
+});
+
+test('relative days', () => {
+  const today = { year: 2026, month: 12, day: 31 };
+  assert.equal(P.relativeDay({ year: 2027, month: 1, day: 1 }, today), 'tomorrow');
+  assert.equal(P.relativeDay({ year: 2026, month: 12, day: 31 }, today), 'today');
+  assert.equal(P.relativeDay({ year: 2026, month: 12, day: 30 }, today), 'yesterday');
+  assert.equal(P.relativeDay({ year: 2027, month: 1, day: 5 }, today), null);
+});
+
+test('Hold', () => {
+  assert.equal(P.parseHold('none'), null);
+  assert.deepEqual(plain(P.parseHold('until cancelled')), { until: null, note: '' });
+  assert.equal(P.parseHold('until Sun 2026-10-18 14:28').until.hour, 14);
+  assert.equal(P.parseHold('active (clock not set)').note, 'active (clock not set)');
 });

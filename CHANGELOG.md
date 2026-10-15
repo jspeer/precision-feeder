@@ -32,7 +32,13 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
   - Light and dark follow the browser; phones get a bottom tab bar.
   - A warning banner for the most important problem, with what to do.
   - A Diagnostics page: system, network, memory, live log, and every entity with a control.
-  - The Dashboard, Schedule, Configuration, Maintenance and Bluetooth pages follow.
+  - Dashboard:
+    - the tray as a dial of its seven slots, the next feed and runway;
+    - Feed now, with the guard's current answer, reporting the device's own result;
+    - today's feeds, status, recent feeds;
+    - hold with durations, resume, tray reload, and stop while moving.
+  - Recovering the tray position after a power cut: pick the slot you see, from the banner.
+  - The Schedule, Configuration, Maintenance and Bluetooth pages follow.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,
