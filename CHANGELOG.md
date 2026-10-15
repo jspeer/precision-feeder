@@ -6,6 +6,12 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 1.0.1: quieter log (2026-10-15)
+
+- "Clock set by NTP / Home Assistant / BLE" is logged at DEBUG instead of INFO.
+  It was added to diagnose the Home Assistant time source; at INFO it appeared
+  twice every 15 minutes. Turn on debug logging (`logger: level: DEBUG`) to see it.
+
 ## 1.0.0: first release (2026-10-14)
 
 The first release: everything in this changelog, bench-tested on one complete

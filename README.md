@@ -19,7 +19,7 @@ does, then adds minute-accurate scheduling with sunrise and sunset events,
 three switchable schedule profiles, and a feed guard that protects the fish
 from being over-fed.
 
-> **Status: version 1.0.0, tested on a bench build.** One complete feeder
+> **Status: version 1.0.1, tested on a bench build.** One complete feeder
 > (Waveshare ESP32-S3-Zero, MG90S servo) has been calibrated and tested on real
 > hardware: feeding, schedules, power cuts, Home Assistant and BLE. It has not
 > yet had months of daily use. Test it on your own build, watch it for a few

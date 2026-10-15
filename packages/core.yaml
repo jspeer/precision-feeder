@@ -10,7 +10,7 @@
 substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
-  fw_version: "1.0.0"
+  fw_version: "1.0.1"
 
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
   servo_pin: GPIO1             # servo signal wire
