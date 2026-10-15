@@ -8,6 +8,10 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 ## Unreleased
 
+- Refactor (no behaviour change): the feed history is handled as records
+  (`HistoryEntry`, newest first) through four helpers, instead of five parallel
+  arrays shifted and indexed by hand; the saved layout is unchanged. The rule for
+  which feeds the daily cap counts lives in one place (`counts_today_`).
 - Python client split into the `precision_feeder_client` package: `protocol`
   (pure Python, standard library only, for reuse in other clients such as a PLC
   bridge), `client` (bleak), `selftest` and `cli`. `tools/precision_feeder_ble.py`

@@ -242,9 +242,11 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
 
   // Feed history stamped with an unknown time cannot be aged after a reboot: drop it.
   for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
-    this->hist_this_boot_[i] = false;
-    if (this->state_.hist_n[i] != 0 && this->state_.hist_ts[i] == 0)
-      this->state_.hist_n[i] = 0;
+    HistoryEntry e = this->history_(i);
+    e.this_boot = false;
+    if (e.epoch == 0)
+      e.portions = 0;
+    this->set_history_(i, e);
   }
 
   if (this->state_.moving_to != NO_MOVE) {
@@ -402,9 +404,11 @@ void FeederCore::abort_motion_() {
 void FeederCore::uncount_portions_(uint8_t portions) {
   // The newest history entry is the feed being cut short (it was recorded, with all its portions, before the tray
   // moved). Take off the portions that never dropped.
-  if (portions == 0 || this->state_.hist_n[0] == 0)
+  HistoryEntry newest = this->history_(0);
+  if (portions == 0 || newest.portions == 0)
     return;
-  this->state_.hist_n[0] = static_cast<uint8_t>(this->state_.hist_n[0] > portions ? this->state_.hist_n[0] - portions : 0);
+  newest.portions = static_cast<uint8_t>(newest.portions > portions ? newest.portions - portions : 0);
+  this->set_history_(0, newest);
   this->project_dirty_ = true;
   this->log_(LogLevel::kInfo, "Feed cut short: %u portion(s) did not drop", portions);
 }
@@ -558,24 +562,48 @@ bool FeederCore::hold_active() {
   return this->time_valid() && this->hal_epoch() < static_cast<int64_t>(this->state_.hold_until);
 }
 
+FeederCore::HistoryEntry FeederCore::history_(uint8_t i) const {
+  HistoryEntry e;
+  e.epoch = this->state_.hist_ts[i];
+  e.portions = this->state_.hist_n[i];
+  e.source = this->state_.hist_src[i];
+  e.at_ms = this->hist_ms_[i];
+  e.this_boot = this->hist_this_boot_[i];
+  return e;
+}
+
+void FeederCore::set_history_(uint8_t i, const HistoryEntry &e) {
+  this->state_.hist_ts[i] = e.epoch;
+  this->state_.hist_n[i] = e.portions;
+  this->state_.hist_src[i] = e.source;
+  this->hist_ms_[i] = e.at_ms;
+  this->hist_this_boot_[i] = e.this_boot;
+}
+
+void FeederCore::push_history_(const HistoryEntry &e) {
+  for (uint8_t i = HISTORY_SIZE - 1; i > 0; i--)
+    this->set_history_(i, this->history_(i - 1));
+  this->set_history_(0, e);
+}
+
+bool FeederCore::counts_today_(const HistoryEntry &e, int64_t now_epoch, bool time_ok) {
+  if (e.portions == 0)
+    return false;
+  if (e.epoch != 0 && time_ok)
+    return now_epoch - static_cast<int64_t>(e.epoch) < 86400;
+  if (e.this_boot)
+    return this->hal_millis() - e.at_ms < 86400000UL;
+  // Saved before this boot, and the clock is not set again yet: its age is unknown, so it is not counted.
+  // (Counting it would refuse feeds for a day after a power cut with no network; decision 2026-10-14.)
+  return false;
+}
+
 uint16_t FeederCore::portions_24h_(int64_t now_epoch, bool time_ok) {
   uint16_t total = 0;
-  const uint32_t ms = this->hal_millis();
   for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
-    if (this->state_.hist_n[i] == 0)
-      continue;
-    bool recent;
-    if (this->state_.hist_ts[i] != 0 && time_ok) {
-      recent = now_epoch - static_cast<int64_t>(this->state_.hist_ts[i]) < 86400;
-    } else if (this->hist_this_boot_[i]) {
-      recent = ms - this->hist_ms_[i] < 86400000UL;
-    } else {
-      // Saved before this boot, and the clock is not set again yet: its age is unknown, so it is not counted.
-      // (Counting it would refuse feeds for a day after a power cut with no network; decision 2026-10-14.)
-      recent = false;
-    }
-    if (recent)
-      total += this->state_.hist_n[i];
+    const HistoryEntry e = this->history_(i);
+    if (this->counts_today_(e, now_epoch, time_ok))
+      total += e.portions;
   }
   return total;
 }
@@ -597,18 +625,12 @@ void FeederCore::set_portions_24h(uint16_t portions) {
     // Remove counted portions, oldest first, until the count is right.
     uint16_t excess = before - portions;
     for (int i = HISTORY_SIZE - 1; i >= 0 && excess > 0; i--) {
-      if (this->state_.hist_n[i] == 0)
+      HistoryEntry e = this->history_(static_cast<uint8_t>(i));
+      if (!this->counts_today_(e, now, time_ok))
         continue;
-      const uint16_t total = this->portions_24h_(now, time_ok);
-      const uint8_t keep = this->state_.hist_n[i];
-      this->state_.hist_n[i] = 0;
-      const uint16_t removed = total - this->portions_24h_(now, time_ok);  // 0 if this entry was not counted
-      if (removed == 0) {
-        this->state_.hist_n[i] = keep;
-        continue;
-      }
-      const uint16_t take = std::min<uint16_t>(removed, excess);
-      this->state_.hist_n[i] = static_cast<uint8_t>(keep - take);
+      const uint16_t take = std::min<uint16_t>(e.portions, excess);
+      e.portions = static_cast<uint8_t>(e.portions - take);
+      this->set_history_(static_cast<uint8_t>(i), e);
       excess -= take;
     }
   }
@@ -619,18 +641,13 @@ void FeederCore::set_portions_24h(uint16_t portions) {
 }
 
 void FeederCore::record_history_(uint8_t portions, Source source) {
-  for (uint8_t i = HISTORY_SIZE - 1; i > 0; i--) {
-    this->state_.hist_ts[i] = this->state_.hist_ts[i - 1];
-    this->state_.hist_n[i] = this->state_.hist_n[i - 1];
-    this->state_.hist_src[i] = this->state_.hist_src[i - 1];
-    this->hist_ms_[i] = this->hist_ms_[i - 1];
-    this->hist_this_boot_[i] = this->hist_this_boot_[i - 1];
-  }
-  this->state_.hist_ts[0] = this->time_valid() ? static_cast<uint32_t>(this->hal_epoch()) : 0;
-  this->state_.hist_n[0] = portions;
-  this->state_.hist_src[0] = static_cast<uint8_t>(source);
-  this->hist_ms_[0] = this->hal_millis();
-  this->hist_this_boot_[0] = true;
+  HistoryEntry e;
+  e.epoch = this->time_valid() ? static_cast<uint32_t>(this->hal_epoch()) : 0;
+  e.portions = portions;
+  e.source = static_cast<uint8_t>(source);
+  e.at_ms = this->hal_millis();
+  e.this_boot = true;
+  this->push_history_(e);
 }
 
 Result FeederCore::check_guard_(uint8_t &portions, Source source) {
@@ -699,7 +716,7 @@ Result FeederCore::request_feed(uint8_t portions, Source source, uint8_t *accept
   this->log_(LogLevel::kInfo, "Feeding %u portion(s) from %s, tray position %u", portions, source_name(source),
              this->state_.position);
   this->record_history_(portions, source);
-  this->state_.last_feed_epoch = this->state_.hist_ts[0];
+  this->state_.last_feed_epoch = this->history_(0).epoch;
   this->state_.last_src = static_cast<uint8_t>(source);
   this->last_feed_ms_ = this->hal_millis();
   this->have_last_feed_ms_ = true;

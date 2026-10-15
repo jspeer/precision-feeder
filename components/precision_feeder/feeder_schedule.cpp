@@ -142,8 +142,11 @@ void FeederCore::on_time_valid_() {
   // Feeds made before the clock was set count as happening now: the conservative choice for the daily cap.
   const uint32_t now = static_cast<uint32_t>(this->hal_epoch());
   for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
-    if (this->state_.hist_n[i] != 0 && this->state_.hist_ts[i] == 0)
-      this->state_.hist_ts[i] = now;
+    HistoryEntry e = this->history_(i);
+    if (e.portions != 0 && e.epoch == 0) {
+      e.epoch = now;
+      this->set_history_(i, e);
+    }
   }
   if (anchored)
     this->cfg_changed();  // only then is there anything new to save

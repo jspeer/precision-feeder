@@ -266,17 +266,13 @@ std::string FeederCore::tray_state_text() const {
 
 uint16_t FeederCore::feeds_today() {
   uint16_t total = 0;
-  if (!this->time_valid()) {
-    for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
-      if (this->state_.hist_ts[i] == 0 && this->state_.hist_n[i] != 0)
-        total += this->state_.hist_n[i];
-    }
-    return total;
-  }
-  const int64_t midnight = this->wall_to_epoch_(this->today_(), 0);
+  const bool time_ok = this->time_valid();
+  const int64_t midnight = time_ok ? this->wall_to_epoch_(this->today_(), 0) : 0;
   for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
-    if (this->state_.hist_n[i] != 0 && static_cast<int64_t>(this->state_.hist_ts[i]) >= midnight)
-      total += this->state_.hist_n[i];
+    const HistoryEntry e = this->history_(i);
+    // Without a clock, "today" is whatever was fed since the clock was lost (stamped 0).
+    if (e.portions != 0 && (time_ok ? static_cast<int64_t>(e.epoch) >= midnight : e.epoch == 0))
+      total += e.portions;
   }
   return total;
 }
@@ -301,27 +297,27 @@ std::string FeederCore::empty_on_text() {
 
 std::string FeederCore::last_feed_text() {
   if (this->state_.last_feed_epoch == 0)
-    return this->state_.hist_n[0] != 0 ? "clock was not set" : "never";
+    return this->history_(0).portions != 0 ? "clock was not set" : "never";
   return this->format_local_(this->state_.last_feed_epoch) + " (" + source_name(static_cast<Source>(this->state_.last_src)) + ")";
 }
 
 std::string FeederCore::recent_feeds_text() {
   std::string out;
   for (uint8_t i = 0; i < HISTORY_SIZE && i < 6; i++) {
-    if (this->state_.hist_n[i] == 0)
+    const HistoryEntry e = this->history_(i);
+    if (e.portions == 0)
       continue;
     if (!out.empty())
       out += "; ";
-    if (this->state_.hist_ts[i] == 0) {
+    if (e.epoch == 0) {
       out += "unknown time";
     } else {
-      const LocalTime l = this->hal_local(this->state_.hist_ts[i]);
+      const LocalTime l = this->hal_local(e.epoch);
       char buf[24];
       std::snprintf(buf, sizeof(buf), "%02d-%02d %02d:%02d", l.month, l.day, l.hour, l.minute);
       out += buf;
     }
-    out += " x" + std::to_string(this->state_.hist_n[i]) + " " +
-           source_name(static_cast<Source>(this->state_.hist_src[i]));
+    out += " x" + std::to_string(e.portions) + " " + source_name(static_cast<Source>(e.source));
   }
   return out.empty() ? "none" : out;
 }

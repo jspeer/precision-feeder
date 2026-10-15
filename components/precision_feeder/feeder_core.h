@@ -426,6 +426,21 @@ class FeederCore {
   void uncount_portions_(uint8_t portions);
   bool moving_() const;
 
+  // feed history: newest first, HISTORY_SIZE entries. Saved as the parallel hist_* arrays of State (that layout is
+  // kept so saved data stays loadable); everything else uses these records.
+  struct HistoryEntry {
+    uint32_t epoch{0};      // when it was fed; 0 = the clock was not set
+    uint8_t portions{0};    // 0 = an empty slot
+    uint8_t source{0};      // Source
+    uint32_t at_ms{0};      // hal_millis() when recorded (only meaningful when this_boot)
+    bool this_boot{false};  // recorded since this boot
+  };
+  HistoryEntry history_(uint8_t i) const;
+  void set_history_(uint8_t i, const HistoryEntry &e);
+  void push_history_(const HistoryEntry &e);
+  /// Whether an entry is inside the rolling 24 h the daily cap looks at.
+  bool counts_today_(const HistoryEntry &e, int64_t now_epoch, bool time_ok);
+
   // guard
   Result check_guard_(uint8_t &portions, Source source);
   uint16_t portions_24h_(int64_t now_epoch, bool time_ok);
