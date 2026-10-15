@@ -314,8 +314,9 @@ over-fed tank:
 - **BLE has no authentication yet.** Anyone in Bluetooth range can connect;
   the feed guard limits what they can do. Leave the BLE package out if you do not
   need it. (Work on this is planned; see DESIGN.md section 10.)
-- **Sunrise and sunset events** are skipped on days without a sunrise or sunset
-  (far north or south), and need Latitude and Longitude set.
+- **Sunrise and sunset events** need Latitude and Longitude set. On days with
+  no sunrise or sunset (far north or south) they count from 06:00 and 18:00
+  instead, and Faults says so.
 
 ## Documentation and repository layout
 

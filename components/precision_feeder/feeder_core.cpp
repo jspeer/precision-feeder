@@ -705,11 +705,14 @@ bool FeederCore::resolve_minutes_(const Event &e, const DayCtx &d, int &minutes)
     return true;
   }
   if (this->cfg.latitude == 0.0f && this->cfg.longitude == 0.0f)
-    return false;  // location not set
+    return false;  // location not set: skipped (a setup mistake, reported in Faults)
+  const bool sunrise = e.anchor == static_cast<uint8_t>(Anchor::SUNRISE);
   double rise, set;
-  if (!this->sun_cached_(d, rise, set))
-    return false;
-  const double base = e.anchor == static_cast<uint8_t>(Anchor::SUNRISE) ? rise : set;
+  double base;
+  if (this->sun_cached_(d, rise, set))
+    base = sunrise ? rise : set;
+  else
+    base = sunrise ? POLAR_SUNRISE_MIN : POLAR_SUNSET_MIN;  // no sunrise or sunset that day: fixed fallback
   minutes = static_cast<int>(std::lround(base)) + e.offset_min;
   return true;
 }
@@ -747,6 +750,7 @@ void FeederCore::schedule_tick_() {
   this->was_time_valid_ = valid;
   if (!valid) {
     this->solar_fault_ = false;
+    this->polar_fallback_ = false;
     return;
   }
 
@@ -771,6 +775,7 @@ void FeederCore::schedule_tick_() {
 void FeederCore::update_solar_fault_() {
   // Only meaningful while recurring events can actually run.
   this->solar_fault_ = false;
+  this->polar_fallback_ = false;
   if (!this->cfg.scheduler_enabled)
     return;
   const Profile &p = this->cfg.profiles[this->cfg.active_profile];
@@ -780,11 +785,13 @@ void FeederCore::update_solar_fault_() {
   for (const Event &ev : p.ev) {
     if (!ev.enabled || ev.anchor == static_cast<uint8_t>(Anchor::CLOCK) || !(ev.days & (1 << d.wday)))
       continue;
-    int minutes;
-    if (!this->resolve_minutes_(ev, d, minutes)) {
+    if (this->cfg.latitude == 0.0f && this->cfg.longitude == 0.0f) {
       this->solar_fault_ = true;
       return;
     }
+    double rise, set;
+    if (!this->sun_cached_(d, rise, set))
+      this->polar_fallback_ = true;
   }
 }
 
@@ -1365,6 +1372,8 @@ std::string FeederCore::faults_text() {
     add("next feed needs more portions than remain");
   if (this->solar_fault_)
     add("sunrise/sunset unavailable (set location)");
+  if (this->polar_fallback_)
+    add("no sunrise or sunset today: sun events use 06:00 / 18:00");
   if (this->oversubscribed_)
     add("schedule needs more portions than the tray holds before the next refill");
   if (this->schedule_over_cap())

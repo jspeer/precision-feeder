@@ -237,9 +237,12 @@ every_2nd); C "Growout" (3 events/day, short runway warning).
   rollover and whenever profile, location or time changes.
 - Weekday mask applies to the **anchor day**. An event resolving after
   midnight (for example sunset + 3 h) fires early the next morning.
-- **No sunrise/sunset on that day (polar):** skip the event and raise a
-  `solar_no_event` fault flag. (Default chosen as the safe side for animals:
-  a missed meal beats an overfeed. Proposed, not confirmed.)
+- **No sunrise/sunset on that day (polar night or midnight sun):** the event
+  uses a fixed fallback, 06:00 for sunrise and 18:00 for sunset, plus its
+  offset, so the animals are still fed at a sensible hour; Faults says so and
+  BLE Status flag bit 6 is set (owner decision 2026-10-14, replacing "skip").
+  With **no location set**, sun events are still skipped with a fault: that is
+  a setup mistake, not geography.
 - Events resolving within the minimum gap of each other: the guard handles it
   (later one is rejected `TOO_SOON` and logged).
 
@@ -502,10 +505,12 @@ Importable with ESPHome `packages:` / `github://`.
   history. AGENTS.md is updated to match.
 - Each event feeds at most once per day, also when it is moved later after it
   fed (2026-10-14; the safe side).
+- Polar days (no sunrise or sunset): sun events fall back to 06:00 / 18:00 plus
+  their offset, with a fault shown (owner, 2026-10-14; was "skip").
 
 ## 14. Open items
 
-1. Polar/no-sun fallback: skip (proposed) or clock-time fallback.
+1. ~~Polar/no-sun fallback.~~ Decided 2026-10-14: fixed 06:00 / 18:00 fallback (section 5.2).
 2. ~~Confirm the slot/position mapping on the printed tray.~~ Done on the
    bench, 2026-10-14 (section 17): all 7 positions line up. Still to watch:
    whether the servo strains at position 6 in daily use.
@@ -516,7 +521,7 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.3.4, 2026-10-14)
+## 15. Implementation status (v0.3.5, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -609,6 +614,13 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
   the saved tray state from earlier versions is discarded).
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.3.5 (polar days, 2026-10-14):
+- On a day without a sunrise or sunset at the set location, sun events use
+  06:00 (sunrise) or 18:00 (sunset) plus their offset instead of being skipped.
+  Faults: "no sunrise or sunset today: sun events use 06:00 / 18:00"; BLE flag
+  bit 6 stays set (it means a sun event could not use the real sun). No
+  location set: still skipped. Test: `test_polar_fallback` (89 degrees N).
 
 Changes in v0.3.4 (source label, 2026-10-14):
 - The feed source for the device's own feed buttons (pressed in Home Assistant

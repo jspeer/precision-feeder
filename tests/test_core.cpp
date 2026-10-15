@@ -589,6 +589,32 @@ static void test_needs_food() {
   CHECK(f->position_unknown() && !f->needs_food(), "position unknown: not 'needs food'");
 }
 
+static void test_polar_fallback() {
+  current = "polar day fallback";
+  Flash flash;
+  auto f = boot(flash, T0);  // 2026-10-14 07:55 local
+  enable_event(*f, 0, 0, Anchor::SUNSET, -60);  // sunset - 1 h
+  f->advance(2000);
+  CHECK(f->solar_fault() && !f->polar_fallback(), "no location: sun event skipped, fault");
+  CHECK(f->next_event_epoch() == 0, "no location: nothing scheduled");
+  // 89 degrees north in mid October: the sun does not rise (polar night).
+  f->cfg.latitude = 89.0f;
+  f->cfg.longitude = 0.0f;
+  f->cfg_changed();
+  f->advance(2000);
+  CHECK(f->polar_fallback() && f->solar_fault(), "polar night: fallback in use, still flagged");
+  CHECK(f->faults_text().find("06:00 / 18:00") != std::string::npos, "Faults explains the fallback");
+  CHECK(f->next_event_epoch() == static_cast<uint32_t>(local_epoch(2026, 10, 14, 17, 0)),
+        "sunset - 1 h resolves to 17:00 (18:00 fallback)");
+  f->advance((9 * 3600 + 5 * 60 + 20) * 1000LL);  // to 17:00:20
+  CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "fed at 17:00");
+  // A normal latitude has a real sunset: no fallback.
+  f->cfg.latitude = 51.5f;
+  f->cfg_changed();
+  f->advance(2000);
+  CHECK(!f->polar_fallback() && !f->solar_fault(), "normal latitude: no fallback, no fault");
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -609,6 +635,7 @@ int main() {
   test_edit_portions_24h();
   test_cap_warning_and_edited_summary();
   test_needs_food();
+  test_polar_fallback();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

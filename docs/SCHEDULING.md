@@ -117,8 +117,10 @@ even while it is switched on.
 - **Sun events after midnight.** "Sunset + 5 h" can land after midnight. It
   belongs to the day of the sunset: its weekday (and fast day and every-N day) is
   the evening's, even though it feeds the next morning.
-- **Sun events and location.** No location, or no sunrise or sunset that day
-  (polar regions): the event is skipped and Faults says why.
+- **Sun events and location.** With no location set, sun events are skipped and
+  Faults says so. On a day with no sunrise or no sunset (far north or south:
+  polar night or midnight sun), a sunrise event counts from 06:00 and a sunset
+  event from 18:00 instead, so it still feeds; Faults says when that happens.
 - **Hold and reload pause stop the schedule, not you.** "Hold Scheduled Feeding"
   (for "Hold Duration" hours, or until "Cancel Hold" when it is 0) and the
   pause after "Tray Reload" skip scheduled events; manual feeds still work.

@@ -28,6 +28,10 @@ constexpr uint8_t MAX_ONESHOTS = 8;
 constexpr uint8_t HISTORY_SIZE = 8;
 constexpr uint8_t NO_MOVE = 0xFF;
 constexpr uint32_t HOLD_FOREVER = UINT32_MAX;  // State::hold_until marker: until the user cancels it
+// On a day with no sunrise or no sunset (polar night or midnight sun), sun events use these local times instead
+// (before their offset), so the animals are still fed at a sensible hour (owner decision 2026-10-14).
+constexpr int POLAR_SUNRISE_MIN = 6 * 60;
+constexpr int POLAR_SUNSET_MIN = 18 * 60;
 constexpr uint32_t SETTINGS_VERSION = 3;       // 2: late-start grace removed; 3: servo pulse range
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
 // Servo pulse range limits (microseconds for 0 and 180 degrees). Wide enough for servos that turn less than
@@ -294,7 +298,11 @@ class FeederCore {
       return false;
     return this->remaining() == 0 || (this->next_event_portions_ != 0 && this->next_event_portions_ > this->remaining());
   }
-  bool solar_fault() const { return this->solar_fault_; }
+  /// A sun event of the active profile cannot be placed today: no location set (the event is skipped), or no
+  /// sunrise/sunset today (the event uses the polar fallback time; see polar_fallback()).
+  bool solar_fault() const { return this->solar_fault_ || this->polar_fallback_; }
+  /// Today has no sunrise or sunset at the set location, so sun events use 06:00 / 18:00 plus their offset.
+  bool polar_fallback() const { return this->polar_fallback_; }
   bool reload_pause_active();
   bool hold_active();
   std::string hold_text();
@@ -427,7 +435,8 @@ class FeederCore {
   uint32_t last_tick_{0};
   uint32_t last_project_{0};
   bool project_dirty_{true};
-  bool solar_fault_{false};
+  bool solar_fault_{false};    // location not set: sun events skipped
+  bool polar_fallback_{false};  // no sunrise/sunset today: sun events use the fallback times
   uint8_t runway_days_{255};
   bool oversubscribed_{false};
   int64_t next_event_epoch_{0};

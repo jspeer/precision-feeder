@@ -145,7 +145,7 @@ NTP or Home Assistant syncs (firmware 0.3.1 and later; before that, such a clock
 wrongly reported as NTP).
 
 Flags: bit 0 clock valid, 1 hold, 2 calibrating, 3 moving, 4 scheduler enabled,
-5 reload pause, 6 sunrise/sunset unavailable, 7 schedule needs more portions than
+5 reload pause, 6 sunrise/sunset unavailable (no location: sun events skipped; or no sunrise/sunset today: they use 06:00 / 18:00, from firmware 0.3.5), 7 schedule needs more portions than
 remain before the next refill, 8 clock not re-synchronised for over a week,
 9 position unknown, 10 tray empty, 11 the active profile feeds more portions on its
 busiest day than the daily cap allows (added in firmware 0.3.2; 0 before), 12 needs
