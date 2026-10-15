@@ -37,6 +37,16 @@ constexpr int POLAR_SUNSET_MIN = 18 * 60;
 constexpr uint32_t SETTINGS_VERSION = 4;       // 2: no late start; 3: servo pulse range; 4: calibration moved out
 constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
+// Setting limits: the single source of truth. Every way of changing a setting (Home Assistant, BLE, loading from
+// flash) goes through the setters below, which check against these. The YAML entities repeat them as min/max for
+// their input boxes; tests/test_consistency.py checks that they agree.
+constexpr int32_t MIN_GAP_S_LO = 10, MIN_GAP_S_HI = 3600;           // minimum seconds between feeds
+constexpr int32_t PORTION_GAP_S_LO = 1, PORTION_GAP_S_HI = 60;      // seconds between portions of one feed
+constexpr int32_t RELOAD_PAUSE_MIN_LO = 0, RELOAD_PAUSE_MIN_HI = 60;
+constexpr int32_t REFILL_DAYS_LO = 1, REFILL_DAYS_HI = 30;
+constexpr int32_t DAILY_CAP_LO = 1, DAILY_CAP_HI = 6;               // portions in any rolling 24 h
+constexpr int32_t PORTIONS_CMD_LO = 1, PORTIONS_CMD_HI = 6;         // portions per manual / remote command
+constexpr int16_t CAL_OFFSET_LO = -150, CAL_OFFSET_HI = 150;        // tenths of a degree
 // Servo pulse range limits (microseconds for 0 and 180 degrees). Wide enough for servos that turn less than
 // the nominal amount per microsecond; the firmware never commands more than about 155 degrees.
 constexpr uint16_t PULSE_MIN_LO = 300;
@@ -264,6 +274,24 @@ class FeederCore {
   Event &edit_event() { return this->cfg.profiles[this->editor_profile].ev[this->editor_event]; }
   /// Call after changing cfg; saves after a short delay and refreshes projections.
   void cfg_changed();
+
+  // ---- settings, validated (INVALID_ARG and no change when out of range) ----
+  Result set_min_gap_s(int32_t seconds);
+  Result set_portion_gap_s(int32_t seconds);
+  Result set_reload_pause_min(int32_t minutes);
+  Result set_refill_interval_days(int32_t days);
+  Result set_daily_cap(int32_t portions);
+  Result set_max_portions_cmd(int32_t portions);
+  Result set_scheduler_enabled(bool on);
+  Result set_active_profile(int32_t profile);
+  /// Degrees, north and east positive. Both 0 means "not set" (sun events are then skipped).
+  Result set_location(float latitude, float longitude);
+  /// The same in units of 1e-5 degree (BLE). Checked as integers, before the conversion to float can round a value
+  /// just outside the limits (180.00001 degrees is 180.0 as a float) back inside them.
+  Result set_location_e5(int32_t latitude_e5, int32_t longitude_e5);
+  static bool location_ok(float latitude, float longitude) {
+    return latitude >= -90.0f && latitude <= 90.0f && longitude >= -180.0f && longitude <= 180.0f;  // false for NaN
+  }
   /// Change the editor event's anchor; the offset resets when switching between clock and solar.
   void set_event_anchor(uint8_t anchor);
   static std::string format_days(uint8_t mask);

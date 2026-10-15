@@ -245,3 +245,10 @@ WiFi: `selftest` 14/14; the repeated-AUTH replay test refused the old write as
 stale; the full Config / Calibration / Profile read-out matched the earlier one
 exactly.
 
+## Firmware 0.5.2 on hardware (2026-10-14)
+
+Settings now go through FeederCore's validated setters. Through the ESPHome API
+(as Home Assistant does it), Daily Portion Cap was changed 3 -> 4 -> 3 and each
+change was applied and published; BLE `selftest` 14/14 (its Config writes go
+through the same setters).
+

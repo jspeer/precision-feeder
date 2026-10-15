@@ -74,20 +74,24 @@ void FeederCore::clamp_loaded_() {
       e.days &= 0x7F;
     }
   }
+  // The same limits as the setters (feeder_core.h), so nothing out of range survives a reboot.
+  auto clamp = [](int32_t v, int32_t lo, int32_t hi) { return std::min(std::max(v, lo), hi); };
   for (auto &c : this->calib.offsets)
-    c = std::min<int16_t>(std::max<int16_t>(c, -150), 150);
+    c = static_cast<int16_t>(clamp(c, CAL_OFFSET_LO, CAL_OFFSET_HI));
   this->cfg.active_profile = std::min<uint8_t>(this->cfg.active_profile, NUM_PROFILES - 1);
-  this->cfg.min_gap_s = std::min<uint16_t>(std::max<uint16_t>(this->cfg.min_gap_s, 10), 3600);
-  this->cfg.portion_gap_s = std::min<uint16_t>(std::max<uint16_t>(this->cfg.portion_gap_s, 1), 60);
-  this->cfg.reload_pause_min = std::min<uint16_t>(this->cfg.reload_pause_min, 60);
-  this->cfg.refill_interval_days = std::min<uint16_t>(std::max<uint16_t>(this->cfg.refill_interval_days, 1), 30);
+  this->cfg.min_gap_s = static_cast<uint16_t>(clamp(this->cfg.min_gap_s, MIN_GAP_S_LO, MIN_GAP_S_HI));
+  this->cfg.portion_gap_s = static_cast<uint16_t>(clamp(this->cfg.portion_gap_s, PORTION_GAP_S_LO, PORTION_GAP_S_HI));
+  this->cfg.reload_pause_min =
+      static_cast<uint16_t>(clamp(this->cfg.reload_pause_min, RELOAD_PAUSE_MIN_LO, RELOAD_PAUSE_MIN_HI));
+  this->cfg.refill_interval_days =
+      static_cast<uint16_t>(clamp(this->cfg.refill_interval_days, REFILL_DAYS_LO, REFILL_DAYS_HI));
+  this->cfg.daily_cap = static_cast<uint8_t>(clamp(this->cfg.daily_cap, DAILY_CAP_LO, DAILY_CAP_HI));
+  this->cfg.max_portions_cmd = static_cast<uint8_t>(clamp(this->cfg.max_portions_cmd, PORTIONS_CMD_LO, PORTIONS_CMD_HI));
   this->cfg.scheduler_enabled = this->cfg.scheduler_enabled ? 1 : 0;
-  if (!(this->cfg.latitude >= -90.0f && this->cfg.latitude <= 90.0f))  // also catches NaN
+  if (!location_ok(this->cfg.latitude, this->cfg.longitude)) {  // also catches NaN
     this->cfg.latitude = 0.0f;
-  if (!(this->cfg.longitude >= -180.0f && this->cfg.longitude <= 180.0f))
     this->cfg.longitude = 0.0f;
-  this->cfg.daily_cap = std::min<uint8_t>(std::max<uint8_t>(this->cfg.daily_cap, 1), MAX_PORTIONS);
-  this->cfg.max_portions_cmd = std::min<uint8_t>(std::max<uint8_t>(this->cfg.max_portions_cmd, 1), MAX_PORTIONS);
+  }
   this->state_.position = std::min<uint8_t>(this->state_.position, MAX_PORTIONS);
   if (!pulse_range_ok(this->calib.min_pulse_us, this->calib.max_pulse_us)) {
     this->calib.min_pulse_us = this->default_min_pulse_us_;
@@ -101,6 +105,77 @@ void FeederCore::cfg_changed() {
   this->project_dirty_ = true;
   this->cfg_dirty_ = true;
   this->cfg_dirty_since_ = this->hal_millis();
+}
+
+static bool in_range(int32_t v, int32_t lo, int32_t hi) { return v >= lo && v <= hi; }
+
+Result FeederCore::set_min_gap_s(int32_t s) {
+  if (!in_range(s, MIN_GAP_S_LO, MIN_GAP_S_HI))
+    return Result::INVALID_ARG;
+  this->cfg.min_gap_s = static_cast<uint16_t>(s);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_portion_gap_s(int32_t s) {
+  if (!in_range(s, PORTION_GAP_S_LO, PORTION_GAP_S_HI))
+    return Result::INVALID_ARG;
+  this->cfg.portion_gap_s = static_cast<uint16_t>(s);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_reload_pause_min(int32_t m) {
+  if (!in_range(m, RELOAD_PAUSE_MIN_LO, RELOAD_PAUSE_MIN_HI))
+    return Result::INVALID_ARG;
+  this->cfg.reload_pause_min = static_cast<uint16_t>(m);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_refill_interval_days(int32_t d) {
+  if (!in_range(d, REFILL_DAYS_LO, REFILL_DAYS_HI))
+    return Result::INVALID_ARG;
+  this->cfg.refill_interval_days = static_cast<uint16_t>(d);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_daily_cap(int32_t n) {
+  if (!in_range(n, DAILY_CAP_LO, DAILY_CAP_HI))
+    return Result::INVALID_ARG;
+  this->cfg.daily_cap = static_cast<uint8_t>(n);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_max_portions_cmd(int32_t n) {
+  if (!in_range(n, PORTIONS_CMD_LO, PORTIONS_CMD_HI))
+    return Result::INVALID_ARG;
+  this->cfg.max_portions_cmd = static_cast<uint8_t>(n);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_scheduler_enabled(bool on) {
+  this->cfg.scheduler_enabled = on ? 1 : 0;
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_active_profile(int32_t profile) {
+  if (!in_range(profile, 0, NUM_PROFILES - 1))
+    return Result::INVALID_ARG;
+  this->cfg.active_profile = static_cast<uint8_t>(profile);
+  this->cfg_changed();
+  return Result::OK;
+}
+Result FeederCore::set_location(float latitude, float longitude) {
+  if (!location_ok(latitude, longitude))
+    return Result::INVALID_ARG;
+  this->cfg.latitude = latitude;
+  this->cfg.longitude = longitude;
+  this->cfg_changed();
+  return Result::OK;
+}
+
+Result FeederCore::set_location_e5(int32_t lat, int32_t lon) {
+  if (!in_range(lat, -9000000, 9000000) || !in_range(lon, -18000000, 18000000))
+    return Result::INVALID_ARG;
+  return this->set_location(static_cast<float>(lat) / 100000.0f, static_cast<float>(lon) / 100000.0f);
 }
 
 void FeederCore::save_calibration() {
@@ -436,7 +511,7 @@ void FeederCore::set_calibration_offset(int16_t tenths) { this->set_calibration_
 
 void FeederCore::set_calibration_offset_at(uint8_t position, int16_t tenths) {
   position = std::min<uint8_t>(position, NUM_POSITIONS - 1);
-  this->calib.offsets[position] = std::min<int16_t>(std::max<int16_t>(tenths, -150), 150);
+  this->calib.offsets[position] = std::min<int16_t>(std::max<int16_t>(tenths, CAL_OFFSET_LO), CAL_OFFSET_HI);
   this->cfg_changed();
   if (this->calibrating_ && position == this->cal_pos_)
     this->move_to_(position);
@@ -464,7 +539,8 @@ Result FeederCore::jog_calibration(uint8_t position, int16_t delta_tenths) {
     return Result::INVALID_ARG;
   this->cal_pos_ = position;
   const int32_t next = static_cast<int32_t>(this->calib.offsets[position]) + delta_tenths;
-  this->calib.offsets[position] = static_cast<int16_t>(std::min<int32_t>(std::max<int32_t>(next, -150), 150));
+  this->calib.offsets[position] =
+      static_cast<int16_t>(std::min<int32_t>(std::max<int32_t>(next, CAL_OFFSET_LO), CAL_OFFSET_HI));
   this->cfg_changed();
   this->move_to_(position);
   return Result::OK;

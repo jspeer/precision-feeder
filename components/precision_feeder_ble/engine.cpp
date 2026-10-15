@@ -191,10 +191,8 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       return {RES_OK, f.remaining()};
 
     case OP_SET_PROFILE:
-      if (n != 1 || args[0] >= PROFILES)
+      if (n != 1 || f.set_active_profile(args[0]) != Result::OK)
         return invalid;
-      f.cfg.active_profile = args[0];
-      f.cfg_changed();
       return {RES_OK, args[0]};
 
     case OP_HOLD: {
@@ -235,14 +233,7 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
     case OP_SET_LOCATION: {
       if (n != 8)
         return invalid;
-      const int32_t lat = get_i32(args);
-      const int32_t lon = get_i32(args + 4);
-      if (!config_value_ok(CFG_LATITUDE_E5, lat) || !config_value_ok(CFG_LONGITUDE_E5, lon))
-        return invalid;
-      f.cfg.latitude = static_cast<float>(lat) / 100000.0f;
-      f.cfg.longitude = static_cast<float>(lon) / 100000.0f;
-      f.cfg_changed();
-      return {RES_OK, 0};
+      return res(f.set_location_e5(get_i32(args), get_i32(args + 4)));
     }
     case OP_CALIBRATE:
       if (n != 1 || args[0] > 1)
@@ -254,7 +245,7 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       if (n != 3)
         return invalid;
       const int16_t delta = get_i16(args + 1);
-      if (delta < -2 * CAL_MAX || delta > 2 * CAL_MAX)
+      if (delta < 2 * CAL_OFFSET_LO || delta > 2 * CAL_OFFSET_HI)
         return invalid;
       return res(f.jog_calibration(args[0], delta));
     }
@@ -459,48 +450,48 @@ BleEngine::Answer BleEngine::handle_config_(const uint8_t *d, size_t n) {
   if (n != CONFIG_SET_SIZE || !config_key_known(key))
     return {RES_INVALID_ARG, key};
   const int32_t v = get_i32(d + 1);
-  if (!config_value_ok(key, v))
-    return {RES_INVALID_ARG, key};
-  Settings &c = f.cfg;
-  switch (key) {
+  Result r = Result::INVALID_ARG;
+  switch (key) {  // the setters check the value against the limits in feeder_core.h
     case CFG_MIN_GAP_S:
-      c.min_gap_s = static_cast<uint16_t>(v);
+      r = f.set_min_gap_s(v);
       break;
     case CFG_PORTION_GAP_S:
-      c.portion_gap_s = static_cast<uint16_t>(v);
+      r = f.set_portion_gap_s(v);
       break;
     case CFG_RELOAD_PAUSE_MIN:
-      c.reload_pause_min = static_cast<uint16_t>(v);
+      r = f.set_reload_pause_min(v);
       break;
     case CFG_REFILL_INTERVAL_DAYS:
-      c.refill_interval_days = static_cast<uint16_t>(v);
+      r = f.set_refill_interval_days(v);
       break;
     case CFG_DAILY_CAP:
-      c.daily_cap = static_cast<uint8_t>(v);
+      r = f.set_daily_cap(v);
       break;
     case CFG_MAX_PORTIONS_CMD:
-      c.max_portions_cmd = static_cast<uint8_t>(v);
+      r = f.set_max_portions_cmd(v);
       break;
     case CFG_SCHEDULER_ENABLED:
-      c.scheduler_enabled = static_cast<uint8_t>(v);
+      if (v == 0 || v == 1)
+        r = f.set_scheduler_enabled(v == 1);
       break;
     case CFG_LATITUDE_E5:
-      c.latitude = static_cast<float>(v) / 100000.0f;
+      r = f.set_location_e5(v, static_cast<int32_t>(std::lround(f.cfg.longitude * 100000.0f)));
       break;
     case CFG_LONGITUDE_E5:
-      c.longitude = static_cast<float>(v) / 100000.0f;
+      r = f.set_location_e5(static_cast<int32_t>(std::lround(f.cfg.latitude * 100000.0f)), v);
       break;
     case CFG_MIN_PULSE_US:
     case CFG_MAX_PULSE_US: {
       // The pair must stay at least 500 us apart; the core checks it and moves the servo in calibration mode.
-      const uint16_t lo = key == CFG_MIN_PULSE_US ? static_cast<uint16_t>(v) : f.min_pulse_us();
-      const uint16_t hi = key == CFG_MAX_PULSE_US ? static_cast<uint16_t>(v) : f.max_pulse_us();
-      if (f.set_pulse_range(lo, hi) != Result::OK)
-        return {RES_INVALID_ARG, key};
+      const int32_t lo = key == CFG_MIN_PULSE_US ? v : f.min_pulse_us();
+      const int32_t hi = key == CFG_MAX_PULSE_US ? v : f.max_pulse_us();
+      if (lo >= 0 && lo <= 0xFFFF && hi >= 0 && hi <= 0xFFFF)
+        r = f.set_pulse_range(static_cast<uint16_t>(lo), static_cast<uint16_t>(hi));
       break;
     }
   }
-  f.cfg_changed();
+  if (r != Result::OK)
+    return {RES_INVALID_ARG, key};
   this->set_config_read_(key);
   return {RES_OK, key};
 }
@@ -531,7 +522,7 @@ BleEngine::Answer BleEngine::handle_calibration_(const uint8_t *d, size_t n) {
     return {RES_INVALID_ARG, d[0]};
   const uint8_t index = d[0];
   const int16_t tenths = get_i16(d + 1);
-  if (!calibration_ok(index, tenths))
+  if (index >= POSITIONS || tenths < CAL_OFFSET_LO || tenths > CAL_OFFSET_HI)
     return {RES_INVALID_ARG, index};
   this->feeder_.set_calibration_offset_at(index, tenths);
   this->set_calibration_read_(index);

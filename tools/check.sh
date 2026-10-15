@@ -27,8 +27,9 @@ echo "== C++ host tests"
   -o "$OUT/test_ble_engine"
 "$OUT/test_ble_engine"
 
-echo "== Python client tests"
+echo "== Python tests (client, and limits consistency)"
 (cd tools && python3 -m unittest -q test_precision_feeder_ble)
+python3 -m unittest -q tests/test_consistency.py
 
 ESPHOME=""
 if [ -x .venv/bin/esphome ]; then ESPHOME=.venv/bin/esphome; elif command -v esphome >/dev/null; then ESPHOME=esphome; fi

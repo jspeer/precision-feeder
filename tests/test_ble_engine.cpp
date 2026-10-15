@@ -292,6 +292,55 @@ static void test_records() {
   CHECK(c.write(proto::CHANNEL_CONFIG, w) == first && r.feeder->cfg.daily_cap == 5, "record retry not re-applied");
 }
 
+static Bytes cfg(uint8_t key, int32_t v) {
+  Bytes b{key};
+  const Bytes x = i32(v);
+  b.insert(b.end(), x.begin(), x.end());
+  return b;
+}
+
+// The value ranges BLE enforces are FeederCore's (feeder_core.h): each limit and one step past it.
+static void test_ranges() {
+  current = "ranges";
+  Rig r;
+  r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  Client &c = *r.client;
+  struct Case {
+    uint8_t key;
+    int32_t lo, hi;
+  };
+  const Case cases[] = {
+      {proto::CFG_MIN_GAP_S, MIN_GAP_S_LO, MIN_GAP_S_HI},
+      {proto::CFG_PORTION_GAP_S, PORTION_GAP_S_LO, PORTION_GAP_S_HI},
+      {proto::CFG_RELOAD_PAUSE_MIN, RELOAD_PAUSE_MIN_LO, RELOAD_PAUSE_MIN_HI},
+      {proto::CFG_REFILL_INTERVAL_DAYS, REFILL_DAYS_LO, REFILL_DAYS_HI},
+      {proto::CFG_DAILY_CAP, DAILY_CAP_LO, DAILY_CAP_HI},
+      {proto::CFG_MAX_PORTIONS_CMD, PORTIONS_CMD_LO, PORTIONS_CMD_HI},
+      {proto::CFG_SCHEDULER_ENABLED, 0, 1},
+      {proto::CFG_LATITUDE_E5, -9000000, 9000000},
+      {proto::CFG_LONGITUDE_E5, -18000000, 18000000},
+  };
+  for (const Case &k : cases) {
+    char what[128];
+    std::snprintf(what, sizeof(what), "Config key %u: %d and %d accepted, %d and %d refused", k.key, k.lo, k.hi,
+                  k.lo - 1, k.hi + 1);
+    const bool ok = c.record(proto::CHANNEL_CONFIG, cfg(k.key, k.lo))[2] == proto::RES_OK &&
+                    c.record(proto::CHANNEL_CONFIG, cfg(k.key, k.hi))[2] == proto::RES_OK &&
+                    c.record(proto::CHANNEL_CONFIG, cfg(k.key, k.lo - 1))[2] == proto::RES_INVALID_ARG &&
+                    c.record(proto::CHANNEL_CONFIG, cfg(k.key, k.hi + 1))[2] == proto::RES_INVALID_ARG;
+    CHECK(ok, what);
+  }
+  CHECK(c.record(proto::CHANNEL_CONFIG, cfg(12, 1))[2] == proto::RES_INVALID_ARG, "unknown key refused");
+  CHECK(c.record(proto::CHANNEL_CONFIG, cfg(proto::CFG_MIN_PULSE_US, PULSE_MIN_LO - 1))[2] == proto::RES_INVALID_ARG,
+        "min pulse below its limit");
+  CHECK(c.record(proto::CHANNEL_CONFIG, cfg(proto::CFG_MAX_PULSE_US, PULSE_MAX_HI + 1))[2] == proto::RES_INVALID_ARG,
+        "max pulse above its limit");
+  CHECK(c.record(proto::CHANNEL_CALIBRATION, {6, uint8_t(CAL_OFFSET_HI), 0})[2] == proto::RES_OK &&
+            c.record(proto::CHANNEL_CALIBRATION, {6, uint8_t(CAL_OFFSET_HI + 1), 0})[2] == proto::RES_INVALID_ARG &&
+            c.record(proto::CHANNEL_CALIBRATION, {7, 0, 0})[2] == proto::RES_INVALID_ARG,
+        "calibration offset and index limits");
+}
+
 static void test_disconnect() {
   current = "disconnect";
   Rig r;
@@ -314,6 +363,7 @@ int main() {
   test_commands();
   test_set_time_policy();
   test_records();
+  test_ranges();
   test_disconnect();
   if (failures == 0)
     std::printf("All BLE engine tests passed\n");

@@ -127,30 +127,11 @@ int main() {
     CHECK(!valid_profile_event(d), "anchor 3 invalid");
   }
 
-  // ---- Config and calibration ranges ----
+  // ---- Config keys (value ranges are FeederCore's; tested through the engine in test_ble_engine.cpp) ----
   {
     CHECK(config_key_known(CFG_MIN_GAP_S) && config_key_known(CFG_LONGITUDE_E5), "known keys");
     CHECK(config_key_known(CFG_MIN_PULSE_US) && config_key_known(CFG_MAX_PULSE_US), "pulse keys known");
     CHECK(!config_key_known(0) && !config_key_known(12), "unknown keys");
-    CHECK(config_value_ok(CFG_MIN_PULSE_US, 300) && config_value_ok(CFG_MIN_PULSE_US, 1500) &&
-              !config_value_ok(CFG_MIN_PULSE_US, 299) && !config_value_ok(CFG_MIN_PULSE_US, 1501),
-          "min pulse range");
-    CHECK(config_value_ok(CFG_MAX_PULSE_US, 1500) && config_value_ok(CFG_MAX_PULSE_US, 3000) &&
-              !config_value_ok(CFG_MAX_PULSE_US, 1499) && !config_value_ok(CFG_MAX_PULSE_US, 3001),
-          "max pulse range");
-    CHECK(config_value_ok(CFG_DAILY_CAP, 3) && !config_value_ok(CFG_DAILY_CAP, 0) && !config_value_ok(CFG_DAILY_CAP, 7),
-          "daily cap range");
-    CHECK(config_value_ok(CFG_MIN_GAP_S, 10) && !config_value_ok(CFG_MIN_GAP_S, 9) && config_value_ok(CFG_MIN_GAP_S, 3600) &&
-              !config_value_ok(CFG_MIN_GAP_S, 3601),
-          "min gap range");
-    CHECK(config_value_ok(CFG_RELOAD_PAUSE_MIN, 0) && config_value_ok(CFG_RELOAD_PAUSE_MIN, 60), "reload pause range");
-    CHECK(config_value_ok(CFG_SCHEDULER_ENABLED, 1) && !config_value_ok(CFG_SCHEDULER_ENABLED, 2), "scheduler flag");
-    CHECK(config_value_ok(CFG_LATITUDE_E5, -9000000) && !config_value_ok(CFG_LATITUDE_E5, 9000001), "latitude range");
-    CHECK(config_value_ok(CFG_LONGITUDE_E5, 18000000) && !config_value_ok(CFG_LONGITUDE_E5, -18000001), "longitude range");
-    CHECK(!config_value_ok(99, 1), "unknown key has no valid value");
-
-    CHECK(calibration_ok(0, 0) && calibration_ok(6, 150) && calibration_ok(2, -150), "calibration ok");
-    CHECK(!calibration_ok(7, 0) && !calibration_ok(0, 151) && !calibration_ok(0, -151), "calibration range");
   }
 
   // ---- Event log ----

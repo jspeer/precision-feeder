@@ -97,6 +97,10 @@ substitutions.
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
   `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.
+- Setting limits live in `feeder_core.h` and are enforced by FeederCore's setters
+  (`set_min_gap_s()` and so on). Home Assistant, BLE and loading from flash all go
+  through them; never write `cfg` fields directly from YAML or BLE. The YAML min/max
+  repeat the limits for the input boxes, and `tests/test_consistency.py` checks them.
 - BLE protocol behaviour belongs in `BleEngine` (`engine.*`), which must stay free of
   ESPHome includes; the radio is reached only through `BleTransport`. New protocol
   behaviour gets a test in `tests/test_ble_engine.cpp`.

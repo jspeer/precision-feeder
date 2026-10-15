@@ -255,46 +255,14 @@ constexpr uint8_t QUERY_FLAG = 0x80;  // OR into a key (or index) to ask for it 
 constexpr size_t CONFIG_SET_SIZE = 5;  // key u8, value i32
 constexpr size_t QUERY_SIZE = 1;       // key|0x80
 
-/// True if `key` exists and `value` is in range for it.
-inline bool config_value_ok(uint8_t key, int32_t v) {
-  switch (key) {
-    case CFG_MIN_GAP_S:
-      return v >= 10 && v <= 3600;
-    case CFG_PORTION_GAP_S:
-      return v >= 1 && v <= 60;
-    case CFG_RELOAD_PAUSE_MIN:
-      return v >= 0 && v <= 60;
-    case CFG_REFILL_INTERVAL_DAYS:
-      return v >= 1 && v <= 30;
-    case CFG_DAILY_CAP:
-    case CFG_MAX_PORTIONS_CMD:
-      return v >= 1 && v <= 6;
-    case CFG_SCHEDULER_ENABLED:
-      return v == 0 || v == 1;
-    case CFG_LATITUDE_E5:
-      return v >= -9000000 && v <= 9000000;
-    case CFG_LONGITUDE_E5:
-      return v >= -18000000 && v <= 18000000;
-    case CFG_MIN_PULSE_US:
-      return v >= 300 && v <= 1500;
-    case CFG_MAX_PULSE_US:
-      return v >= 1500 && v <= 3000;
-    default:
-      return false;
-  }
-}
+// Value ranges are not here: FeederCore's setters check them (feeder_core.h), so BLE, Home Assistant and loading
+// from flash share one set of limits.
 
 inline bool config_key_known(uint8_t key) { return key >= CFG_MIN_GAP_S && key <= CFG_MAX_PULSE_US; }
 
 // ---- Calibration characteristic -------------------------------------------------------------------
 
-constexpr size_t CALIBRATION_SET_SIZE = 3;  // index u8, offset i16 (tenths of a degree)
-constexpr int16_t CAL_MIN = -150;           // +/- 15 degrees
-constexpr int16_t CAL_MAX = 150;
-
-inline bool calibration_ok(uint8_t index, int16_t tenths) {
-  return index < POSITIONS && tenths >= CAL_MIN && tenths <= CAL_MAX;
-}
+constexpr size_t CALIBRATION_SET_SIZE = 3;  // index u8, offset i16 (tenths of a degree; limits in feeder_core.h)
 
 // ---- Event log characteristic -----------------------------------------------------------------------
 

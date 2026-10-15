@@ -6,7 +6,14 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## Unreleased
+## 0.5.2: refactors, tests and CI (2026-10-14)
+
+- Settings limits have one home: `feeder_core.h`, enforced by FeederCore's
+  setters, which Home Assistant, BLE and loading from flash all use. The range
+  table in `protocol.h` is gone; `tests/test_consistency.py` checks the YAML
+  min/max and the component schema against the C++ limits. BLE locations are
+  checked as integers before conversion (as a float, 180.00001 degrees rounds to
+  180.0).
 
 - Refactor (no protocol change): the BLE protocol moved into `BleEngine`
   (`engine.h/.cpp`), plain C++ on top of FeederCore that talks to the radio only

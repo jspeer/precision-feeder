@@ -6,7 +6,9 @@
 #
 # Every feed, whatever its source, goes through the same guard inside the
 # component (minimum gap, daily cap, tray state, hold). These entities only
-# make requests and change the guard's settings.
+# make requests and change the guard's settings, through the component's setters,
+# which check every value against the limits in feeder_core.h (the min/max below
+# repeat them for the input boxes; tests/test_consistency.py keeps them in step).
 
 button:
   - platform: template
@@ -61,13 +63,9 @@ switch:
     icon: mdi:calendar-check
     lambda: return id(feeder).cfg.scheduler_enabled != 0;
     turn_on_action:
-      - lambda: |-
-          id(feeder).cfg.scheduler_enabled = 1;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_scheduler_enabled(true);
     turn_off_action:
-      - lambda: |-
-          id(feeder).cfg.scheduler_enabled = 0;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_scheduler_enabled(false);
 
 select:
   - platform: template
@@ -76,9 +74,7 @@ select:
     icon: mdi:calendar-multiple
     options: ["A", "B", "C"]
     set_action:
-      - lambda: |-
-          id(feeder).cfg.active_profile = x[0] - 'A';
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_active_profile(x[0] - 'A');
     update_interval: never
 
 number:
@@ -117,9 +113,7 @@ number:
     step: 1
     mode: box
     set_action:
-      - lambda: |-
-          id(feeder).cfg.min_gap_s = (uint16_t) x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_min_gap_s((int32_t) std::lround(x));
     update_interval: never
 
   - platform: template
@@ -132,9 +126,7 @@ number:
     step: 1
     mode: box
     set_action:
-      - lambda: |-
-          id(feeder).cfg.portion_gap_s = (uint16_t) x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_portion_gap_s((int32_t) std::lround(x));
     update_interval: never
 
   - platform: template
@@ -147,9 +139,7 @@ number:
     step: 1
     mode: box
     set_action:
-      - lambda: |-
-          id(feeder).cfg.daily_cap = (uint8_t) x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_daily_cap((int32_t) std::lround(x));
     update_interval: never
 
   # Debugging and recovery (owner decision 2026-10-14): the number of portions the
@@ -179,9 +169,7 @@ number:
     step: 1
     mode: box
     set_action:
-      - lambda: |-
-          id(feeder).cfg.max_portions_cmd = (uint8_t) x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_max_portions_cmd((int32_t) std::lround(x));
     update_interval: never
 
   - platform: template
@@ -195,9 +183,7 @@ number:
     mode: box
     # Scheduled feeding pauses this long after "Tray Reload", so you can finish loading the tray.
     set_action:
-      - lambda: |-
-          id(feeder).cfg.reload_pause_min = (uint16_t) x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_reload_pause_min((int32_t) std::lround(x));
     update_interval: never
 
   - platform: template
@@ -211,9 +197,7 @@ number:
     mode: box
     # How often you expect to refill. The schedule is flagged if it needs more portions than the tray holds before then.
     set_action:
-      - lambda: |-
-          id(feeder).cfg.refill_interval_days = (uint16_t) x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_refill_interval_days((int32_t) std::lround(x));
     update_interval: never
 
   # --- Location (needed only for sunrise/sunset events) --------------------
@@ -227,9 +211,7 @@ number:
     step: 0.0001
     mode: box
     set_action:
-      - lambda: |-
-          id(feeder).cfg.latitude = x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_location(x, id(feeder).cfg.longitude);
     update_interval: never
 
   - platform: template
@@ -242,9 +224,7 @@ number:
     step: 0.0001
     mode: box
     set_action:
-      - lambda: |-
-          id(feeder).cfg.longitude = x;
-          id(feeder).cfg_changed();
+      - lambda: id(feeder).set_location(id(feeder).cfg.latitude, x);
     update_interval: never
 
 # Publish the entities above only when their value changes (see packages/status.yaml).
