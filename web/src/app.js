@@ -6,7 +6,7 @@ const TABS = [
   { id: 'schedule', title: 'Schedule', short: 'Schedule', icon: 'calendar', shown: () => store.has(E.editProfile) },
   { id: 'configuration', title: 'Configuration', short: 'Config', icon: 'sliders', shown: () => store.has(E.dailyCap) },
   { id: 'maintenance', title: 'Maintenance', short: 'Service', icon: 'tool',
-    shown: () => store.has(E.calibrationMode) || store.has(E.declarePosition) },
+    shown: () => store.has(E.calibrationMode) || store.has(E.declarePosition) || store.has(E.portions24h) },
   { id: 'bluetooth', title: 'Bluetooth', short: 'BLE', icon: 'bluetooth', shown: () => store.has(E.bleSession) },
   { id: 'diagnostics', title: 'Diagnostics', short: 'Diag', icon: 'activity', shown: () => true },
 ];

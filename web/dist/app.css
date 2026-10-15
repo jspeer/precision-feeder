@@ -363,6 +363,22 @@ a { color: var(--accent); }
 .advanced { margin-top: 14px; }
 .advanced summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
 
+/* ---- bluetooth ---- */
+.metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.metric { background: var(--surface-2); border-radius: var(--radius-small); padding: 10px 12px; }
+.metric-label { font-size: 12px; color: var(--muted); }
+.metric-value { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.metric-sub { font-size: 12px; color: var(--muted); }
+.metric-warn .metric-value { color: var(--warn); }
+.activity { display: flex; flex-direction: column; font-size: 14px; max-height: 420px; overflow: auto; }
+.act { display: grid; grid-template-columns: 6.5em 3em minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--border); }
+.act:first-child { border-top: none; }
+.act-time { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }
+.act-dir { font: 700 11px var(--mono); text-align: center; padding: 2px 0; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.act-rx { background: var(--accent-soft); color: var(--accent); }
+.act-what { overflow-wrap: anywhere; font-family: var(--mono); font-size: 13px; }
+.act-seq { margin-left: 8px; color: var(--muted); font-size: 12px; }
+
 /* ---- phones: tabs become a bottom bar ---- */
 @media (max-width: 720px) {
   body { font-size: 15px; }
@@ -382,6 +398,8 @@ a { color: var(--accent); }
   .grid { grid-template-columns: 1fr; }
   .log-line { flex-wrap: wrap; column-gap: 6px; }
   .event { grid-template-columns: 28px minmax(0, 1fr) auto auto; }
+  .act { grid-template-columns: 3em minmax(0, 1fr) auto; }
+  .act-time { grid-column: 1 / -1; }
   .event .chips { grid-column: 2 / -1; grid-row: 2; }
   .log-text { flex-basis: 100%; }
 }

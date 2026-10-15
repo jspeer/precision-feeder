@@ -56,7 +56,13 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
     - the servo pulse range;
     - declaring the tray position or reloading;
     - the 24 h count edit for debugging, behind its explanation.
-  - The Bluetooth page follows.
+  - Bluetooth (only in builds with BLE):
+    - status, the client (the last two bytes of its address, connected for, last activity, MTU);
+    - protocol facts and counters;
+    - the activity log of the last 32 connections and writes with their results (from `/feeder/ble`),
+      fetched again only when a connection or write happens.
+    Read-only; nothing secret is shown, because the device never reports it.
+  - Maintenance also appears in builds without the calibration package (tray reload and the 24 h count).
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,
