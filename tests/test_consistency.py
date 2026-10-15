@@ -9,6 +9,8 @@ Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """
 
+import argparse
+import importlib.util
 import pathlib
 import re
 import unittest
@@ -81,6 +83,17 @@ class Consistency(unittest.TestCase):
         c = self.c
         self.assertEqual(ranges, [(c["PULSE_MIN_LO"], c["PULSE_MIN_HI"]), (c["PULSE_MAX_LO"], c["PULSE_MAX_HI"])])
         self.assertIn(f"if span < {c['PULSE_SPAN_MIN']}:", schema)
+
+    def test_mock_device_entities(self):
+        """tools/mock_device.py imitates the device: every entity it serves must exist under that name."""
+        spec = importlib.util.spec_from_file_location("mock_device", ROOT / "tools/mock_device.py")
+        mock = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mock)
+        args = argparse.Namespace(unknown=False, no_calibration=False, no_diagnostics=False)
+        served = [e.name for e in mock.Feeder(args).entities.values()]
+        self.assertGreater(len(served), 50)
+        for name in served:
+            self.assertIn(name, self.e, f"mock_device.py serves {name!r}, which no package defines")
 
 
 if __name__ == "__main__":

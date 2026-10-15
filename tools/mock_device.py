@@ -1,0 +1,616 @@
+#!/usr/bin/env python3
+"""A fake Precision Feeder for building and checking the web app without hardware.
+
+It speaks the same HTTP as ESPHome's web_server (version 3, ESPHome 2026.9.1): the index page that loads /0.css and
+/0.js, the /events server-sent-event stream (a "ping" with the device config, every entity with full detail, then
+state changes, log lines and a ping every 10 s), GET /<domain>/<name> and POST /<domain>/<name>/<action>. The
+entities are the ones the packages in packages/ define, with plausible values and a little behaviour (feeding moves
+the tray, Tray Reload refills it, the editor entities follow Edit Profile / Edit Event). It is a stand-in for the
+transport, not a second implementation of the feeder: the guard here is deliberately crude, and anything it gets
+wrong is the device's word that counts.
+
+    python3 tools/mock_device.py                     http://localhost:8080 (and [::1]:8080)
+    python3 tools/mock_device.py --port 8000 --no-calibration --no-diagnostics
+    python3 tools/mock_device.py --auth user:pass    HTTP basic authentication, as web_server's auth: block
+    python3 tools/mock_device.py --unknown           start with the tray position unknown
+
+Standard library only. The app is served from web/dist/ (app.js, app.css) when it exists.
+
+Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Designed and written with the assistance of an AI (Anthropic's Claude);
+reviewed by a human, but it may still contain mistakes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import math
+import pathlib
+import queue
+import socket
+import socketserver
+import threading
+import time
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DIST = ROOT / "web" / "dist"
+
+# The index page ESPHome builds for js_include/css_include with empty js_url/css_url (web_server/__init__.py).
+INDEX = ("<!DOCTYPE html><html><head><meta charset=UTF-8><link rel=icon href=data:>"
+         "<link rel=stylesheet href=/0.css></head><body><script type=module src=/0.js></script>"
+         "<esp-app></esp-app></body></html>")
+
+CONFIG, DIAGNOSTIC = 1, 2  # entity_category as the web server sends it
+DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+class Entity:
+    def __init__(self, domain: str, name: str, value=None, *, icon: str = "", category: int = 0, uom: str = "",
+                 decimals: int = 0, **detail):
+        self.domain, self.name, self.value = domain, name, value
+        self.icon, self.category, self.uom, self.decimals, self.detail = icon, category, uom, decimals, detail
+
+    @property
+    def id(self) -> str:
+        return f"{self.domain}/{self.name}"
+
+    def json(self, full: bool) -> dict:
+        d: dict = {"id": self.id}
+        if full:
+            d.update(domain=self.domain, name=self.name, icon=self.icon, entity_category=self.category)
+        if self.domain == "button":
+            return d
+        if self.domain in ("sensor", "number"):
+            v = self.value
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                d["value"], d["state"] = ("NaN" if self.domain == "number" else None), "NA"
+            else:
+                text = f"{v:.{self.decimals}f}"
+                d["value"] = text if self.domain == "number" else round(float(v), self.decimals)
+                d["state"] = f"{text} {self.uom}".strip()
+            if full and self.uom:
+                d["uom"] = self.uom
+            if full and self.domain == "number":
+                d.update({k: f"{self.detail[k]:.{self.decimals}f}" for k in ("min_value", "max_value", "step")},
+                         mode=1)
+        elif self.domain in ("binary_sensor", "switch"):
+            d["value"], d["state"] = bool(self.value), "ON" if self.value else "OFF"
+            if full and self.domain == "switch":
+                d["assumed_state"] = False
+        elif self.domain == "select":
+            d["value"] = d["state"] = self.value
+            if full:
+                d["option"] = list(self.detail["options"])
+        elif self.domain == "text":
+            d["value"] = d["state"] = self.value
+            d.update(min_length=0, max_length=self.detail["max_length"], pattern="")
+            if full:
+                d["mode"] = 0
+        else:  # text_sensor
+            d["value"] = d["state"] = self.value
+        return d
+
+
+class Feeder:
+    """The device: its entities and a crude imitation of what the firmware does with them."""
+
+    def __init__(self, args):
+        self.lock = threading.RLock()
+        self.clients: list[queue.Queue] = []
+        self.started = time.monotonic()
+        self.position = 2
+        self.unknown = args.unknown
+        self.calibrating = False
+        self.history: list[tuple[float, int, str]] = []  # (epoch, portions, source), newest first
+        self.last_feed_mono = -1e9
+        self.hold_until: float | None = None
+        self.edit_profile, self.edit_event = 0, 0
+        self.cal_pos, self.offsets = 0, [0.0] * 7
+        # 3 profiles x 4 events: [enabled, anchor, offset_min, portions, days mask (bit0 = Sunday)]
+        self.profiles = [
+            {"every_n": 1, "fast": 0b0000001,
+             "ev": [[1, 0, 510, 1, 0x7E], [1, 0, 1050, 1, 0x7E], [0, 2, -30, 1, 0x7F], [0, 0, 720, 1, 0x7F]]},
+            {"every_n": 2, "fast": 0,
+             "ev": [[1, 0, 600, 1, 0x7F], [0, 0, 720, 1, 0x7F], [0, 0, 720, 1, 0x7F], [0, 0, 720, 1, 0x7F]]},
+            {"every_n": 1, "fast": 0,
+             "ev": [[1, 1, 30, 1, 0x7F], [1, 0, 720, 1, 0x7F], [1, 2, -60, 1, 0x7F], [0, 0, 720, 1, 0x7F]]},
+        ]
+        self.oneshots: list[tuple[float, int]] = []
+        self.entities: dict[str, Entity] = {}
+        self._build(args)
+
+    # ---- entity table (names exactly as in packages/*.yaml) ----
+
+    def _add(self, *a, **k):
+        e = Entity(*a, **k)
+        self.entities[e.id] = e
+
+    def _build(self, args):
+        a = self._add
+        # status.yaml
+        a("sensor", "Tray Position", icon="mdi:rotate-right")
+        a("sensor", "Portions Remaining", icon="mdi:fish")
+        a("sensor", "Portions Fed Today", icon="mdi:counter")
+        a("sensor", "Runway", icon="mdi:calendar-clock", uom="d")
+        a("sensor", "Minutes Since Clock Sync", 3, icon="mdi:clock-time-four-outline", category=DIAGNOSTIC, uom="min")
+        for name, icon in [("Tray State", "mdi:state-machine"), ("Next Feed", "mdi:clock-outline"),
+                           ("Hold", "mdi:pause-circle-outline"), ("Last Feed", "mdi:history"),
+                           ("Last Result", "mdi:message-text-outline"), ("Recent Feeds", "mdi:format-list-bulleted"),
+                           ("Active Schedule", "mdi:calendar-text"), ("One-shot Feeds", "mdi:calendar-star"),
+                           ("Tray Empty On", "mdi:calendar-end"), ("Faults", "mdi:alert-circle-outline")]:
+            a("text_sensor", name, "", icon=icon)
+        self.entities["text_sensor/Last Result"].value = "none yet"
+        a("text_sensor", "Time Source", "NTP", icon="mdi:clock-check-outline", category=DIAGNOSTIC)
+        a("text_sensor", "Firmware Version", "1.1.0", category=DIAGNOSTIC)
+        a("binary_sensor", "Clock Valid", True, category=DIAGNOSTIC)
+        a("binary_sensor", "Needs Food", False, icon="mdi:fish-off")
+        a("binary_sensor", "Schedule Over Capacity", False, icon="mdi:alert-outline")
+        # controls.yaml
+        for name in ["Feed One Portion", "Feed Selected Portions", "Tray Reload", "Stop", "Hold Scheduled Feeding",
+                     "Cancel Hold"]:
+            a("button", name)
+        a("switch", "Scheduler", True, icon="mdi:calendar-check")
+        a("select", "Active Profile", "A", icon="mdi:calendar-multiple", options=["A", "B", "C"])
+        a("number", "Manual Portions", 1, icon="mdi:numeric", min_value=1, max_value=6, step=1)
+        a("number", "Hold Duration", 24, icon="mdi:timer-sand", uom="h", min_value=0, max_value=100000, step=1)
+        a("number", "Minimum Gap Between Feeds", 60, category=CONFIG, uom="s", min_value=10, max_value=3600, step=1)
+        a("number", "Gap Between Portions", 3, category=CONFIG, uom="s", min_value=1, max_value=60, step=1)
+        a("number", "Daily Portion Cap", 4, category=CONFIG, icon="mdi:shield-check", min_value=1, max_value=6, step=1)
+        a("number", "Portions Counted (24 h)", 0, category=DIAGNOSTIC, icon="mdi:counter", min_value=0, max_value=24,
+          step=1)
+        a("number", "Max Portions Per Command", 1, category=CONFIG, icon="mdi:shield-check", min_value=1, max_value=6,
+          step=1)
+        a("number", "Reload Pause", 10, category=CONFIG, uom="min", min_value=0, max_value=60, step=1)
+        a("number", "Refill Interval", 3, category=CONFIG, uom="d", min_value=1, max_value=30, step=1)
+        a("number", "Latitude", 0.0, category=CONFIG, uom="°", decimals=4, min_value=-90, max_value=90, step=0.0001)
+        a("number", "Longitude", 0.0, category=CONFIG, uom="°", decimals=4, min_value=-180, max_value=180,
+          step=0.0001)
+        # schedule_editor.yaml
+        a("text_sensor", "Edited Profile", "", icon="mdi:calendar-edit")
+        a("select", "Edit Profile", "A", icon="mdi:pencil", options=["A", "B", "C"])
+        a("select", "Edit Event", "1", icon="mdi:pencil", options=["1", "2", "3", "4"])
+        a("select", "Event Anchor", "clock", icon="mdi:weather-sunset", options=["clock", "sunrise", "sunset"])
+        a("switch", "Event Enabled", True, icon="mdi:check-circle-outline")
+        a("text", "Event Time", "", icon="mdi:clock-edit-outline", max_length=8)
+        a("text", "Event Days", "", icon="mdi:calendar-week", max_length=40)
+        a("text", "Profile Fast Days", "", icon="mdi:calendar-remove", max_length=40)
+        a("text", "Add One-shot Feed", "", icon="mdi:calendar-plus", max_length=20)
+        a("number", "Event Portions", 1, icon="mdi:fish", min_value=1, max_value=6, step=1)
+        a("number", "Profile Every N Days", 1, icon="mdi:calendar-sync", min_value=1, max_value=14, step=1)
+        a("number", "One-shot Portions", 1, icon="mdi:fish", min_value=1, max_value=6, step=1)
+        a("button", "Restart Cycle Today")
+        a("button", "Clear One-shot Feeds")
+        if not args.no_calibration:  # calibration.yaml
+            a("switch", "Calibration Mode", False, icon="mdi:tune")
+            a("select", "Calibration Position", "0", icon="mdi:numeric", options=[str(i) for i in range(7)])
+            a("number", "Calibration Offset", 0.0, icon="mdi:angle-acute", uom="°", decimals=1, min_value=-15,
+              max_value=15, step=0.1)
+            a("number", "Servo Min Pulse", 544, icon="mdi:pulse", category=CONFIG, uom="µs", min_value=300,
+              max_value=1500, step=1)
+            a("number", "Servo Max Pulse", 2400, icon="mdi:pulse", category=CONFIG, uom="µs", min_value=1500,
+              max_value=3000, step=1)
+            a("number", "Declared Tray Position", 0, icon="mdi:numeric", min_value=0, max_value=6, step=1)
+            a("button", "Declare Tray Position")
+        if not args.no_diagnostics:  # diagnostics.yaml (ESPHome's debug sensors)
+            a("sensor", "Free Heap", 121344, uom="B")
+            a("sensor", "Largest Free Heap Block", 65536, uom="B")
+            a("sensor", "Heap Fragmentation", 9, uom="%")
+            a("sensor", "Loop Time", 12, uom="ms")
+        self.refresh(publish=False)
+
+    # ---- helpers ----
+
+    def uptime(self) -> int:
+        return int(time.monotonic() - self.started)
+
+    def get(self, domain: str, name: str):
+        return self.entities[f"{domain}/{name}"].value
+
+    def set(self, domain: str, name: str, value, publish: bool = True):
+        e = self.entities.get(f"{domain}/{name}")
+        if e is None or e.value == value:
+            return
+        e.value = value
+        if publish:
+            self.broadcast("state", json.dumps(e.json(False)))
+
+    def fmt(self, epoch: float) -> str:
+        t = time.localtime(epoch)
+        return f"{DAY_ABBR[(t.tm_wday + 1) % 7]} {time.strftime('%Y-%m-%d %H:%M', t)}"
+
+    @staticmethod
+    def days_text(mask: int) -> str:
+        mask &= 0x7F
+        if mask == 0x7F:
+            return "all"
+        if mask == 0:
+            return "none"
+        return ",".join(DAY_NAMES[i] for i in range(7) if mask & (1 << i))
+
+    @staticmethod
+    def parse_days(text: str) -> int | None:
+        text = text.strip().lower()
+        words = {"all": 0x7F, "none": 0, "weekdays": 0x3E, "weekend": 0x41}
+        if text in words:
+            return words[text]
+        mask = 0
+        for part in filter(None, (p.strip() for p in text.split(","))):
+            if part[:3] not in DAY_NAMES:
+                return None
+            mask |= 1 << DAY_NAMES.index(part[:3])
+        return mask
+
+    @staticmethod
+    def event_time_text(ev) -> str:
+        if ev[1] == 0:
+            return f"{ev[2] // 60:02d}:{ev[2] % 60:02d}"
+        a = abs(ev[2])
+        return f"{'-' if ev[2] < 0 else '+'}{a // 60:02d}:{a % 60:02d}"
+
+    def summary(self, p: int) -> str:
+        prof = self.profiles[p]
+        parts = []
+        for ev in sorted((e for e in prof["ev"] if e[0]), key=lambda e: e[2] + (0, 360, 1080)[e[1]]):
+            t = self.event_time_text(ev)
+            if ev[1]:
+                t = ("sunrise", "sunset")[ev[1] - 1] + t
+            parts.append(f"{t} x{ev[3]}" + ("" if ev[4] == 0x7F else f" ({self.days_text(ev[4])})"))
+        out = f"{'ABC'[p]}: " + (", ".join(parts) or "no events")
+        if prof["every_n"] > 1:
+            out += f"; every {prof['every_n']} days"
+        if prof["fast"]:
+            out += f"; fast: {self.days_text(prof['fast'])}"
+        if not self.get("switch", "Scheduler"):
+            out += " (scheduler off)"
+        return out
+
+    def remaining(self) -> int:
+        return 6 - self.position
+
+    def fed_24h(self) -> int:
+        return sum(n for t, n, _ in self.history if t > time.time() - 86400)
+
+    def refresh(self, publish: bool = True):
+        """Recompute every derived entity, publishing only what changed (as the firmware's 1 s interval does)."""
+        def s(domain, name, value):
+            self.set(domain, name, value, publish)
+
+        if self.hold_until is not None and self.hold_until != math.inf and time.time() > self.hold_until:
+            self.hold_until = None
+        state = ("calibrating" if self.calibrating else "unknown" if self.unknown
+                 else "empty" if self.position >= 6 else "loaded")
+        s("sensor", "Tray Position", self.position)
+        s("sensor", "Portions Remaining", self.remaining())
+        midnight = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
+        s("sensor", "Portions Fed Today", sum(n for t, n, _ in self.history if t >= midnight))
+        s("sensor", "Runway", None if self.position >= 6 else float(self.remaining() // 2))
+        s("text_sensor", "Tray State", state)
+        nxt = time.time() + 3 * 3600
+        s("text_sensor", "Next Feed", self.fmt(nxt - nxt % 60))
+        s("text_sensor", "Hold", "none" if self.hold_until is None else "until cancelled"
+          if self.hold_until == math.inf else "until " + self.fmt(self.hold_until))
+        if self.history:
+            t, _, src = self.history[0]
+            s("text_sensor", "Last Feed", f"{self.fmt(t)} ({src})")
+        else:
+            s("text_sensor", "Last Feed", "never")
+        s("text_sensor", "Recent Feeds", "; ".join(
+            f"{time.strftime('%m-%d %H:%M', time.localtime(t))} x{n} {src}" for t, n, src in self.history[:6])
+          or "none")
+        s("text_sensor", "Active Schedule", self.summary("ABC".index(self.get("select", "Active Profile"))))
+        s("text_sensor", "One-shot Feeds", "; ".join(f"{self.fmt(t)} x{n}" for t, n in self.oneshots) or "none")
+        s("text_sensor", "Tray Empty On", "empty now" if self.position >= 6 else self.fmt(time.time() + 2 * 86400))
+        faults = []
+        if self.unknown:
+            faults.append("tray position unknown")
+        if self.position >= 6:
+            faults.append("tray empty")
+        s("text_sensor", "Faults", "; ".join(faults) or "none")
+        s("binary_sensor", "Needs Food", self.position >= 6)
+        s("number", "Portions Counted (24 h)", self.fed_24h())
+        # the schedule editor follows Edit Profile / Edit Event
+        p = self.profiles[self.edit_profile]
+        ev = p["ev"][self.edit_event]
+        active = "ABC".index(self.get("select", "Active Profile")) == self.edit_profile
+        s("text_sensor", "Edited Profile", self.summary(self.edit_profile) + (" [active]" if active else " [not active]"))
+        s("select", "Edit Profile", "ABC"[self.edit_profile])
+        s("select", "Edit Event", str(self.edit_event + 1))
+        s("select", "Event Anchor", ("clock", "sunrise", "sunset")[ev[1]])
+        s("switch", "Event Enabled", bool(ev[0]))
+        s("text", "Event Time", self.event_time_text(ev))
+        s("text", "Event Days", self.days_text(ev[4]))
+        s("text", "Profile Fast Days", self.days_text(p["fast"]))
+        s("number", "Event Portions", ev[3])
+        s("number", "Profile Every N Days", p["every_n"])
+        if "switch/Calibration Mode" in self.entities:
+            s("switch", "Calibration Mode", self.calibrating)
+            s("select", "Calibration Position", str(self.cal_pos))
+            s("number", "Calibration Offset", self.offsets[self.cal_pos])
+
+    def log(self, level: str, tag: str, msg: str):
+        colour = {"E": "1;31", "W": "0;33", "I": "0;32", "D": "0;36"}.get(level, "0")
+        self.broadcast("log", f"\033[{colour}m[{level}][{tag}]: {msg}\033[0m")
+
+    def broadcast(self, event: str, data: str):
+        for q in list(self.clients):
+            q.put((event, data))
+
+    # ---- actions ----
+
+    def feed(self, portions: int):
+        if self.calibrating:
+            result = "calibrating"
+        elif self.unknown:
+            result = "position unknown"
+        elif self.position >= 6:
+            result = "tray empty"
+        elif portions > self.get("number", "Max Portions Per Command"):
+            result = "too many portions for one command"
+        elif time.monotonic() - self.last_feed_mono < self.get("number", "Minimum Gap Between Feeds"):
+            result = "too soon"
+        elif self.fed_24h() + portions > self.get("number", "Daily Portion Cap"):
+            result = "daily cap reached"
+        else:
+            portions = min(portions, self.remaining())
+            self.position += portions
+            self.last_feed_mono = time.monotonic()
+            self.history.insert(0, (time.time(), portions, "ESPHome"))
+            result = "ok"
+            self.log("I", "precision_feeder", f"Feed x{portions} (ESPHome): ok")
+        if result != "ok":
+            self.log("W", "precision_feeder", f"Feed refused (ESPHome): {result}")
+        self.set("text_sensor", "Last Result", result)
+
+    def action(self, domain: str, name: str, action: str, params: dict) -> bool:
+        key = f"{domain}/{name}"
+        if key not in self.entities:
+            return False
+        value = params.get("value", params.get("option", ""))
+        ev = self.profiles[self.edit_profile]["ev"][self.edit_event]
+        if domain == "button" and action == "press":
+            if name == "Feed One Portion":
+                self.feed(1)
+            elif name == "Feed Selected Portions":
+                self.feed(int(self.get("number", "Manual Portions")))
+            elif name == "Tray Reload":
+                self.position, self.unknown = 0, False
+                self.log("I", "precision_feeder", "Tray reloaded: position 0, scheduled feeding paused")
+            elif name == "Stop":
+                self.log("I", "precision_feeder", "Stop")
+            elif name == "Hold Scheduled Feeding":
+                h = self.get("number", "Hold Duration")
+                self.hold_until = math.inf if h == 0 else time.time() + h * 3600
+            elif name == "Cancel Hold":
+                self.hold_until = None
+            elif name == "Clear One-shot Feeds":
+                self.oneshots.clear()
+            elif name == "Declare Tray Position":
+                self.position, self.unknown = int(self.get("number", "Declared Tray Position")), False
+        elif domain == "switch" and action in ("turn_on", "turn_off", "toggle"):
+            on = {"turn_on": True, "turn_off": False}.get(action, not self.get("switch", name))
+            if name == "Calibration Mode":
+                self.calibrating = on
+            elif name == "Event Enabled":
+                ev[0] = int(on)
+            else:
+                self.set("switch", name, on)
+        elif domain == "select" and action == "set":
+            if value not in self.entities[key].detail["options"]:
+                return True  # ignored, as on the device
+            if name == "Edit Profile":
+                self.edit_profile = "ABC".index(value)
+            elif name == "Edit Event":
+                self.edit_event = int(value) - 1
+            elif name == "Event Anchor":
+                ev[1] = ("clock", "sunrise", "sunset").index(value)
+            elif name == "Calibration Position":
+                self.cal_pos = int(value)
+            else:
+                self.set("select", name, value)
+        elif domain == "number" and action == "set":
+            e = self.entities[key]
+            try:
+                x = float(value)
+            except ValueError:
+                return True
+            if not e.detail["min_value"] <= x <= e.detail["max_value"]:
+                return True  # out of range: ignored, as on the device
+            if name == "Event Portions":
+                ev[3] = int(x)
+            elif name == "Profile Every N Days":
+                self.profiles[self.edit_profile]["every_n"] = int(x)
+            elif name == "Calibration Offset":
+                self.offsets[self.cal_pos] = round(x, 1)
+            else:
+                self.set("number", name, round(x, e.decimals) if e.decimals else int(x))
+        elif domain == "text" and action == "set":
+            if name == "Event Time":
+                self.set_event_time(ev, value)
+            elif name in ("Event Days", "Profile Fast Days"):
+                mask = self.parse_days(value)
+                if mask is None:
+                    self.log("W", "schedule_editor", f"Days '{value}' not understood")
+                elif name == "Event Days":
+                    ev[4] = mask
+                else:
+                    self.profiles[self.edit_profile]["fast"] = mask
+            elif name == "Add One-shot Feed" and value:
+                try:
+                    t = time.mktime(time.strptime(value, "%Y-%m-%d %H:%M"))
+                    self.oneshots.append((t, int(self.get("number", "One-shot Portions"))))
+                except ValueError:
+                    self.log("W", "schedule_editor", f"One-shot '{value}' rejected")
+        else:
+            return False
+        self.refresh()
+        return True
+
+    def set_event_time(self, ev, text: str):
+        text = text.strip()
+        try:
+            sign = -1 if text.startswith("-") else 1
+            h, _, m = text.lstrip("+-").partition(":")
+            minutes = int(h) * 60 + int(m or 0)
+            if ev[1] == 0 and text[0] not in "+-" and 0 <= minutes < 1440:
+                ev[2] = minutes
+            elif ev[1] != 0 and minutes <= 720:
+                ev[2] = sign * minutes
+            else:
+                raise ValueError
+        except (ValueError, IndexError):
+            self.log("W", "schedule_editor", f"Event time '{text}' not understood")
+
+
+def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
+    expected = "Basic " + base64.b64encode(auth.encode()).decode() if auth else None
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):  # quieter than the default
+            pass
+
+        def _authorized(self) -> bool:
+            if expected is None or self.headers.get("Authorization") == expected:
+                return True
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Login Required"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
+        def _send(self, code: int, body: bytes = b"", ctype: str = "text/plain"):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _parts(self):
+            url = urllib.parse.urlsplit(self.path)
+            parts = [urllib.parse.unquote(p) for p in url.path.split("/") if p]
+            params = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+            return url.path, parts, params
+
+        def do_GET(self):
+            if not self._authorized():
+                return
+            path, parts, params = self._parts()
+            if path == "/":
+                return self._send(200, INDEX.encode(), "text/html")
+            if path in ("/0.js", "/0.css"):
+                f = DIST / ("app.js" if path == "/0.js" else "app.css")
+                body = f.read_bytes() if f.exists() else b"/* web/dist is not built yet */"
+                return self._send(200, body, "text/javascript" if path.endswith("js") else "text/css")
+            if path == "/events":
+                return self._events()
+            if len(parts) == 2:
+                with feeder.lock:
+                    e = feeder.entities.get("/".join(parts))
+                    if e is not None:
+                        body = json.dumps(e.json(params.get("detail") == "all")).encode()
+                        return self._send(200, body, "application/json")
+            self._send(404)
+
+        def do_POST(self):
+            if not self._authorized():
+                return
+            _, parts, params = self._parts()
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                params.update({k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()})
+            if len(parts) == 3:
+                with feeder.lock:
+                    if feeder.action(parts[0], parts[1], parts[2], params):
+                        return self._send(200)
+            self._send(404)
+
+        def _events(self):
+            q: queue.Queue = queue.Queue()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            with feeder.lock:
+                config = {"title": "Precision Feeder", "comment": "", "ota": False, "log": True, "lang": "en",
+                          "uptime": feeder.uptime()}
+                q.put(("ping", json.dumps(config)))
+                for e in feeder.entities.values():
+                    q.put(("state", json.dumps(e.json(True))))
+                feeder.clients.append(q)
+            try:
+                while True:
+                    try:
+                        event, data = q.get(timeout=ping_s)
+                    except queue.Empty:
+                        event, data = "ping", json.dumps({"uptime": feeder.uptime()})
+                    self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode())
+                    self.wfile.flush()
+            except OSError:
+                pass
+            finally:
+                with feeder.lock:
+                    feeder.clients.remove(q)
+
+    return Handler
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def server_bind(self):
+        # HTTPServer.server_bind looks the host name up (getfqdn), which can hang with no DNS; skip it.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
+
+
+class DualStackServer(Server):
+    """Listens on IPv6 and, where the system allows it, IPv4 on the same socket."""
+
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        except OSError:
+            pass
+        super().server_bind()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--host", default="::", help="address to listen on (default: all, IPv6 and IPv4)")
+    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--auth", metavar="USER:PASS", help="require HTTP basic authentication")
+    ap.add_argument("--no-calibration", action="store_true", help="as a build without the calibration package")
+    ap.add_argument("--no-diagnostics", action="store_true", help="as a build without the diagnostics package")
+    ap.add_argument("--unknown", action="store_true", help="start with the tray position unknown")
+    ap.add_argument("--ping", type=float, default=10.0, help="seconds between keep-alive pings (default 10)")
+    args = ap.parse_args()
+
+    feeder = Feeder(args)
+    server_cls = DualStackServer if ":" in args.host else Server
+    server = server_cls((args.host, args.port), make_handler(feeder, args.auth, args.ping))
+
+    def tick():  # the firmware's 1-second interval
+        while True:
+            time.sleep(1)
+            with feeder.lock:
+                feeder.refresh()
+
+    threading.Thread(target=tick, daemon=True).start()
+    print(f"Mock Precision Feeder on http://localhost:{args.port}/ (Ctrl+C to stop)", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

@@ -127,7 +127,8 @@ packages/     reusable YAML packages
 examples/     basic.yaml, ble.yaml
 tests/        host-side C++ tests (test_core, test_logic, test_protocol, test_ble_engine; fake_feeder.h)
 tools/        precision_feeder_ble.py (entry point) and precision_feeder_client/ (protocol: pure, no
-              dependencies; client: bleak; selftest; cli), with tests; check.sh runs every check
+              dependencies; client: bleak; selftest; cli), with tests; check.sh runs every check;
+              mock_device.py imitates the device's web server for building the web app
 ```
 
 See DESIGN.md section 12 for the intended layout.

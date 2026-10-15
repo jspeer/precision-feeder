@@ -468,7 +468,8 @@ precision-feeder/
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
   tests/               host-side C++ tests (core, logic, protocol)
   tools/               Python reference client: precision_feeder_ble.py (entry point) and
-                       precision_feeder_client/ (protocol, client, selftest, cli); check.sh
+                       precision_feeder_client/ (protocol, client, selftest, cli); check.sh;
+                       mock_device.py (a fake device for building the web app)
 ```
 
 ## 13. Decisions log
@@ -549,16 +550,34 @@ precision-feeder/
    model's files, credits the author, and the README states the model's licence;
    `.gitignore` keeps 3MF/STL files out.
 6. ~~HA-time package in v1.~~ Decided 2026-10-14: enabled in both examples.
-7. Checks for 1.1.0 (milestone M0 in [docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-local-first.md)),
-   against the ESPHome version in use:
-   - How a `js_include` path written in a package resolves (likely relative to the
-     user's YAML, so `precision-feeder/web/...`).
-   - Whether `disabled_by_default` entities appear in `/events`.
-   - The `/events` stream and custom handlers with both `basic` and `digest` auth.
-   - The `network:` IPv6 option.
-   - From the BLE adapter: the peer address and MTU (GATT server events), any read
-     callback on characteristics, and whether advertising restarts after a
-     disconnect.
+7. Checks for 1.1.0 (milestone M0 in [docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-local-first.md)).
+   Answered 2026-10-15 from the ESPHome 2026.9.1 source, and by validating a test
+   configuration:
+   - **`js_include` path:** `cv.file_` tries the config folder, then the folder of
+     the YAML file that declares it. So `packages/web_server.yaml` can name
+     `../web/dist/app.js`, whatever the clone is called.
+   - **`disabled_by_default` entities:** sent on `/events` like any other, with
+     `"is_disabled_by_default": true`. Only `internal` entities are left out (unless
+     `include_internal`).
+   - **Auth:** `add_handler()` wraps a handler in the auth middleware when credentials
+     are set (they are set before any component's `setup()`). The ESP-IDF server
+     implements both `basic` and `digest`, one per build. Still to see on hardware:
+     the browser re-sending credentials for `/events` and the app's requests.
+   - **Custom handlers run on the HTTP server's task, not the main loop,** so any
+     state they read (M2's ring buffer) needs a lock.
+   - **IPv6:** `network: enable_ipv6: true` (default false on ESP32) and
+     `min_ipv6_addr_count`. **Finding:** ESPHome's Wi-Fi only counts as connected
+     once it has an IPv4 address (`wifi_sta_connect_status_()`). On a network with
+     no DHCPv4 it never connects, and falls back to its access point. A static IPv4
+     address (`manual_ip`) may work around this; to check on hardware. See the plan,
+     M8.
+   - **BLE adapter:**
+     - A component can register a GATT server event handler
+       (`esp32_ble.register_gatts_event_handler`). Events arrive on the main loop, so
+       the peer address (`ESP_GATTS_CONNECT_EVT`) and MTU (`ESP_GATTS_MTU_EVT`) are
+       available.
+     - `BLECharacteristic::on_read(conn_id)` exists, so reads can be counted.
+     - Advertising restarts after a disconnect (`advertising_refresh()`).
 8. Profile names: section 5.1 lists a per-profile `name`, but the `Profile` record
    has none, so profiles show as A, B and C. Adding one changes the saved Settings
    layout (new version, key and migration); deferred (2026-10-15).
