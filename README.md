@@ -5,6 +5,9 @@ ESPHome firmware for the
 a 3D-printed fish feeder that drops one measured portion at a time from a
 servo-driven tray.
 
+**The feeder to print:** <https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2>
+(by FlyingGyroscope; the model is CC BY-NC-SA 4.0, see [Licence](#licence)).
+
 It runs the feeder on its own: the schedule lives on the device, so the fish
 are fed with no Home Assistant, no internet and no app, once the clock is set.
 On top of that you get full **Home Assistant** control, a **web dashboard**, and
@@ -97,7 +100,7 @@ say where the tray is (or reload it). It never guesses.
 
 | Part | Notes |
 |---|---|
-| The printed feeder | [Printables model](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2) |
+| The printed feeder | <https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2> |
 | Waveshare ESP32-S3-Zero | the 4 MB flash / 2 MB PSRAM version (ESP32-S3FH4R2). Another ESP32-S3 board works if you change the pins. |
 | MG90S servo | or the TowerPro SG92R the original was built with (same size and pins) |
 | 5 V supply | for the servo; USB-C or the board's 5 V pad for the board |
