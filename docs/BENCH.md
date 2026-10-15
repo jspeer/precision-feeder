@@ -318,5 +318,21 @@ from the computer used for testing.
   - The Bluetooth page showed all of it, the refusals in amber, and the activity log (31 entries).
   - Not seen: the masked client address. It is kept only while connected, and the selftest had disconnected
     before the page was read.
-- **Not checked:** IPv6 (M8), web auth on the device, and a phone.
+- **Not checked:** web auth on the device, and a phone.
+
+## IPv6 on hardware (2026-10-15, firmware 1.1.0 in progress, after M8)
+
+The same board, updated over Wi-Fi (encrypted OTA with the API key, 13 s upload) to the M8 build with
+`enable_ipv6: "true"`, on a dual-stack network (DHCPv4 plus router advertisements with a global prefix and a
+ULA prefix), reached from a computer on another subnet of the same network.
+
+- **Addresses:** after boot the feeder had four, all reported by `wifi_info`: IPv4, IPv6 link-local, a global
+  IPv6 address and a ULA. Diagnostics listed each with its kind.
+- **Web app over IPv6:** by the global address and by the ULA, the index page, the app (33 KB gzipped) and
+  `/events` all answered. In a browser at the global address the app connected, and a setting written from it
+  was confirmed (then put back).
+- **mDNS:** `precision-feeder.local` resolved to the IPv4 address and all three IPv6 addresses, and the web app
+  answered by name over IPv4 and over IPv6.
+- **IPv4-only and IPv6-only networks** were not tried (the fallback for IPv6-only is a static IPv4 address;
+  README, Limits).
 
