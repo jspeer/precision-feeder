@@ -306,7 +306,15 @@ from the computer used for testing.
     app is not affected.
 - **Seen once, not reproduced:** in the first calibration run, the page still showed calibration on several
   seconds after Finish, with no confirmation toast. In two later runs both came within 0.1 s. To watch in M9.
-- **Not checked:** BLE with a client. The test machine's shell could not use Bluetooth, so the BLE selftest,
-  the client details and the activity log with real entries still need a run from a computer that can.
-  Also not checked: IPv6 (M8), web auth on the device, and a phone.
+- **BLE with a client** (run from the owner's own terminal; the test shell could not use Bluetooth):
+  - The selftest (`tools/precision_feeder_ble.py ADDRESS selftest`, which never feeds or holds) passed 14/14.
+  - The BLE diagnostics matched it exactly: 1 connection and a disconnect; AUTH 1 accepted, 0 refused; 3
+    refused writes (a stale sequence number, a tampered write, a write signed for another characteristic);
+    2 invalid (an out-of-range Config value, the reserved SET_TIMEZONE opcode); the exact retry logged as a
+    replay with the same answer; 29 writes, 23 reads, 30 notifications with their bytes.
+  - MTU 517, negotiated by the client, so the GATT server event hook works.
+  - The Bluetooth page showed all of it, the refusals in amber, and the activity log (31 entries).
+  - Not seen: the masked client address. It is kept only while connected, and the selftest had disconnected
+    before the page was read.
+- **Not checked:** IPv6 (M8), web auth on the device, and a phone.
 
