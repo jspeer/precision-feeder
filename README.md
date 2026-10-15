@@ -85,8 +85,10 @@ say where the tray is (or reload it). It never guesses.
 - **Optional extras:** push button (as in the original), status LED, web
   dashboard, memory diagnostics.
 - **Optional BLE interface** for a PLC, a phone app or a script: feed, read
-  status, edit the schedule, calibrate, set the clock. Documented byte for byte
-  in [docs/PROTOCOL.md](docs/PROTOCOL.md), with a Python reference client.
+  status, edit the schedule, calibrate, set the clock. Every write is
+  authenticated with a shared key, so a stranger in Bluetooth range cannot
+  control it. Documented byte for byte in [docs/PROTOCOL.md](docs/PROTOCOL.md),
+  with a Python reference client.
 - **Secure updates.** OTA updates are encrypted with the API key; the web
   server's own upload page is turned off.
 
@@ -183,7 +185,9 @@ repository never touches your file.
 3. **Secrets.** Copy `examples/secrets.example.yaml` to `examples/secrets.yaml`
    (ignored by git) and fill it in: WiFi name and password, a password for the
    fallback hotspot, and an API key. Make the key with
-   `openssl rand -base64 32`. Keep it: Home Assistant asks for it.
+   `openssl rand -base64 32`. Keep it: Home Assistant asks for it. With the BLE
+   package, also a `ble_key`, made the same way (a different one): your BLE
+   client needs it.
 4. **Your configuration.** Make `examples/local.yaml` as shown above. At least
    set `timezone` (an IANA name such as `Europe/London`, or a POSIX string such
    as `<-06>6` for a fixed UTC−6).
@@ -265,6 +269,8 @@ calibration mode; dim cyan hold or reload pause.
 | `ble_name` | `Precision Feeder` | name shown to BLE scanners (BLE package) |
 | `ble_time_policy` | `fallback_only` | whether a clock pushed over BLE is accepted: only when network time is stale (recommended), `always`, or `off` |
 
+The BLE key itself is `ble_key` in `secrets.yaml`, not a substitution.
+
 **At run time**, from Home Assistant or the web UI (saved on the device): the
 schedule, Active Profile, Hold, Minimum Gap Between Feeds (60 s), Gap Between
 Portions (5 s), Daily Portion Cap (4), Max Portions Per Command (1), Reload Pause
@@ -311,9 +317,10 @@ over-fed tank:
   is set again (NTP, Home Assistant, or BLE). There is no battery-backed clock.
 - **Six portions per load.** Schedules that feed several times a day need
   frequent refills; the runway sensors tell you how long a load lasts.
-- **BLE has no authentication yet.** Anyone in Bluetooth range can connect;
-  the feed guard limits what they can do. Leave the BLE package out if you do not
-  need it. (Work on this is planned; see DESIGN.md section 10.)
+- **BLE trusts anyone with the key, and does not prove itself to the client.**
+  Writes need the shared `ble_key`; answers are not signed, so a client should
+  pair (encrypted link) if it must trust what it reads. Leave the BLE package out
+  if you do not need it. Details: [PROTOCOL.md](docs/PROTOCOL.md), Authentication.
 - **Sunrise and sunset events** need Latitude and Longitude set. On days with
   no sunrise or sunset (far north or south) they count from 06:00 and 18:00
   instead, and Faults says so.

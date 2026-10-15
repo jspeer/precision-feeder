@@ -100,8 +100,32 @@ class GoldenVectors(unittest.TestCase):
         self.assertEqual(pf.profile_query(1, 3), b(0x02, 0x01, 0x03))
 
     def test_info(self):
-        i = pf.parse_info(b(1, 0x1F, 0x00, 7, 3, 4))
-        self.assertEqual((i.protocol_version, i.capabilities, i.positions, i.profiles, i.events_per_profile), (1, 0x1F, 7, 3, 4))
+        i = pf.parse_info(b(2, 0x7F, 0x00, 7, 3, 4))
+        self.assertEqual((i.protocol_version, i.capabilities, i.positions, i.profiles, i.events_per_profile), (2, 0x7F, 7, 3, 4))
+
+    def test_authentication_golden_vectors(self):
+        # The same vectors as tests/test_protocol.cpp, so the firmware and the client agree byte for byte.
+        key = bytes(range(32))
+        nonce = bytes(range(0xA0, 0xB0))
+        self.assertEqual(pf.auth_proof(key, nonce).hex(), "fae372f2c6d3c9d6ee0e4974574d6c7f")
+        ks = pf.session_key(key, nonce)
+        self.assertEqual(ks.hex(), "0c3122b4b9cc9402f417944dda88312c46479e89d230c4865069355aadf391c3")
+        self.assertEqual(pf.write_tag(ks, pf.CHANNEL_COMMAND, b(5, 0x01, 0x01)).hex(), "2a8f789b5ed334f6")
+        self.assertEqual(pf.write_tag(ks, pf.CHANNEL_CONFIG, b(6, 0x05, 0x03, 0, 0, 0)).hex(), "c479cee3220fce8b")
+        self.assertEqual(pf.signed(ks, pf.CHANNEL_COMMAND, b(5, 0x01, 0x01)), b(5, 1, 1) + bytes.fromhex("2a8f789b5ed334f6"))
+
+    def test_parse_key(self):
+        import base64
+
+        self.assertEqual(pf.parse_key(base64.b64encode(bytes(range(32))).decode()), bytes(range(32)))
+        with self.assertRaises(ValueError):
+            pf.parse_key(base64.b64encode(b"short").decode())
+
+    def test_writes_fit_the_payload(self):
+        # The longest command (SET_LOCATION) and record (a profile event) still fit 20 bytes with seq and tag.
+        self.assertLessEqual(len(pf.command(1, pf.OP_SET_LOCATION, pf.set_location_args(1, 1))) + pf.TAG_SIZE, 20)
+        self.assertLessEqual(1 + len(pf.profile_event(0, 0, True, "clock", 0, 1)) + pf.TAG_SIZE, 20)
+        self.assertLessEqual(len(pf.command(1, pf.OP_AUTH, bytes(pf.PROOF_SIZE))), 20)
 
     def test_uuids_follow_the_base(self):
         self.assertEqual(pf.SERVICE_UUID, "02dd1dd9-ba75-4bbc-bdea-306d21010001")
@@ -148,6 +172,7 @@ class YamlAgreesWithClient(unittest.TestCase):
             pf.CONFIG_UUID,
             pf.CALIBRATION_UUID,
             pf.EVENT_LOG_UUID,
+            pf.AUTH_UUID,
         }
         self.assertEqual(found, wanted)
 

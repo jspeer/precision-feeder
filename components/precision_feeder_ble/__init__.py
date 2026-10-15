@@ -8,6 +8,8 @@ Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """
 
+import base64
+
 import esphome.codegen as cg
 from esphome.components import esp32_ble_server, precision_feeder
 import esphome.config_validation as cv
@@ -30,6 +32,8 @@ CONF_PROFILE = "profile"
 CONF_CONFIG = "config"
 CONF_CALIBRATION = "calibration"
 CONF_EVENT_LOG = "event_log"
+CONF_AUTH = "auth"
+CONF_KEY = "key"
 CONF_TIME_POLICY = "time_policy"
 CONF_NTP_STALE = "network_time_stale_after"
 
@@ -42,7 +46,22 @@ CHARACTERISTICS = (
     CONF_CONFIG,
     CONF_CALIBRATION,
     CONF_EVENT_LOG,
+    CONF_AUTH,
 )
+
+KEY_SIZE = 32
+
+
+def validate_key(value):
+    """The shared BLE key: 32 random bytes, base64 encoded (openssl rand -base64 32)."""
+    value = cv.string_strict(value)
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except ValueError as err:
+        raise cv.Invalid(f"BLE key is not valid base64: {err}") from err
+    if len(raw) != KEY_SIZE:
+        raise cv.Invalid(f"BLE key must be {KEY_SIZE} bytes (base64 of 32 random bytes), got {len(raw)}")
+    return value
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -54,6 +73,9 @@ CONFIG_SCHEMA = cv.Schema(
             cv.Required(name): cv.use_id(esp32_ble_server.BLECharacteristic)
             for name in CHARACTERISTICS
         },
+        # The shared secret a client must prove it knows before any write is accepted (protocol 2).
+        # 32 random bytes, base64: `openssl rand -base64 32`. Keep it in secrets.yaml.
+        cv.Required(CONF_KEY): validate_key,
         # What to do with a clock pushed over BLE (SET_TIME):
         #   fallback_only: accept it only if NTP / Home Assistant has not set the clock recently
         #   always:        accept any plausible value
@@ -83,5 +105,7 @@ async def to_code(config):
         char = await cg.get_variable(config[name])
         cg.add(getattr(var, f"set_{name}")(char))
 
+    key = base64.b64decode(config[CONF_KEY])
+    cg.add(var.set_key(cg.RawExpression("std::array<uint8_t, 32>{" + ", ".join(str(b) for b in key) + "}")))
     cg.add(var.set_time_policy(config[CONF_TIME_POLICY]))
     cg.add(var.set_network_time_stale_ms(config[CONF_NTP_STALE].total_milliseconds))

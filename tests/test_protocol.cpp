@@ -245,6 +245,156 @@ int main() {
     CHECK(ring.find(cmd1, sizeof(cmd1), 301, out) && ring.find(cmd100, sizeof(cmd100), 301, out), "newer entries survive");
   }
 
+  // ---- Retry cache: channels are separate ----
+  {
+    ReplayCache cache(30000);
+    uint8_t out[RESPONSE_SIZE];
+    const uint8_t w[] = {7, 0x05, 0x03, 0x00, 0x00, 0x00};
+    const uint8_t r[] = {7, 0x81, 0, 5};
+    cache.store(CHANNEL_CONFIG, w, sizeof(w), r, 100);
+    CHECK(cache.find(CHANNEL_CONFIG, w, sizeof(w), 200, out) && same(out, r), "record retry replayed");
+    CHECK(!cache.find(CHANNEL_PROFILE, w, sizeof(w), 200, out), "same bytes on another channel are new");
+    const uint8_t c7[] = {7, 0x01, 1};
+    const uint8_t rc[] = {7, 0x01, 0, 1};
+    cache.store(CHANNEL_COMMAND, c7, sizeof(c7), rc, 300);
+    CHECK(cache.find(CHANNEL_CONFIG, w, sizeof(w), 400, out), "a command with the same seq does not evict a record");
+    cache.clear();
+    CHECK(!cache.find(CHANNEL_COMMAND, c7, sizeof(c7), 400, out), "clear forgets everything");
+  }
+
+  // ---- SHA-256 and HMAC-SHA256 (FIPS 180-4, RFC 4231) ----
+  {
+    using namespace esphome::precision_feeder::crypto;
+    auto hex = [](const char *h, uint8_t *out) {
+      for (size_t i = 0; h[2 * i]; i++) {
+        unsigned v;
+        std::sscanf(h + 2 * i, "%2x", &v);
+        out[i] = static_cast<uint8_t>(v);
+      }
+    };
+    uint8_t want[32], got[32];
+    sha256(nullptr, 0, got);
+    hex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", want);
+    CHECK(std::memcmp(got, want, 32) == 0, "sha256 empty");
+    sha256(reinterpret_cast<const uint8_t *>("abc"), 3, got);
+    hex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", want);
+    CHECK(std::memcmp(got, want, 32) == 0, "sha256 abc");
+    const char *m448 = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    sha256(reinterpret_cast<const uint8_t *>(m448), std::strlen(m448), got);
+    hex("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1", want);
+    CHECK(std::memcmp(got, want, 32) == 0, "sha256 448-bit message (two blocks)");
+    {
+      Sha256 h;
+      uint8_t a[1000];
+      std::memset(a, 'a', sizeof(a));
+      for (int i = 0; i < 1000; i++)
+        h.update(a, sizeof(a));
+      h.finish(got);
+      hex("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0", want);
+      CHECK(std::memcmp(got, want, 32) == 0, "sha256 one million 'a'");
+    }
+    uint8_t k1[20];
+    std::memset(k1, 0x0b, sizeof(k1));
+    hmac_sha256(k1, sizeof(k1), reinterpret_cast<const uint8_t *>("Hi There"), 8, got);
+    hex("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7", want);
+    CHECK(std::memcmp(got, want, 32) == 0, "hmac rfc4231 case 1");
+    const char *jefe = "what do ya want for nothing?";
+    hmac_sha256(reinterpret_cast<const uint8_t *>("Jefe"), 4, reinterpret_cast<const uint8_t *>(jefe),
+                std::strlen(jefe), got);
+    hex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", want);
+    CHECK(std::memcmp(got, want, 32) == 0, "hmac rfc4231 case 2");
+    uint8_t k6[131];
+    std::memset(k6, 0xaa, sizeof(k6));
+    const char *m6 = "Test Using Larger Than Block-Size Key - Hash Key First";
+    hmac_sha256(k6, sizeof(k6), reinterpret_cast<const uint8_t *>(m6), std::strlen(m6), got);
+    hex("60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54", want);
+    CHECK(std::memcmp(got, want, 32) == 0, "hmac rfc4231 case 6 (key longer than a block)");
+    const uint8_t x[] = {1, 2, 3}, y[] = {1, 2, 4};
+    CHECK(equal_ct(x, x, 3) && !equal_ct(x, y, 3), "constant-time compare");
+  }
+
+  // ---- Authentication golden vectors (shared with tools/test_precision_feeder_ble.py) ----
+  {
+    using namespace esphome::precision_feeder::crypto;
+    uint8_t key[KEY_SIZE], nonce[NONCE_SIZE];
+    for (size_t i = 0; i < KEY_SIZE; i++)
+      key[i] = static_cast<uint8_t>(i);
+    for (size_t i = 0; i < NONCE_SIZE; i++)
+      nonce[i] = static_cast<uint8_t>(0xA0 + i);
+    uint8_t proof[PROOF_SIZE];
+    auth_proof(key, nonce, proof);
+    const uint8_t want_proof[] = {0xFA, 0xE3, 0x72, 0xF2, 0xC6, 0xD3, 0xC9, 0xD6,
+                                  0xEE, 0x0E, 0x49, 0x74, 0x57, 0x4D, 0x6C, 0x7F};
+    CHECK(same(proof, want_proof), "auth proof golden bytes");
+    uint8_t ks[SESSION_KEY_SIZE];
+    session_key(key, nonce, ks);
+    const uint8_t want_ks[] = {0x0C, 0x31, 0x22, 0xB4, 0xB9, 0xCC, 0x94, 0x02, 0xF4, 0x17, 0x94,
+                               0x4D, 0xDA, 0x88, 0x31, 0x2C, 0x46, 0x47, 0x9E, 0x89, 0xD2, 0x30,
+                               0xC4, 0x86, 0x50, 0x69, 0x35, 0x5A, 0xAD, 0xF3, 0x91, 0xC3};
+    CHECK(same(ks, want_ks), "session key golden bytes");
+    uint8_t tag[TAG_SIZE];
+    const uint8_t feed[] = {5, 0x01, 0x01};
+    write_tag(ks, CHANNEL_COMMAND, feed, sizeof(feed), tag);
+    const uint8_t want_feed_tag[] = {0x2A, 0x8F, 0x78, 0x9B, 0x5E, 0xD3, 0x34, 0xF6};
+    CHECK(same(tag, want_feed_tag), "FEED seq 5 tag golden bytes");
+    const uint8_t cfg[] = {6, 0x05, 0x03, 0x00, 0x00, 0x00};
+    write_tag(ks, CHANNEL_CONFIG, cfg, sizeof(cfg), tag);
+    const uint8_t want_cfg_tag[] = {0xC4, 0x79, 0xCE, 0xE3, 0x22, 0x0F, 0xCE, 0x8B};
+    CHECK(same(tag, want_cfg_tag), "Config write seq 6 tag golden bytes");
+
+    // Sequence numbers: 1..255, wrapping, window 127.
+    CHECK(seq_is_newer(5, 6) && seq_is_newer(5, 132) && !seq_is_newer(5, 133), "window of 127 ahead");
+    CHECK(!seq_is_newer(5, 5) && !seq_is_newer(5, 4) && !seq_is_newer(5, 0), "not equal, not behind, never 0");
+    CHECK(seq_is_newer(255, 1) && seq_is_newer(250, 3), "wraps from 255 to 1");
+  }
+
+  // ---- Session ----
+  {
+    using namespace esphome::precision_feeder::crypto;
+    uint8_t key[KEY_SIZE], nonce[NONCE_SIZE], proof[PROOF_SIZE], ks[SESSION_KEY_SIZE];
+    for (size_t i = 0; i < KEY_SIZE; i++)
+      key[i] = static_cast<uint8_t>(i);
+    for (size_t i = 0; i < NONCE_SIZE; i++)
+      nonce[i] = static_cast<uint8_t>(0xA0 + i);
+    auth_proof(key, nonce, proof);
+    session_key(key, nonce, ks);
+    Session s;
+    s.set_key(key);
+    s.start(nonce);
+    uint8_t detail;
+    uint8_t w[12] = {5, 0x01, 0x01};
+    write_tag(ks, CHANNEL_COMMAND, w, 3, w + 3);
+    CHECK(s.check(CHANNEL_COMMAND, w, 11, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_NOT_AUTHENTICATED,
+          "nothing accepted before AUTH");
+    uint8_t bad[PROOF_SIZE];
+    std::memcpy(bad, proof, sizeof(bad));
+    bad[0] ^= 1;
+    CHECK(s.authenticate(1, bad, sizeof(bad), 1000, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_BAD_PROOF,
+          "wrong proof refused");
+    CHECK(s.authenticate(1, proof, sizeof(proof), 1500, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_TOO_SOON,
+          "even the right proof waits a second after a failure");
+    CHECK(s.authenticate(1, proof, sizeof(proof), 2000, detail) == RES_OK && s.authenticated(), "AUTH accepted");
+    CHECK(s.check(CHANNEL_COMMAND, w, 11, detail) == RES_OK, "tagged FEED with seq 5 after AUTH seq 1");
+    CHECK(s.check(CHANNEL_CONFIG, w, 11, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_BAD_TAG,
+          "the tag binds the channel");
+    uint8_t w2[11];
+    std::memcpy(w2, w, 11);
+    w2[2] = 2;  // FEED 2 with FEED 1's tag
+    CHECK(s.check(CHANNEL_COMMAND, w2, 11, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_BAD_TAG,
+          "changed bytes break the tag");
+    s.accept(5);
+    CHECK(s.check(CHANNEL_COMMAND, w, 11, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_STALE_SEQ,
+          "the same seq again is stale (a retry is answered from the retry cache instead)");
+    CHECK(s.check(CHANNEL_COMMAND, w, 8, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_TOO_SHORT,
+          "too short for a tag");
+    uint8_t other[NONCE_SIZE] = {};
+    s.start(other);
+    CHECK(!s.authenticated() && s.check(CHANNEL_COMMAND, w, 11, detail) == RES_NOT_AUTHORIZED,
+          "a new nonce (new connection) ends the session");
+    CHECK(s.authenticate(1, proof, sizeof(proof), 5000, detail) == RES_NOT_AUTHORIZED,
+          "a proof for the old nonce does not work on the new one");
+  }
+
   if (failures == 0)
     std::printf("All protocol tests passed\n");
   return failures == 0 ? 0 : 1;

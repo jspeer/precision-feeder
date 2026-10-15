@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstring>
 
+#include <esp_random.h>
+
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -31,7 +33,7 @@ static std::vector<uint8_t> to_vector(const uint8_t *data, size_t n) { return st
 void PrecisionFeederBle::setup() {
   // Info: protocol version, capability bits, positions, profiles, events per profile.
   uint16_t caps = proto::CAP_SOLAR | proto::CAP_PROFILE_EDIT | proto::CAP_CALIBRATION | proto::CAP_HOLD_FOREVER |
-                  proto::CAP_SERVO_PULSE;
+                  proto::CAP_SERVO_PULSE | proto::CAP_AUTH;
   if (this->time_policy_ != proto::TimePolicy::OFF)
     caps |= proto::CAP_TIME_PUSH;
   uint8_t info[6];
@@ -43,16 +45,31 @@ void PrecisionFeederBle::setup() {
   this->info_->set_value(to_vector(info, sizeof(info)));
 
   this->command_->on_write([this](std::span<const uint8_t> data, uint16_t) { this->on_command_(data); });
-  this->profile_->on_write([this](std::span<const uint8_t> data, uint16_t) { this->on_profile_write_(data); });
-  this->config_->on_write([this](std::span<const uint8_t> data, uint16_t) { this->on_config_write_(data); });
-  this->calibration_->on_write([this](std::span<const uint8_t> data, uint16_t) { this->on_calibration_write_(data); });
+  this->profile_->on_write([this](std::span<const uint8_t> data, uint16_t) {
+    this->on_record_write_(proto::CHANNEL_PROFILE, proto::OP_PROFILE_WRITE, data);
+  });
+  this->config_->on_write([this](std::span<const uint8_t> data, uint16_t) {
+    this->on_record_write_(proto::CHANNEL_CONFIG, proto::OP_CONFIG_WRITE, data);
+  });
+  this->calibration_->on_write([this](std::span<const uint8_t> data, uint16_t) {
+    this->on_record_write_(proto::CHANNEL_CALIBRATION, proto::OP_CALIBRATION_WRITE, data);
+  });
 
-  // Something sensible to read before the client has asked for anything.
-  this->set_profile_read_(this->feeder_->cfg.active_profile, proto::QUERY_HEADER);
-  this->set_config_read_(proto::CFG_MIN_GAP_S);
-  this->set_calibration_read_(0);
+  // Nothing but Info and Auth is readable until a client has authenticated.
+  this->clear_reads_();
+  this->new_nonce_();
 
-  this->server_->on_connect([this](uint16_t) { this->force_status_ = true; });
+  // Each connection gets a new challenge and starts unauthenticated; nothing survives a disconnect.
+  this->server_->on_connect([this](uint16_t) {
+    this->replay_.clear();
+    this->clear_reads_();
+    this->new_nonce_();
+  });
+  this->server_->on_disconnect([this](uint16_t) {
+    this->session_.end();
+    this->replay_.clear();
+    this->clear_reads_();
+  });
   this->feeder_->set_feed_listener([this](const FeedRecord &record) { this->publish_event_(record); });
 }
 
@@ -64,12 +81,13 @@ void PrecisionFeederBle::dump_config() {
     policy = "off";
   ESP_LOGCONFIG(TAG, "Precision Feeder BLE:");
   ESP_LOGCONFIG(TAG, "  Protocol version: %u", proto::PROTOCOL_VERSION);
+  ESP_LOGCONFIG(TAG, "  Authentication: required (shared key set)");
   ESP_LOGCONFIG(TAG, "  Time policy: %s (network time counts as fresh for %u h)", policy,
                 (unsigned) (this->network_stale_ms_ / 3600000u));
 }
 
 void PrecisionFeederBle::loop() {
-  if (!this->has_client_())
+  if (!this->authorized_())
     return;
   const uint32_t now = millis();
   if (!this->force_status_ && now - this->last_status_ms_ < STATUS_PERIOD_MS)
@@ -89,42 +107,93 @@ void PrecisionFeederBle::send_response_(const uint8_t response[proto::RESPONSE_S
 }
 
 void PrecisionFeederBle::respond_write_(uint8_t opcode, uint8_t result, uint8_t detail) {
-  const uint8_t response[proto::RESPONSE_SIZE] = {0, opcode, result, detail};  // seq 0: writes carry no sequence number
+  const uint8_t response[proto::RESPONSE_SIZE] = {this->record_seq_, opcode, result, detail};
+  if (this->record_write_len_ > 0)
+    this->replay_.store(this->record_channel_, this->record_write_, this->record_write_len_, response,
+                        static_cast<uint64_t>(this->feeder_->uptime()));
+  this->send_response_(response);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Authentication
+// ---------------------------------------------------------------------------------------------
+
+void PrecisionFeederBle::new_nonce_() {
+  uint8_t nonce[crypto::NONCE_SIZE];
+  esp_fill_random(nonce, sizeof(nonce));  // hardware RNG; the radio is on, so it is a true random source
+  this->session_.start(nonce);
+  this->auth_->set_value(to_vector(nonce, sizeof(nonce)));
+}
+
+void PrecisionFeederBle::clear_reads_() {
+  this->status_->set_value(std::vector<uint8_t>(proto::STATUS_SIZE, 0));
+  this->profile_->set_value(std::vector<uint8_t>(proto::PROFILE_EVENT_SIZE, 0));
+  this->config_->set_value(std::vector<uint8_t>(proto::CONFIG_SET_SIZE, 0));
+  this->calibration_->set_value(std::vector<uint8_t>(proto::CALIBRATION_SET_SIZE, 0));
+  this->response_->set_value(std::vector<uint8_t>(proto::RESPONSE_SIZE, 0));
+  std::memset(this->last_status_, 0, sizeof(this->last_status_));
+}
+
+void PrecisionFeederBle::handle_auth_(uint8_t seq, const uint8_t *proof, size_t n, uint64_t now) {
+  uint8_t detail = 0;
+  const uint8_t result = this->session_.authenticate(seq, proof, n, now, detail);
+  if (result == proto::RES_OK) {
+    ESP_LOGI(TAG, "BLE client authenticated");
+    this->replay_.clear();
+    this->force_status_ = true;  // send fresh status straight away
+  } else {
+    ESP_LOGW(TAG, "BLE authentication refused (detail %u)", detail);
+    if (detail == proto::AUTH_DETAIL_BAD_PROOF)
+      this->new_nonce_();  // a guess is never tried against the same challenge twice
+  }
+  const uint8_t response[proto::RESPONSE_SIZE] = {seq, proto::OP_AUTH, result, detail};
   this->send_response_(response);
 }
 
 void PrecisionFeederBle::on_command_(std::span<const uint8_t> data) {
   if (data.empty())
     return;
-  const uint8_t seq = data[0];
-  if (data.size() < 2) {
+  // Copy first: answering can notify and set values, and `data` points into ESPHome's buffer.
+  uint8_t command[proto::ReplayCache::MAX_COMMAND];
+  const size_t n = std::min(data.size(), proto::ReplayCache::MAX_COMMAND);
+  std::memcpy(command, data.data(), n);
+  const uint8_t seq = command[0];
+  if (n < 2) {
     const uint8_t response[proto::RESPONSE_SIZE] = {seq, 0, proto::RES_INVALID_ARG, 0};
     this->send_response_(response);
     return;
   }
-  const uint8_t opcode = data[1];
+  const uint8_t opcode = command[1];
   const uint64_t now = static_cast<uint64_t>(this->feeder_->uptime());
+  if (opcode == proto::OP_AUTH) {
+    this->handle_auth_(seq, command + 2, n - 2, now);
+    return;
+  }
 
   uint8_t response[proto::RESPONSE_SIZE];
-  if (this->replay_.find(data.data(), data.size(), now, response)) {
+  if (this->replay_.find(proto::CHANNEL_COMMAND, command, n, now, response)) {
     // A retry of a command we already answered: repeat the answer, do not act again.
     ESP_LOGI(TAG, "Command seq %u repeated, replaying the earlier answer", seq);
     this->send_response_(response);
     return;
   }
 
-  // Copy the command first: executing it can notify and set values, and `data` points into ESPHome's buffer.
-  uint8_t command[proto::ReplayCache::MAX_COMMAND];
-  const size_t command_len = std::min(data.size(), proto::ReplayCache::MAX_COMMAND);
-  std::memcpy(command, data.data(), command_len);
-
   uint8_t detail = 0;
-  const uint8_t result = this->execute_(opcode, command + 2, command_len - 2, detail);
+  uint8_t result = this->session_.check(proto::CHANNEL_COMMAND, command, n, detail);
+  if (result != proto::RES_OK) {
+    ESP_LOGW(TAG, "Command 0x%02X seq %u refused: not authorized (detail %u)", opcode, seq, detail);
+    const uint8_t refused[proto::RESPONSE_SIZE] = {seq, opcode, result, detail};
+    this->send_response_(refused);
+    return;
+  }
+  this->session_.accept(seq);
+
+  result = this->execute_(opcode, command + 2, n - 2 - crypto::TAG_SIZE, detail);
   response[0] = seq;
   response[1] = opcode;
   response[2] = result;
   response[3] = detail;
-  this->replay_.store(command, command_len, response, now);
+  this->replay_.store(proto::CHANNEL_COMMAND, command, n, response, now);
   ESP_LOGI(TAG, "Command 0x%02X seq %u -> %s", opcode, seq, PrecisionFeeder::result_name(static_cast<Result>(result)));
   this->send_response_(response);
 }
@@ -244,10 +313,10 @@ uint8_t PrecisionFeederBle::execute_(uint8_t opcode, const uint8_t *args, size_t
 // ---------------------------------------------------------------------------------------------
 // Profile characteristic
 //
-// Note for the three write handlers below (profile, config, calibration): ESPHome passes the written bytes as a
-// span into the characteristic's own stored value, and the handlers replace that value (set_value) so that a
-// following read returns the record the client asked for. Anything needed from the written bytes must therefore
-// be copied before the first set_value call.
+// Note for the record writes below (profile, config, calibration): ESPHome passes the written bytes as a span into
+// the characteristic's own stored value, and the handlers replace that value (set_value) so that a following read
+// returns the record the client asked for. on_record_write_ therefore copies the write before anything else; the
+// handlers get a span into that copy.
 // ---------------------------------------------------------------------------------------------
 
 void PrecisionFeederBle::set_profile_read_(uint8_t profile, uint8_t event) {
@@ -277,7 +346,52 @@ void PrecisionFeederBle::set_profile_read_(uint8_t profile, uint8_t event) {
   }
 }
 
-void PrecisionFeederBle::on_profile_write_(std::span<const uint8_t> d) {
+void PrecisionFeederBle::on_record_write_(uint8_t channel, uint8_t opcode, std::span<const uint8_t> data) {
+  if (data.empty())
+    return;
+  // Copy first (see the note above): the handlers replace the characteristic's value, which `data` points into.
+  uint8_t write[proto::ReplayCache::MAX_COMMAND];
+  const size_t n = std::min(data.size(), proto::ReplayCache::MAX_COMMAND);
+  std::memcpy(write, data.data(), n);
+  const uint8_t seq = write[0];
+  const uint64_t now = static_cast<uint64_t>(this->feeder_->uptime());
+
+  uint8_t response[proto::RESPONSE_SIZE];
+  if (this->replay_.find(channel, write, n, now, response)) {
+    this->send_response_(response);  // a retry: same answer, not applied again
+    return;
+  }
+  uint8_t detail = 0;
+  const uint8_t result = this->session_.check(channel, write, n, detail);
+  if (result != proto::RES_OK) {
+    ESP_LOGW(TAG, "Write to 0x%02X seq %u refused: not authorized (detail %u)", channel, seq, detail);
+    const uint8_t refused[proto::RESPONSE_SIZE] = {seq, opcode, result, detail};
+    this->send_response_(refused);
+    return;
+  }
+  this->session_.accept(seq);
+
+  // The record sits between the sequence number and the tag. respond_write_ answers with this seq and stores the
+  // answer for retries.
+  this->record_seq_ = seq;
+  this->record_channel_ = channel;
+  std::memcpy(this->record_write_, write, n);
+  this->record_write_len_ = n;
+  const std::span<const uint8_t> record(write + 1, n - 1 - crypto::TAG_SIZE);
+  if (record.empty()) {
+    this->respond_write_(opcode, proto::RES_INVALID_ARG, 0);
+  } else if (channel == proto::CHANNEL_PROFILE) {
+    this->handle_profile_(record);
+  } else if (channel == proto::CHANNEL_CONFIG) {
+    this->handle_config_(record);
+  } else {
+    this->handle_calibration_(record);
+  }
+  this->record_seq_ = 0;
+  this->record_write_len_ = 0;
+}
+
+void PrecisionFeederBle::handle_profile_(std::span<const uint8_t> d) {
   using namespace proto;
   if (d.empty())
     return;
@@ -393,7 +507,7 @@ void PrecisionFeederBle::set_config_read_(uint8_t key) {
   this->config_->set_value(to_vector(out, sizeof(out)));
 }
 
-void PrecisionFeederBle::on_config_write_(std::span<const uint8_t> d) {
+void PrecisionFeederBle::handle_config_(std::span<const uint8_t> d) {
   using namespace proto;
   if (d.empty())
     return;
@@ -479,7 +593,7 @@ void PrecisionFeederBle::set_calibration_read_(uint8_t index) {
   this->calibration_->set_value(to_vector(out, sizeof(out)));
 }
 
-void PrecisionFeederBle::on_calibration_write_(std::span<const uint8_t> d) {
+void PrecisionFeederBle::handle_calibration_(std::span<const uint8_t> d) {
   using namespace proto;
   if (d.empty())
     return;
@@ -573,7 +687,7 @@ void PrecisionFeederBle::publish_status_(bool force) {
 }
 
 void PrecisionFeederBle::publish_event_(const FeedRecord &record) {
-  if (!this->has_client_())
+  if (!this->authorized_())
     return;
   uint8_t buf[proto::EVENT_LOG_SIZE];
   proto::encode_event_log(record.epoch, record.source, record.portions, record.result, buf);

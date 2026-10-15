@@ -33,8 +33,11 @@ substitutions:
 
 esp32_ble:
   name: ${ble_name}
-  # No pairing hardware, so Just Works. Authentication is discussed in DESIGN.md section 10.
+  # Pairing, if the client pairs: LE Secure Connections with bonding, so the link is encrypted. With no screen or
+  # keypad it is "Just Works", which does not stop a stranger pairing; access control is the shared key below
+  # (protocol 2 authentication, docs/PROTOCOL.md). See DESIGN.md section 10.
   io_capability: none
+  auth_req_mode: sc_bond
 
 esp32_ble_server:
   id: gatt_server
@@ -50,7 +53,7 @@ esp32_ble_server:
         - id: gatt_info
           uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010002
           read: true
-          value: [1, 0, 0, 7, 3, 4]
+          value: [2, 0, 0, 7, 3, 4]
 
         # Commands from the client: seq u8, opcode u8, arguments.
         - id: gatt_command
@@ -100,6 +103,12 @@ esp32_ble_server:
           uuid: 02dd1dd9-ba75-4bbc-bdea-306d21010009
           notify: true
           value: [0, 0, 0, 0, 0, 0, 0]
+        # Authentication challenge: a random 16-byte nonce, new for every connection and after a failed AUTH.
+        # Readable without authenticating; everything except Info reads as zeros until AUTH succeeds.
+        - id: gatt_auth
+          uuid: 02dd1dd9-ba75-4bbc-bdea-306d2101000a
+          read: true
+          value: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 # The protocol: what the characteristics above mean.
 precision_feeder_ble:
@@ -113,5 +122,8 @@ precision_feeder_ble:
   config: gatt_config
   calibration: gatt_calibration
   event_log: gatt_event_log
+  auth: gatt_auth
+  # The shared secret for protocol 2 authentication. Give the same key to your PLC bridge or client.
+  key: !secret ble_key
   time_policy: ${ble_time_policy}
   network_time_stale_after: ${ble_network_time_stale_after}

@@ -12,12 +12,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+
+#include "crypto.h"
 
 namespace esphome {
 namespace precision_feeder {
 namespace proto {
 
-constexpr uint8_t PROTOCOL_VERSION = 1;
+constexpr uint8_t PROTOCOL_VERSION = 2;  // 2: authenticated writes (AUTH, tags, sequence numbers on records)
 
 // Capability bits reported in the Info characteristic.
 constexpr uint16_t CAP_SOLAR = 1u << 0;          // sunrise/sunset event anchors
@@ -26,6 +29,13 @@ constexpr uint16_t CAP_PROFILE_EDIT = 1u << 2;   // Profile characteristic can e
 constexpr uint16_t CAP_CALIBRATION = 1u << 3;    // calibration commands
 constexpr uint16_t CAP_HOLD_FOREVER = 1u << 4;   // HOLD accepts "until cancelled"
 constexpr uint16_t CAP_SERVO_PULSE = 1u << 5;    // Config keys 10 and 11 (servo pulse range) exist
+constexpr uint16_t CAP_AUTH = 1u << 6;           // writes must be authenticated (protocol 2)
+
+// Channels: the low byte of each writable characteristic's UUID, mixed into the write tags.
+constexpr uint8_t CHANNEL_COMMAND = 0x03;
+constexpr uint8_t CHANNEL_PROFILE = 0x06;
+constexpr uint8_t CHANNEL_CONFIG = 0x07;
+constexpr uint8_t CHANNEL_CALIBRATION = 0x08;
 
 // Layout constants (must match the feeder component; checked in precision_feeder_ble.cpp).
 constexpr uint8_t POSITIONS = 7;
@@ -45,6 +55,7 @@ constexpr uint8_t OP_JOG = 0x09;               // position u8, delta i16 (tenths
 constexpr uint8_t OP_SAVE_CALIBRATION = 0x0A;  // none
 constexpr uint8_t OP_SET_POSITION = 0x0B;      // position u8
 constexpr uint8_t OP_SET_TIMEZONE = 0x0C;      // reserved; answered UNSUPPORTED (see DESIGN.md section 6)
+constexpr uint8_t OP_AUTH = 0x0D;              // proof[16] = HMAC-SHA256(key, "PF2 auth" || nonce)[0..15]; no tag
 
 // Opcodes used in the Response for writes to the Profile, Config and Calibration characteristics.
 constexpr uint8_t OP_PROFILE_WRITE = 0x80;
@@ -58,6 +69,15 @@ constexpr uint8_t RES_IGNORED_NTP_ACTIVE = 12;  // BLE time refused: network tim
 constexpr uint8_t RES_BLE_TIME_DISABLED = 13;   // BLE time refused: policy is "off"
 constexpr uint8_t RES_UNSUPPORTED = 14;         // unknown or reserved opcode
 constexpr uint8_t RES_NOT_CALIBRATING = 15;     // the command needs calibration mode
+constexpr uint8_t RES_NOT_AUTHORIZED = 16;      // not authenticated, bad tag, stale sequence number or bad proof
+
+// `detail` of a NOT_AUTHORIZED answer.
+constexpr uint8_t AUTH_DETAIL_NOT_AUTHENTICATED = 0;  // send AUTH first (read the Auth characteristic for the nonce)
+constexpr uint8_t AUTH_DETAIL_BAD_TAG = 1;            // the tag does not match (wrong key, or the bytes changed)
+constexpr uint8_t AUTH_DETAIL_STALE_SEQ = 2;          // sequence number not after the last accepted one
+constexpr uint8_t AUTH_DETAIL_BAD_PROOF = 3;          // AUTH refused; the nonce has changed, read it again
+constexpr uint8_t AUTH_DETAIL_TOO_SOON = 4;           // AUTH refused: wait a second after a failed attempt
+constexpr uint8_t AUTH_DETAIL_TOO_SHORT = 5;          // the write is too short to carry a sequence number and tag
 
 constexpr size_t RESPONSE_SIZE = 4;  // seq, opcode, result, detail
 
@@ -316,16 +336,16 @@ inline uint8_t decide_ble_time(TimePolicy policy, uint32_t epoch, int64_t networ
 class ReplayCache {
  public:
   static constexpr size_t SIZE = 8;
-  static constexpr size_t MAX_COMMAND = 20;  // a whole Command write fits the default 20-byte payload
+  static constexpr size_t MAX_COMMAND = 20;  // a whole write fits the default 20-byte payload
   static constexpr uint32_t DEFAULT_TTL_MS = 30000;
 
   explicit ReplayCache(uint32_t ttl_ms = DEFAULT_TTL_MS) : ttl_ms_(ttl_ms) {}
 
-  /// If this exact command (`command[0]` is the sequence number) was answered within the TTL, copy the stored
-  /// response and return true.
-  bool find(const uint8_t *command, size_t len, uint64_t now_ms, uint8_t out[RESPONSE_SIZE]) const {
+  /// If this exact write (`command[0]` is the sequence number) to `channel` was answered within the TTL, copy the
+  /// stored response and return true.
+  bool find(uint8_t channel, const uint8_t *command, size_t len, uint64_t now_ms, uint8_t out[RESPONSE_SIZE]) const {
     for (const Entry &e : this->entries_) {
-      if (e.used && same_(e, command, len) && now_ms - e.at_ms < this->ttl_ms_) {
+      if (e.used && e.channel == channel && same_(e, command, len) && now_ms - e.at_ms < this->ttl_ms_) {
         for (size_t i = 0; i < RESPONSE_SIZE; i++)
           out[i] = e.response[i];
         return true;
@@ -334,12 +354,13 @@ class ReplayCache {
     return false;
   }
 
-  void store(const uint8_t *command, size_t len, const uint8_t response[RESPONSE_SIZE], uint64_t now_ms) {
+  void store(uint8_t channel, const uint8_t *command, size_t len, const uint8_t response[RESPONSE_SIZE],
+             uint64_t now_ms) {
     if (len == 0)
       return;
     Entry *slot = nullptr;
     for (Entry &e : this->entries_) {
-      if (e.used && e.len > 0 && e.command[0] == command[0]) {  // same sequence number: replace it
+      if (e.used && e.channel == channel && e.len > 0 && e.command[0] == command[0]) {  // same seq: replace it
         slot = &e;
         break;
       }
@@ -349,6 +370,7 @@ class ReplayCache {
       this->next_ = (this->next_ + 1) % SIZE;
     }
     slot->used = true;
+    slot->channel = channel;
     slot->len = static_cast<uint8_t>(len < MAX_COMMAND ? len : MAX_COMMAND);
     for (size_t i = 0; i < slot->len; i++)
       slot->command[i] = command[i];
@@ -357,9 +379,19 @@ class ReplayCache {
       slot->response[i] = response[i];
   }
 
+ public:
+  // Commands (the Command characteristic) are the common case.
+  bool find(const uint8_t *command, size_t len, uint64_t now_ms, uint8_t out[RESPONSE_SIZE]) const {
+    return this->find(CHANNEL_COMMAND, command, len, now_ms, out);
+  }
+  void store(const uint8_t *command, size_t len, const uint8_t response[RESPONSE_SIZE], uint64_t now_ms) {
+    this->store(CHANNEL_COMMAND, command, len, response, now_ms);
+  }
+
  protected:
   struct Entry {
     bool used{false};
+    uint8_t channel{0};
     uint8_t len{0};
     uint8_t command[MAX_COMMAND]{};
     uint8_t response[RESPONSE_SIZE]{};
@@ -379,6 +411,95 @@ class ReplayCache {
   Entry entries_[SIZE];
   size_t next_{0};
   uint32_t ttl_ms_;
+
+ public:
+  /// Forget everything (a new connection must not be able to replay answers from an earlier one).
+  void clear() {
+    for (Entry &e : this->entries_)
+      e.used = false;
+    this->next_ = 0;
+  }
+};
+
+// ---- Authentication (protocol 2) ----------------------------------------------------------------------
+
+/// One connection's authentication state. The device starts it with a fresh random nonce when a client connects;
+/// the client proves it knows the shared key with AUTH; after that every write carries a sequence number and a tag.
+class Session {
+ public:
+  static constexpr uint32_t RETRY_DELAY_MS = 1000;  // after a failed AUTH
+
+  void set_key(const uint8_t key[crypto::KEY_SIZE]) { std::memcpy(this->key_, key, crypto::KEY_SIZE); }
+
+  /// A new challenge: drops any authentication.
+  void start(const uint8_t nonce[crypto::NONCE_SIZE]) {
+    std::memcpy(this->nonce_, nonce, crypto::NONCE_SIZE);
+    this->authenticated_ = false;
+    this->last_seq_ = 0;
+  }
+  void end() { this->authenticated_ = false; }
+
+  bool authenticated() const { return this->authenticated_; }
+  const uint8_t *nonce() const { return this->nonce_; }
+  uint8_t last_seq() const { return this->last_seq_; }
+
+  /// Handle AUTH. Returns RES_OK, or RES_NOT_AUTHORIZED with `detail` set. After a failure the caller must issue a
+  /// new nonce (start()), and further attempts are refused for RETRY_DELAY_MS.
+  uint8_t authenticate(uint8_t seq, const uint8_t *proof, size_t n, uint64_t now_ms, uint8_t &detail) {
+    detail = 0;
+    if (now_ms < this->locked_until_ms_) {
+      detail = AUTH_DETAIL_TOO_SOON;
+      return RES_NOT_AUTHORIZED;
+    }
+    uint8_t want[crypto::PROOF_SIZE];
+    crypto::auth_proof(this->key_, this->nonce_, want);
+    if (n != crypto::PROOF_SIZE || seq == 0 || !crypto::equal_ct(proof, want, crypto::PROOF_SIZE)) {
+      this->authenticated_ = false;
+      this->locked_until_ms_ = now_ms + RETRY_DELAY_MS;
+      detail = AUTH_DETAIL_BAD_PROOF;
+      return RES_NOT_AUTHORIZED;
+    }
+    crypto::session_key(this->key_, this->nonce_, this->session_);
+    this->authenticated_ = true;
+    this->last_seq_ = seq;
+    return RES_OK;
+  }
+
+  /// Check an authenticated write (seq first, tag last) without accepting it. Returns RES_OK, or RES_NOT_AUTHORIZED
+  /// with `detail` set.
+  uint8_t check(uint8_t channel, const uint8_t *data, size_t n, uint8_t &detail) const {
+    detail = 0;
+    if (!this->authenticated_) {
+      detail = AUTH_DETAIL_NOT_AUTHENTICATED;
+      return RES_NOT_AUTHORIZED;
+    }
+    if (n < 1 + crypto::TAG_SIZE) {
+      detail = AUTH_DETAIL_TOO_SHORT;
+      return RES_NOT_AUTHORIZED;
+    }
+    uint8_t tag[crypto::TAG_SIZE];
+    crypto::write_tag(this->session_, channel, data, n - crypto::TAG_SIZE, tag);
+    if (!crypto::equal_ct(tag, data + n - crypto::TAG_SIZE, crypto::TAG_SIZE)) {
+      detail = AUTH_DETAIL_BAD_TAG;
+      return RES_NOT_AUTHORIZED;
+    }
+    if (!crypto::seq_is_newer(this->last_seq_, data[0])) {
+      detail = AUTH_DETAIL_STALE_SEQ;
+      return RES_NOT_AUTHORIZED;
+    }
+    return RES_OK;
+  }
+
+  /// Record that a checked write was accepted (its sequence number becomes the last one).
+  void accept(uint8_t seq) { this->last_seq_ = seq; }
+
+ protected:
+  uint8_t key_[crypto::KEY_SIZE]{};
+  uint8_t nonce_[crypto::NONCE_SIZE]{};
+  uint8_t session_[crypto::SESSION_KEY_SIZE]{};
+  bool authenticated_{false};
+  uint8_t last_seq_{0};
+  uint64_t locked_until_ms_{0};
 };
 
 }  // namespace proto

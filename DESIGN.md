@@ -38,7 +38,7 @@ Goals
 Non-goals (v1)
 - Fry-style burst feeding (the magazine holds 6 portions; see section 3).
 - Remote scheduling by an external controller as the only scheduler.
-- Real BLE authentication (see section 10).
+- Pairing with a passkey (no screen or keypad; section 10 explains the application-layer authentication used instead).
 - **External add-on hardware of any kind** (RTC modules, feed or home
   sensors, humidity sensors). If it is not on the ESP32 board, the firmware
   does not support it. The one exception is the optional push button (section
@@ -433,10 +433,39 @@ is the safe fallback.
 
 ## 10. BLE security
 
-Start simple: optional bonding, with the feed guard bounding the damage a
-stranger in range could do (a few portions). A passkey or application-level
-shared key is a later option. **ESPHome's pairing options need checking
-against current docs.** This is documented in the README as a known limitation.
+Decided 2026-10-14 (owner: "use best practices"), built in protocol 2
+(firmware 0.4.0). Details in docs/PROTOCOL.md, "Authentication".
+
+What ESPHome 2026.9.1 offers, checked in its source: `esp32_ble` can set the
+Security Manager parameters (`io_capability`, `auth_req_mode` including
+`sc_bond`, key sizes), but `esp32_ble_server` hard-codes every characteristic's
+permissions as plain read/write (no "encryption required"), and there is no
+static passkey. So link-layer pairing cannot keep a stranger out: they can skip
+pairing and write anyway, and with no screen or keypad pairing is "Just Works".
+
+Hence application-layer authentication, plus link encryption where offered:
+- A shared 32-byte key (`ble_key`, secrets.yaml, required whenever the BLE
+  package is built in).
+- Per connection: a random 16-byte nonce (hardware RNG) readable from a new Auth
+  characteristic; the client proves the key with AUTH (HMAC-SHA256 over the
+  nonce); both derive a session key.
+- Every write carries a sequence number (strictly increasing, window 127) and an
+  8-byte HMAC tag bound to the characteristic. This stops injection, tampering
+  and replay (recorded traffic is useless on the next connection's nonce, and a
+  stale sequence number is refused within a connection). The 30 s retry cache
+  still makes exact retries safe.
+- Until AUTH, only Info and Auth carry data; nothing is notified.
+- After a failed AUTH: a new nonce and a one-second wait.
+- `auth_req_mode: sc_bond` so a client that pairs gets an encrypted link (also
+  hiding what it reads).
+- Not covered: the feeder does not prove its identity to the client, and
+  answers are not signed (no room in the 20-byte Status). The feeder only acts on
+  authenticated writes, so the animals are protected; a client that must trust
+  what it reads should pair.
+
+SHA-256 and HMAC are a small pure implementation (crypto.h) so the device code
+is the host-tested code (FIPS 180-4 and RFC 4231 vectors, plus golden vectors
+shared with the Python client).
 
 ## 11. Out of scope hardware
 
@@ -507,6 +536,9 @@ Importable with ESPHome `packages:` / `github://`.
   fed (2026-10-14; the safe side).
 - Polar days (no sunrise or sunset): sun events fall back to 06:00 / 18:00 plus
   their offset, with a fault shown (owner, 2026-10-14; was "skip").
+- BLE security: application-layer authentication with a shared key (protocol 2),
+  plus LE Secure Connections pairing when the client pairs (owner, 2026-10-14;
+  section 10).
 
 ## 14. Open items
 
@@ -521,7 +553,7 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.3.5, 2026-10-14)
+## 15. Implementation status (v0.4.0, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -559,7 +591,7 @@ PWM, flash, daylight-saving resolution) and the BLE handlers
 | Clock: source tracking (NTP, Home Assistant, BLE), `SET_TIME` policy, age and stale flag | core + BLE component | built |
 | Reference client | `tools/precision_feeder_ble.py` | built; pure parts tested, the BLE client class needs a device |
 | Runtime timezone | | **blocked** (section 6 finding) |
-| BLE authentication | | not started (section 10) |
+| BLE authentication (protocol 2) | `crypto.h`, `protocol.h` Session, `precision_feeder_ble.cpp` | built, host-tested, bench-tested (section 17) |
 
 Deviations from this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said
@@ -614,6 +646,19 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
   the saved tray state from earlier versions is discarded).
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.4.0 (BLE protocol 2: authentication, 2026-10-14):
+- Every BLE write must be authenticated with the shared `ble_key` (section 10,
+  docs/PROTOCOL.md). New Auth characteristic (000A), AUTH opcode (0x0D), result
+  16 NOT_AUTHORIZED, capability bit 6. Profile, Config and Calibration writes
+  gained a leading sequence number and are answered with it. **Not compatible
+  with protocol 1 clients**: the PLC-side driver must implement protocol 2.
+- `esp32_ble`: `auth_req_mode: sc_bond`.
+- Retry cache entries carry the characteristic (channel), and the cache is
+  cleared on every connect and disconnect.
+- Each clock sync is logged ("Clock set by NTP" / "Home Assistant" / "BLE").
+- Python client: `--key` / PRECISION_FEEDER_BLE_KEY; authenticates on connect
+  and signs every write.
 
 Changes in v0.3.5 (polar days, 2026-10-14):
 - On a day without a sunrise or sunset at the set location, sun events use
@@ -883,4 +928,17 @@ Tray Empty On "not within 30 days". Over-cap warning on hardware: with events
 more per day than the daily cap allows (some events will be refused)". Every
 v0.3.3 feature has now been seen on hardware. (The summary lists events in slot
 order, not time order; a possible tidy-up.)
+
+### BLE protocol 2 on hardware (2026-10-14, firmware 0.4.0)
+
+From a Linux PC with the reference client, never feeding: Info shows protocol 2
+and capability bit 6; the Auth nonce is 16 random bytes; Status reads as zeros
+before AUTH; an unsigned command and a record write are refused (not
+authenticated); AUTH with a wrong key is refused, the nonce then changes, and even
+the right key is refused within a second; the right key is accepted after that.
+Authenticated: Status, Config and Profile reads, a Config write answered with its
+sequence number, SET_TIMEZONE UNSUPPORTED, HOLD and its exact retry (the stored
+answer replayed), and refusals for a stale sequence number, a tampered byte, a
+write signed for another characteristic, and a proof for an earlier
+connection's nonce. 22/22. `sc_bond` did not get in the way of the client.
 

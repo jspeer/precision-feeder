@@ -990,6 +990,7 @@ void FeederCore::note_time_sync(TimeSource source) {
   this->last_sync_ms_[static_cast<uint8_t>(source)] = this->hal_uptime_ms();
   this->last_time_source_ = source;
   this->project_dirty_ = true;
+  this->log_(LogLevel::kInfo, "Clock set by %s", this->time_source_text().c_str());
 }
 
 void FeederCore::set_system_time(uint32_t epoch) {

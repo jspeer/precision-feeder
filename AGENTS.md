@@ -53,6 +53,9 @@ substitutions.
   Do not extend it (for example to BLE) without a new decision.
 - BLE commands are idempotent via sequence numbers. A retry must never feed
   twice.
+- Every BLE write is authenticated (protocol 2: AUTH, then a sequence number and
+  tag on each write; docs/PROTOCOL.md). Never add a characteristic or opcode that
+  acts without it, and never let unauthenticated clients read state.
 - Time is never restored from flash. Scheduled feeds wait for a valid clock;
   manual feeds still work.
 - No periodic or automatic reboot. WiFi or API loss must not reboot the device.

@@ -8,8 +8,12 @@ Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 
+Protocol 2 needs the feeder's shared key (`ble_key` in its secrets.yaml): pass it with
+--key, or set PRECISION_FEEDER_BLE_KEY. Both take the base64 text as in secrets.yaml.
+
 Examples:
     python precision_feeder_ble.py scan
+    export PRECISION_FEEDER_BLE_KEY='...base64 from secrets.yaml...'
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF status
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF feed 1
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF set-time
@@ -20,6 +24,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
+import hmac
+import os
+import secrets
 import struct
 import time
 from dataclasses import dataclass
@@ -37,6 +46,15 @@ PROFILE_UUID = _BASE.format(0x0006)
 CONFIG_UUID = _BASE.format(0x0007)
 CALIBRATION_UUID = _BASE.format(0x0008)
 EVENT_LOG_UUID = _BASE.format(0x0009)
+AUTH_UUID = _BASE.format(0x000A)
+
+PROTOCOL_VERSION = 2
+
+# Channels: the low byte of each writable characteristic's UUID, mixed into the write tags.
+CHANNEL_COMMAND = 0x03
+CHANNEL_PROFILE = 0x06
+CHANNEL_CONFIG = 0x07
+CHANNEL_CALIBRATION = 0x08
 
 # Command opcodes.
 OP_FEED = 0x01
@@ -51,6 +69,7 @@ OP_JOG = 0x09
 OP_SAVE_CALIBRATION = 0x0A
 OP_SET_POSITION = 0x0B
 OP_SET_TIMEZONE = 0x0C  # reserved; the device answers UNSUPPORTED
+OP_AUTH = 0x0D  # proof[16]; the only write that carries no tag
 OP_PROFILE_WRITE = 0x80  # opcodes that appear in responses to Profile/Config/Calibration writes
 OP_CONFIG_WRITE = 0x81
 OP_CALIBRATION_WRITE = 0x82
@@ -74,6 +93,15 @@ RESULTS = {
     13: "clock from BLE disabled",
     14: "unsupported",
     15: "calibration mode is off",
+    16: "not authorized",
+}
+AUTH_DETAILS = {
+    0: "not authenticated (send AUTH first)",
+    1: "bad tag (wrong key?)",
+    2: "stale sequence number",
+    3: "wrong key (AUTH refused; the nonce has changed)",
+    4: "too soon after a failed AUTH",
+    5: "write too short for a tag",
 }
 SOURCES = {0: "schedule", 1: "ESPHome", 2: "ble", 3: "button", 4: "one-shot"}
 TRAY_STATES = {0: "loaded", 1: "empty", 2: "unknown", 3: "calibrating", 4: "moving"}
@@ -115,6 +143,42 @@ QUERY_HEADER = 0xFF
 
 ANCHORS = {"clock": 0, "sunrise": 1, "sunset": 2}
 WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+
+
+# ---- authentication (protocol 2) ----------------------------------------------------------------------
+
+KEY_SIZE = 32
+NONCE_SIZE = 16
+PROOF_SIZE = 16
+TAG_SIZE = 8
+
+
+def parse_key(text: str) -> bytes:
+    """The shared key as written in secrets.yaml (base64 of 32 bytes)."""
+    key = base64.b64decode(text.strip().strip('"'), validate=True)
+    if len(key) != KEY_SIZE:
+        raise ValueError(f"the BLE key must be {KEY_SIZE} bytes, got {len(key)}")
+    return key
+
+
+def auth_proof(key: bytes, nonce: bytes) -> bytes:
+    """What AUTH carries: HMAC-SHA256(key, "PF2 auth" || nonce), first 16 bytes."""
+    return hmac.new(key, b"PF2 auth" + nonce, hashlib.sha256).digest()[:PROOF_SIZE]
+
+
+def session_key(key: bytes, nonce: bytes) -> bytes:
+    """The key for this connection's tags: HMAC-SHA256(key, "PF2 session" || nonce)."""
+    return hmac.new(key, b"PF2 session" + nonce, hashlib.sha256).digest()
+
+
+def write_tag(session: bytes, channel: int, body: bytes) -> bytes:
+    """Tag of an authenticated write: HMAC-SHA256(session, channel || body), first 8 bytes."""
+    return hmac.new(session, bytes([channel]) + body, hashlib.sha256).digest()[:TAG_SIZE]
+
+
+def signed(session: bytes, channel: int, body: bytes) -> bytes:
+    """An authenticated write: the body (sequence number first) followed by its tag."""
+    return body + write_tag(session, channel, body)
 
 
 # ---- packing ------------------------------------------------------------------------------------------
@@ -331,6 +395,7 @@ def parse_calibration(data: bytes) -> tuple[int, int]:
 
 # Writes to these characteristics are answered on Response with seq 0 and this opcode.
 RECORD_OPCODES = {PROFILE_UUID: OP_PROFILE_WRITE, CONFIG_UUID: OP_CONFIG_WRITE, CALIBRATION_UUID: OP_CALIBRATION_WRITE}
+RECORD_CHANNELS = {PROFILE_UUID: CHANNEL_PROFILE, CONFIG_UUID: CHANNEL_CONFIG, CALIBRATION_UUID: CHANNEL_CALIBRATION}
 
 
 def next_seq(seq: int) -> int:
@@ -344,13 +409,15 @@ class FeederClient:
     """Talks to one feeder. Commands carry a sequence number and are retried with the SAME number
     if no answer arrives, which is safe: the device replays its earlier answer instead of acting twice."""
 
-    def __init__(self, address: str, retries: int = 2, timeout: float = 5.0):
+    def __init__(self, address: str, key: bytes, retries: int = 2, timeout: float = 5.0):
         from bleak import BleakClient  # imported here so the pure functions work without bleak
 
         self._client = BleakClient(address)
+        self._key = key
+        self._session = b""
         self._retries = retries
         self._timeout = timeout
-        self._seq = next_seq(int(time.time()))  # varies between runs, so a restart rarely reuses recent numbers
+        self._seq = next_seq(secrets.randbelow(255))  # every write uses the next one; the session starts at AUTH
         # Answers are matched on (seq, opcode): seq alone is not unique (record writes all answer with seq 0).
         self._waiting: dict[tuple[int, int], asyncio.Future] = {}
         self.events: list[EventLog] = []
@@ -359,7 +426,16 @@ class FeederClient:
         await self._client.connect()
         await self._client.start_notify(RESPONSE_UUID, self._on_response)
         await self._client.start_notify(EVENT_LOG_UUID, lambda _c, d: self.events.append(parse_event_log(bytes(d))))
+        await self.authenticate()
         return self
+
+    async def authenticate(self) -> None:
+        """Read the challenge and prove the key. Every write after this is signed."""
+        nonce = bytes(await self._client.read_gatt_char(AUTH_UUID))
+        resp = await self._send(OP_AUTH, command(self._next(), OP_AUTH, auth_proof(self._key, nonce)))
+        if not resp.ok:
+            raise PermissionError(f"BLE authentication refused: {AUTH_DETAILS.get(resp.detail, resp.detail)}")
+        self._session = session_key(self._key, nonce)
 
     async def __aexit__(self, *exc) -> None:
         await self._client.disconnect()
@@ -370,22 +446,30 @@ class FeederClient:
         if fut is not None and not fut.done():
             fut.set_result(resp)
 
-    async def command(self, opcode: int, args: bytes = b"") -> Response:
+    def _next(self) -> int:
         self._seq = next_seq(self._seq)
-        seq = self._seq
-        key = (seq, opcode)
+        return self._seq
+
+    async def _send(self, opcode: int, data: bytes, uuid: str = COMMAND_UUID) -> Response:
+        """Write `data` (sequence number first) and wait for the answer with the same (seq, opcode). A lost
+        answer is retried with the SAME bytes: the device replays its answer instead of acting twice."""
+        key = (data[0], opcode)
         loop = asyncio.get_running_loop()
         for attempt in range(self._retries + 1):
             fut = loop.create_future()
             self._waiting[key] = fut
-            await self._client.write_gatt_char(COMMAND_UUID, command(seq, opcode, args), response=True)
+            await self._client.write_gatt_char(uuid, data, response=True)
             try:
                 return await asyncio.wait_for(fut, self._timeout)
             except asyncio.TimeoutError:
-                continue  # same seq again: a duplicate is answered, not executed twice
+                continue
             finally:
                 self._waiting.pop(key, None)
         raise TimeoutError(f"no answer to opcode 0x{opcode:02X} after {self._retries + 1} tries")
+
+    async def command(self, opcode: int, args: bytes = b"") -> Response:
+        body = command(self._next(), opcode, args)
+        return await self._send(opcode, signed(self._session, CHANNEL_COMMAND, body))
 
     async def info(self) -> Info:
         return parse_info(bytes(await self._client.read_gatt_char(INFO_UUID)))
@@ -394,16 +478,9 @@ class FeederClient:
         return parse_status(bytes(await self._client.read_gatt_char(STATUS_UUID)))
 
     async def write_record(self, uuid: str, data: bytes) -> Response:
-        """Write a Profile/Config/Calibration record and wait for the device's Response (seq 0)."""
-        key = (0, RECORD_OPCODES[uuid])
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._waiting[key] = fut
-        try:
-            await self._client.write_gatt_char(uuid, data, response=True)
-            return await asyncio.wait_for(fut, self._timeout)
-        finally:
-            self._waiting.pop(key, None)
+        """Write a Profile/Config/Calibration record (or query) and wait for the device's Response."""
+        body = bytes([self._next()]) + data
+        return await self._send(RECORD_OPCODES[uuid], signed(self._session, RECORD_CHANNELS[uuid], body), uuid)
 
     async def read_profile_header(self, profile: int) -> dict:
         await self.write_record(PROFILE_UUID, profile_query(profile, None))
@@ -430,7 +507,10 @@ async def _scan() -> None:
 
 
 async def _run(args: argparse.Namespace) -> None:
-    async with FeederClient(args.address) as feeder:
+    key_text = args.key or os.environ.get("PRECISION_FEEDER_BLE_KEY")
+    if not key_text:
+        raise SystemExit("the feeder's BLE key is needed: --key or PRECISION_FEEDER_BLE_KEY (ble_key in secrets.yaml)")
+    async with FeederClient(args.address, parse_key(key_text)) as feeder:
         cmd = args.command
         if cmd == "status":
             print((await feeder.status()).describe())
@@ -476,6 +556,7 @@ async def _run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Precision Feeder BLE reference client")
+    parser.add_argument("--key", help="the feeder's ble_key (base64); or set PRECISION_FEEDER_BLE_KEY")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("scan")
 
@@ -504,6 +585,13 @@ def main() -> None:
     import sys
 
     argv = sys.argv[1:]
+    key = None
+    if "--key" in argv:  # may come anywhere; take it out before splitting off the address
+        i = argv.index("--key")
+        if i + 1 >= len(argv):
+            parser.error("--key needs a value")
+        key = argv[i + 1]
+        del argv[i : i + 2]
     if argv and argv[0] == "scan":
         asyncio.run(_scan())
         return
@@ -512,6 +600,7 @@ def main() -> None:
     address, rest = argv[0], argv[1:]
     args = parser.parse_args(rest)
     args.address = address
+    args.key = key
     asyncio.run(_run(args))
 
 

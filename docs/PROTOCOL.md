@@ -1,8 +1,9 @@
 # Precision Feeder BLE protocol
 
-Protocol version **1**. This document is authoritative; the firmware
-(`components/precision_feeder_ble/protocol.h`) and the reference client
-(`tools/precision_feeder_ble.py`) are checked against the same byte vectors.
+Protocol version **2** (firmware 0.4.0 and later). This document is
+authoritative; the firmware (`components/precision_feeder_ble/protocol.h` and
+`crypto.h`) and the reference client (`tools/precision_feeder_ble.py`) are
+checked against the same byte vectors.
 
 *Written with the assistance of an AI (Anthropic's Claude); verify against the
 source if something looks wrong.*
@@ -10,47 +11,154 @@ source if something looks wrong.*
 ## Overview
 
 The feeder is a BLE peripheral with one custom GATT service. A client (a PLC
-bridge, a phone app, a script) connects, optionally subscribes to notifications,
-and talks to it through eight characteristics. One client at a time.
+bridge, a phone app, a script) connects, **authenticates with a shared key**,
+optionally subscribes to notifications, and talks to it through nine
+characteristics. One client at a time.
 
-- All multi-byte values are **little-endian**. All records fit the default 23-byte
-  ATT MTU (20 bytes of payload), so no MTU negotiation is needed.
+- All multi-byte values are **little-endian**. Every write and record fits the
+  default 23-byte ATT MTU (20 bytes of payload), so no MTU negotiation is needed.
 - The feeder's schedule and guard always run on the device. BLE can *edit* the
   schedule and *request* feeds; it is never required for feeding to continue.
 - Every feed request, from any source, passes the same guard on the device
   (minimum gap, daily cap, tray state, hold). BLE cannot bypass it.
-- Pairing is "Just Works" (no authentication); see DESIGN.md section 10.
+- **Every write is authenticated** (see [Authentication](#authentication)). A
+  client that does not know the key can read Info and Auth and nothing else.
+
+### Changes from protocol 1
+
+- New **Auth** characteristic (`000A`) and **AUTH** command (`0x0D`).
+- Every write (Command, Profile, Config, Calibration) now ends with an 8-byte
+  **tag**. Profile, Config and Calibration writes now **start with a sequence
+  number**, and their answers carry it (protocol 1 answered them with `seq 0`).
+- New result **16 NOT_AUTHORIZED**, and capability bit 6.
+- Before AUTH, Status, Profile, Config, Calibration and Response read as zeros,
+  and nothing is notified.
+- Record formats, opcodes, arguments, result codes 0 to 15 and the Status layout
+  are unchanged.
 
 ## UUIDs
 
 Base `02dd1dd9-ba75-4bbc-bdea-306d2101xxxx`; `xxxx` is:
 
-| xxxx | Characteristic | Properties |
-|---|---|---|
-| 0001 | *Service* | advertised |
-| 0002 | Info | read |
-| 0003 | Command | write |
-| 0004 | Response | notify, read |
-| 0005 | Status | read, notify |
-| 0006 | Profile | read, write |
-| 0007 | Config | read, write |
-| 0008 | Calibration | read, write |
-| 0009 | Event log | notify |
+| xxxx | Characteristic | Properties | Before AUTH |
+|---|---|---|---|
+| 0001 | *Service* | advertised | |
+| 0002 | Info | read | readable |
+| 0003 | Command | write | only AUTH is accepted |
+| 0004 | Response | notify, read | answers to your writes |
+| 0005 | Status | read, notify | zeros, not notified |
+| 0006 | Profile | read, write | zeros; writes refused |
+| 0007 | Config | read, write | zeros; writes refused |
+| 0008 | Calibration | read, write | zeros; writes refused |
+| 0009 | Event log | notify | not notified |
+| 000A | Auth | read | the challenge (16 bytes) |
 
 ## Info (read)
 
 `protocol u8, capabilities u16, positions u8, profiles u8, events_per_profile u8`
 
-Currently `01 | caps | 07 | 03 | 04`. Capability bits: 0 solar anchors,
+Currently `02 | caps | 07 | 03 | 04`. Capability bits: 0 solar anchors,
 1 clock push (`SET_TIME`) available, 2 profile editing, 3 calibration,
-4 hold-until-cancelled, 5 servo pulse range settable (Config keys 10 and 11). If your client sees a protocol version it does not know,
-do not send commands.
+4 hold-until-cancelled, 5 servo pulse range settable (Config keys 10 and 11),
+6 writes must be authenticated. **If your client sees a protocol version it does
+not know, do not send commands.**
+
+## Authentication
+
+The feeder and the client share a secret **key**: 32 random bytes, configured on
+the feeder as `ble_key` in its `secrets.yaml` (base64, as made by
+`openssl rand -base64 32`). The same base64 text goes into the client.
+
+### 1. Read the challenge
+
+Read **Auth** (`000A`): a random 16-byte **nonce**. The feeder makes a new one for
+every connection and after every failed AUTH, from its hardware random number
+generator.
+
+### 2. Prove the key: AUTH
+
+Write to Command: `seq u8, 0x0D, proof[16]` (18 bytes, no tag), where
+
+```
+proof = HMAC-SHA256(key, "PF2 auth" || nonce)[0..15]
+```
+
+(`"PF2 auth"` is the 8 ASCII bytes, no terminator; `||` is concatenation.)
+The answer on Response is `seq, 0x0D, result, detail`: OK, or NOT_AUTHORIZED with
+a detail code (below). On OK, both sides derive this connection's **session key**:
+
+```
+session = HMAC-SHA256(key, "PF2 session" || nonce)      (all 32 bytes)
+```
+
+After a failed AUTH the nonce changes (read Auth again), and AUTH is refused for
+one second. A disconnect ends the session; the next connection starts again at
+step 1.
+
+### 3. Sign every write
+
+Every write after AUTH, to Command, Profile, Config or Calibration, is
+
+```
+seq u8, body..., tag[8]
+tag = HMAC-SHA256(session, channel || seq || body...)[0..7]
+```
+
+- `channel` is the low byte of the characteristic's UUID: `03` Command,
+  `06` Profile, `07` Config, `08` Calibration. A write signed for one
+  characteristic is refused by another.
+- For Command, `body` is `opcode, arguments...` as in protocol 1.
+- For Profile, Config and Calibration, `body` is the record or query exactly as
+  in protocol 1 (sections below). Their answers carry this `seq`.
+- **`seq` runs 1 to 255 and wraps to 1 (never 0). Each new write must use a
+  sequence number after the last accepted one** (AUTH's counts), at most 127
+  ahead. Commands and records share one counter: simply use the next number for
+  every write.
+
+### Retries are safe
+
+If an answer does not arrive, send the **same bytes** again (same `seq`, body
+and tag). The feeder remembers its answers to the last 8 writes for 30 seconds
+and replays the stored answer for an exact repeat **without acting again**, so a
+retried FEED never feeds twice. A new write that reuses an older `seq` is refused
+as stale. Match answers on `seq` and opcode.
+
+### NOT_AUTHORIZED details
+
+| `detail` | Meaning |
+|---|---|
+| 0 | not authenticated: send AUTH first |
+| 1 | bad tag: wrong key, the bytes were changed, or signed for another characteristic |
+| 2 | stale sequence number: not after the last accepted one (a retry must repeat the exact bytes) |
+| 3 | AUTH refused: wrong proof (wrong key, or an old nonce). The nonce has changed |
+| 4 | AUTH refused: within a second of a failed AUTH |
+| 5 | too short to carry a sequence number and tag |
+
+### What this protects, and what it does not
+
+- **Protects:** nobody without the key can feed, change the schedule or
+  settings, calibrate, set the clock, or read the feeder's state. Recorded
+  traffic cannot be replayed (sequence numbers, and a new nonce every
+  connection), and writes cannot be altered or moved to another characteristic.
+- **Pairing:** the feeder offers LE Secure Connections with bonding
+  (`auth_req_mode: sc_bond`). A client that pairs gets an encrypted link, which
+  also hides what is read. With no screen or keypad, pairing is "Just Works", so
+  it is not access control by itself; the key is.
+- **Does not protect:** the feeder does not prove its own identity to the
+  client, and answers and notifications are not signed. Someone with radio
+  equipment who can impersonate the feeder could feed a client false status.
+  The animals are protected (the feeder only acts on authenticated writes); a
+  client that must trust what it reads should pair, and treat the feeder's
+  status as informational.
+- **Keep the key secret.** Anyone with it has full control (still within the feed
+  guard). To change it, generate a new one, update `secrets.yaml`, reflash, and
+  update every client.
 
 ## Command (write) and Response (notify)
 
-A command is `seq u8, opcode u8, arguments...`. The device answers on **Response**
-with `seq u8, opcode u8, result u8, detail u8` (and also keeps the last answer
-readable, in case a notification was missed).
+A command is `seq u8, opcode u8, arguments..., tag[8]` (AUTH has no tag). The
+device answers on **Response** with `seq u8, opcode u8, result u8, detail u8` (and
+also keeps the last answer readable, in case a notification was missed).
 
 | Opcode | Name | Arguments | `detail` in the response |
 |---|---|---|---|
@@ -66,8 +174,9 @@ readable, in case a notification was missed).
 | 0x0A | SAVE_CALIBRATION | none | |
 | 0x0B | SET_POSITION | `position u8` (0 to 6) | remaining portions |
 | 0x0C | SET_TIMEZONE | reserved: always answered UNSUPPORTED | |
+| 0x0D | AUTH | `proof[16]`, no tag (see [Authentication](#authentication)) | NOT_AUTHORIZED detail |
 
-Argument lengths are exact; a wrong length is INVALID_ARG.
+Argument lengths are exact (not counting the tag); a wrong length is INVALID_ARG.
 
 ### Results
 
@@ -89,16 +198,7 @@ Argument lengths are exact; a wrong length is INVALID_ARG.
 | 13 | BLE_TIME_DISABLED | SET_TIME refused: policy is `off` |
 | 14 | UNSUPPORTED | unknown or reserved opcode |
 | 15 | NOT_CALIBRATING | JOG needs calibration mode |
-
-### Retries are safe
-
-Commands are **idempotent**. If you do not get an answer, send the *same bytes*
-again: same `seq`, opcode and arguments. The device remembers its answers to the
-last 8 commands for 30 seconds and replays the stored answer for an exact repeat
-without acting a second time, so a retried FEED never feeds twice. A command that
-reuses a `seq` with different contents is treated as new. Use a fresh `seq` (1 to
-255; avoid 0, which the device uses for its answers to record writes) for each new
-command, and match answers on `seq` *and* opcode.
+| 16 | NOT_AUTHORIZED | see [NOT_AUTHORIZED details](#not_authorized-details) |
 
 ### Setting the clock
 
@@ -120,8 +220,9 @@ a power loss, so a PLC should push the time after every connect.
 
 ## Status (read, notify)
 
-Sent when it changes, at most twice a second, and immediately after a connection
-or a feed request. 20 bytes:
+Sent when it changes, at most twice a second, and immediately after AUTH or a
+feed request; a read may lag a command by up to half a second. Zeros, and no
+notifications, until AUTH succeeds. 20 bytes:
 
 | Offset | Field | Type |
 |---|---|---|
@@ -141,21 +242,22 @@ or a feed request. 20 bytes:
 Clock source 0 with flag bit 0 (clock valid) set means the clock survived a soft
 restart (OTA update, crash, reflash: the chip's RTC keeps counting) but no source has
 set it since. The time is good; `SET_TIME` is accepted under `fallback_only` until
-NTP or Home Assistant syncs (firmware 0.3.1 and later; before that, such a clock was
-wrongly reported as NTP).
+NTP or Home Assistant syncs.
 
 Flags: bit 0 clock valid, 1 hold, 2 calibrating, 3 moving, 4 scheduler enabled,
-5 reload pause, 6 sunrise/sunset unavailable (no location: sun events skipped; or no sunrise/sunset today: they use 06:00 / 18:00, from firmware 0.3.5), 7 schedule needs more portions than
-remain before the next refill, 8 clock not re-synchronised for over a week,
+5 reload pause, 6 sunrise/sunset unavailable (no location: sun events are skipped;
+or no sunrise/sunset today: they use 06:00 / 18:00), 7 schedule needs more portions
+than remain before the next refill, 8 clock not re-synchronised for over a week,
 9 position unknown, 10 tray empty, 11 the active profile feeds more portions on its
-busiest day than the daily cap allows (added in firmware 0.3.2; 0 before), 12 needs
-food: the tray is empty, or the next scheduled or one-shot feed needs more portions
-than remain (added in 0.3.3; never set while the position is unknown).
+busiest day than the daily cap allows, 12 needs food: the tray is empty, or the next
+scheduled or one-shot feed needs more portions than remain (never set while the
+position is unknown).
 
 ## Profile (read, write)
 
-Three profiles, four events each. **Writes** apply immediately and are answered on
-Response with `seq 0`, opcode `0x80`, `result`, and `detail` = the profile index.
+Three profiles, four events each. **Writes** are `seq, record, tag` and apply
+immediately; they are answered on Response with this `seq`, opcode `0x80`,
+`result`, and `detail` = the profile index. The record is one of:
 
 - Header `00, profile, every_n, fast_mask, anchor_day u16` (6 bytes).
   `every_n` 1 to 14; `fast_mask` bit 0 = Sunday ... bit 6 = Saturday, the days
@@ -167,12 +269,13 @@ Response with `seq 0`, opcode `0x80`, `result`, and `detail` = the profile index
   minutes from the sun (-720 to +720). `portions` 1 to 6; `days` is a weekday
   mask like `fast_mask`.
 - Query `02, profile, event` (3 bytes; event `FF` means the header): selects which
-  record the next **read** returns, in the formats above.
+  record the next **read** returns, in the formats above (no seq, no tag).
 
 ## Config (read, write)
 
-Set: `key u8, value i32` (5 bytes). Query: write `key | 0x80` (1 byte), then read to
-get `key, value`. Answered on Response (`seq 0`, opcode `0x81`, detail = key).
+Set: `seq, key u8, value i32, tag`. Query: `seq, key | 0x80, tag`, then read to get
+`key, value` (5 bytes). Answered on Response (this `seq`, opcode `0x81`, detail =
+key).
 
 | Key | Setting | Range |
 |---|---|---|
@@ -188,46 +291,58 @@ get `key, value`. Answered on Response (`seq 0`, opcode `0x81`, detail = key).
 | 10 | servo pulse for 0 degrees, µs | 300 to 1500 |
 | 11 | servo pulse for 180 degrees, µs | 1500 to 3000 |
 
-Keys 10 and 11 were added in firmware 0.3.0 (an addition within protocol 1; older
-firmware answers them INVALID_ARG). The two must stay at least 500 µs apart: a write
-that would break that is refused with INVALID_ARG. In calibration mode the servo moves
-to the selected position again after a change.
+Keys 10 and 11 must stay at least 500 µs apart: a write that would break that is
+refused with INVALID_ARG. In calibration mode the servo moves to the selected
+position again after a change.
 
 ## Calibration (read, write)
 
-Set: `index u8, offset i16` (3 bytes; tenths of a degree, -150 to +150). Query:
-write `index | 0x80`, then read. Answered on Response (`seq 0`, opcode `0x82`).
-The servo only moves when calibration mode is on (CALIBRATE 1); JOG nudges a
-position and moves the servo there. Turning calibration off, or SAVE_CALIBRATION,
-writes the offsets to flash.
+Set: `seq, index u8, offset i16, tag` (offset in tenths of a degree, -150 to +150).
+Query: `seq, index | 0x80, tag`, then read `index, offset` (3 bytes). Answered on
+Response (this `seq`, opcode `0x82`). The servo only moves when calibration mode is
+on (CALIBRATE 1); JOG nudges a position and moves the servo there. Turning
+calibration off, or SAVE_CALIBRATION, writes the offsets to flash.
 
 ## Event log (notify)
 
-One notification per feed request, accepted or refused, from any source:
-`epoch u32 (0 = clock unset), source u8, portions u8, result u8` (7 bytes).
-`result` uses the table above. This is how a client learns the outcome of a
-*scheduled* feed it did not ask for. A scheduled or one-shot feed that the device
-has to wait for (busy, too soon, on hold) is retried quietly during its one-minute
-window and reported once: when it is fed, or with the last refusal when the window
-closes.
+One notification per feed request, accepted or refused, from any source, while an
+authenticated client is connected: `epoch u32 (0 = clock unset), source u8,
+portions u8, result u8` (7 bytes). `result` uses the table above. This is how a
+client learns the outcome of a *scheduled* feed it did not ask for. A scheduled or
+one-shot feed that the device has to wait for (busy, too soon, on hold) is retried
+quietly during its one-minute window and reported once: when it is fed, or with
+the last refusal when the window closes.
 
 ## Example bytes
 
+Unsigned bodies (as in protocol 1; add the seq and tag as described above):
+
 | What | Bytes |
 |---|---|
-| FEED 1 portion, seq 5 | `05 01 01` |
+| FEED 1 portion, seq 5 (before the tag) | `05 01 01` |
 | ...answered OK, 1 portion | `05 01 00 01` |
 | HOLD until cancelled, seq 6 | `06 04 FF FF FF FF` |
 | SET_TIME 1760380800, offset -360, seq 7 | `07 06 80 47 ED 68 98 FE` |
 | SET_LOCATION 39.76840, -86.15810, seq 8 | `08 07 88 AE 3C 00 7E 88 7C FF` |
-| Profile header: profile 1, every 2 days, Sundays off, anchor 20739 | `00 01 02 01 03 51` |
-| Profile event: profile 0, event 2, enabled, sunset +180 min, 2 portions, weekdays | `01 00 02 05 B4 00 02 3E` |
-| Profile event: profile 1, event 0, disabled, sunrise -30 min, 1 portion, every day | `01 01 00 02 E2 FF 01 7F` |
-| Config: daily cap = 3 | `05 03 00 00 00` |
+| Profile header record: profile 1, every 2 days, Sundays off, anchor 20739 | `00 01 02 01 03 51` |
+| Profile event record: profile 0, event 2, enabled, sunset +180 min, 2 portions, weekdays | `01 00 02 05 B4 00 02 3E` |
+| Profile event record: profile 1, event 0, disabled, sunrise -30 min, 1 portion, every day | `01 01 00 02 E2 FF 01 7F` |
+| Config record: daily cap = 3 | `05 03 00 00 00` |
 | Config query: latitude | `88` |
-| Config: servo max pulse = 2770 µs | `0B D2 0A 00 00` |
-| Calibration: position 2 = -1.2 degrees | `02 F4 FF` |
+| Config record: servo max pulse = 2770 µs | `0B D2 0A 00 00` |
+| Calibration record: position 2 = -1.2 degrees | `02 F4 FF` |
 | Event log: a BLE feed of 1 portion at 1760380800, accepted | `80 47 ED 68 02 01 00` |
+
+Authentication, with key `00 01 02 ... 1F` (bytes 0 to 31) and nonce
+`A0 A1 ... AF`:
+
+| What | Bytes |
+|---|---|
+| proof | `FA E3 72 F2 C6 D3 C9 D6 EE 0E 49 74 57 4D 6C 7F` |
+| AUTH, seq 1 | `01 0D FA E3 72 F2 C6 D3 C9 D6 EE 0E 49 74 57 4D 6C 7F` |
+| session key | `0C 31 22 B4 B9 CC 94 02 F4 17 94 4D DA 88 31 2C 46 47 9E 89 D2 30 C4 86 50 69 35 5A AD F3 91 C3` |
+| signed FEED 1, seq 5 (Command) | `05 01 01 2A 8F 78 9B 5E D3 34 F6` |
+| signed Config write daily cap = 3, seq 6 (Config) | `06 05 03 00 00 00 C4 79 CE E3 22 0F CE 8B` |
 
 ## Changing the protocol
 
