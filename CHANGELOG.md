@@ -6,7 +6,21 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## Unreleased
+## 1.0.0: first release (2026-10-14)
+
+The first release: everything in this changelog, bench-tested on one complete
+feeder (docs/BENCH.md). Firmware behaviour is the same as 0.5.2; since then
+only internal refactors, all covered by the host tests:
+
+- The BLE protocol runs in a host-tested engine; setting limits have one home;
+  the scheduler and the projection share one source of events; the feed
+  history is handled as records; the Python client is a package. Details below.
+- `tools/check.sh` and a GitHub workflow run every check.
+
+BLE protocol: version 2 (authenticated). Saved settings from 0.3.0 onwards are
+migrated on update.
+
+### Internal changes since 0.5.2
 
 - Refactor (no behaviour change): the feed history is handled as records
   (`HistoryEntry`, newest first) through four helpers, instead of five parallel

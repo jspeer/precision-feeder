@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **firmware v0.5.0, tested on a bench build** (section 15). This is the
+Status: **firmware v1.0.0, tested on a bench build** (section 15). This is the
 current design; history is in [CHANGELOG.md](CHANGELOG.md) and hardware results
 in [docs/BENCH.md](docs/BENCH.md). First written 2026-10-13.
 
@@ -524,7 +524,7 @@ precision-feeder/
 5. Check the Printables model licence before shipping derived files.
 6. ~~HA-time package in v1.~~ Decided 2026-10-14: enabled in both examples.
 
-## 15. Implementation status (v0.5.0)
+## 15. Implementation status (v1.0.0)
 
 Everything in sections 3 to 10 is built. On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,

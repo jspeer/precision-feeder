@@ -252,3 +252,9 @@ Settings now go through FeederCore's validated setters. Through the ESPHome API
 change was applied and published; BLE `selftest` 14/14 (its Config writes go
 through the same setters).
 
+## Release 1.0.0 (2026-10-14)
+
+Flashed over WiFi: the board reports Firmware Version 1.0.0, Faults "none", tray
+loaded; BLE `selftest` 14/14. Builds: no warnings; flash 53.4% (no BLE) and
+71.4% (BLE) of the 1.8 MB app slot; static RAM 33.7% / 42.7%.
+
