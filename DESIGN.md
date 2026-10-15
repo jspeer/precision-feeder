@@ -849,5 +849,18 @@ bottom of the slots while the disc turns. Flake is not advised (README).
 0.3.3 on hardware: flashed over USB with a new API key (OTA could not be used for
 the key change, since OTA is encrypted with the old key); the API connects with
 the new key; "Edited Profile" and "Active Schedule" report; "Needs Food" off with
-6 portions left and nothing scheduled. Not yet seen: "Needs Food" turning on.
+6 portions left and nothing scheduled. Needs Food on hardware (owner, from Home
+Assistant): with a 21:00 x2 event and the tray declared at 5 (1 left), "Needs
+Food" went to Problem and Faults read "next feed needs more portions than
+remain; schedule needs more portions than the tray holds before the next
+refill"; "Schedule Over Capacity" on. Next Feed showed tomorrow 21:00, correctly:
+that event slot had already fed today during testing (once a day per event).
+Disabling the event cleared it within a second: Needs Food OK (nothing
+scheduled, so 1 portion is enough), Schedule Over Capacity off, Next Feed none,
+Tray Empty On "not within 30 days". Over-cap warning on hardware: with events
+21:00 x2 and 12:00 x3 and a daily cap of 3, Edited Profile read "A: 21:00 x2,
+12:00 x3 [active] ! 5 portions/day > cap 3" and Faults added "schedule feeds
+more per day than the daily cap allows (some events will be refused)". Every
+v0.3.3 feature has now been seen on hardware. (The summary lists events in slot
+order, not time order; a possible tidy-up.)
 
