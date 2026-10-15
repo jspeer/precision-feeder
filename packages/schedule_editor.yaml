@@ -4,15 +4,25 @@
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 #
-# Three profiles (A, B, C), each with four events. Pick "Edit Profile" and
-# "Edit Event", then change the fields below; edits apply straight away and are
-# saved a couple of seconds later. The "Active Profile" select (controls
-# package) chooses which profile the scheduler runs.
+# How to build a profile: docs/SCHEDULING.md (step by step, field reference,
+# examples). In short: three profiles (A, B, C) of four events each. "Edit
+# Profile" / "Edit Event" choose what the fields below change; "Active Profile"
+# (controls package) chooses what runs. Edits apply straight away, so for each
+# event set the anchor first, then time, days and portions, and enable it last.
 #
 # Event time:
 #   clock anchor     -> HH:MM, for example 08:30
 #   sunrise/sunset   -> signed offset, for example +03:00 (3 h after) or -00:30
 # Days: "all", "none", "weekdays", "weekend", or names such as "mon,wed,fri".
+
+text_sensor:
+  - platform: template
+    name: "Edited Profile"
+    icon: mdi:calendar-edit
+    # Summary of the profile chosen in "Edit Profile", marked [active] or [not active], with a
+    # warning when its busiest day needs more portions than the Daily Portion Cap.
+    lambda: return id(feeder).edited_profile_summary();
+    update_interval: 2s
 
 select:
   - platform: template

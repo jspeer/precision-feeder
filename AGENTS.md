@@ -22,7 +22,7 @@ substitutions.
 - Its **Decisions log** and **Open items** sections record what was decided and
   what is unverified. Do not silently reverse a logged decision; say which one
   applies and ask.
-- Keep DESIGN.md (and docs/PROTOCOL.md once it exists) updated in the same
+- Keep DESIGN.md (and the guides in docs/) updated in the same
   change as the code. Docs and code must not drift.
 
 ## Rules
@@ -101,7 +101,7 @@ substitutions.
 
 ```
 README.md  LICENSE  DESIGN.md  AGENTS.md
-docs/         PROTOCOL.md, CALIBRATION.md
+docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md
 components/   precision_feeder/ (feeder_core: tray, guard, scheduler; calendar.h and solar.h,
               pure and host-tested; precision_feeder: ESPHome adapter)
               and precision_feeder_ble/ (optional BLE protocol; protocol.h is pure and host-tested)

@@ -99,6 +99,8 @@ constexpr uint16_t FLAG_OVERSUBSCRIBED = 1u << 7;
 constexpr uint16_t FLAG_TIME_STALE = 1u << 8;
 constexpr uint16_t FLAG_POSITION_UNKNOWN = 1u << 9;
 constexpr uint16_t FLAG_TRAY_EMPTY = 1u << 10;
+constexpr uint16_t FLAG_OVER_CAP = 1u << 11;  // active profile feeds more per day than the daily cap (0.3.2)
+constexpr uint16_t FLAG_NEEDS_FOOD = 1u << 12;  // tray empty, or the next feed needs more than remains (0.3.3)
 
 struct StatusSnapshot {
   uint8_t tray_position{0};

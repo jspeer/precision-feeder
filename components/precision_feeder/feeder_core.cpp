@@ -896,6 +896,7 @@ void FeederCore::project_() {
   this->project_dirty_ = false;
   this->last_project_ = this->hal_millis();
   this->next_event_epoch_ = 0;
+  this->next_event_portions_ = 0;
   this->empty_on_epoch_ = 0;
   this->runway_days_ = 255;
   this->oversubscribed_ = false;
@@ -947,8 +948,10 @@ void FeederCore::project_() {
   }
   std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) { return a.epoch < b.epoch; });
 
-  if (!items.empty())
+  if (!items.empty()) {
     this->next_event_epoch_ = items.front().epoch;
+    this->next_event_portions_ = items.front().portions;
+  }
 
   const uint32_t remaining = this->remaining();
   if (remaining == 0) {
@@ -1358,16 +1361,51 @@ std::string FeederCore::faults_text() {
     add("tray position unknown");
   if (this->state_.position >= MAX_PORTIONS)
     add("tray empty");
+  else if (this->needs_food())
+    add("next feed needs more portions than remain");
   if (this->solar_fault_)
     add("sunrise/sunset unavailable (set location)");
   if (this->oversubscribed_)
     add("schedule needs more portions than the tray holds before the next refill");
+  if (this->schedule_over_cap())
+    add("schedule feeds more per day than the daily cap allows (some events will be refused)");
   return out.empty() ? "none" : out;
 }
 
-std::string FeederCore::schedule_summary() {
-  const Profile &p = this->cfg.profiles[this->cfg.active_profile];
-  std::string out(1, static_cast<char>('A' + this->cfg.active_profile));
+uint16_t FeederCore::max_portions_per_day(int profile) const {
+  const Profile &p = this->cfg.profiles[profile < 0 ? this->cfg.active_profile : std::min<int>(profile, NUM_PROFILES - 1)];
+  uint16_t most = 0;
+  for (int wday = 0; wday < 7; wday++) {
+    if (p.fast_days & (1 << wday))
+      continue;
+    uint16_t total = 0;
+    for (const Event &e : p.ev)
+      if (e.enabled && (e.days & (1 << wday)))
+        total += e.portions;
+    most = std::max(most, total);
+  }
+  return most;
+}
+
+bool FeederCore::schedule_over_cap() const {
+  return this->cfg.scheduler_enabled && this->max_portions_per_day() > this->cfg.daily_cap;
+}
+
+std::string FeederCore::edited_profile_summary() {
+  const uint8_t ep = this->editor_profile;
+  std::string out = this->profile_summary_(ep);
+  out += ep == this->cfg.active_profile ? " [active]" : " [not active]";
+  const uint16_t most = this->max_portions_per_day(ep);
+  if (most > this->cfg.daily_cap)
+    out += " ! " + std::to_string(most) + " portions/day > cap " + std::to_string(this->cfg.daily_cap);
+  return out;
+}
+
+std::string FeederCore::schedule_summary() { return this->profile_summary_(this->cfg.active_profile); }
+
+std::string FeederCore::profile_summary_(uint8_t profile) {
+  const Profile &p = this->cfg.profiles[profile];
+  std::string out(1, static_cast<char>('A' + profile));
   out += ": ";
   bool any = false;
   for (const Event &e : p.ev) {

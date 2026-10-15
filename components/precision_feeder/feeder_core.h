@@ -276,9 +276,23 @@ class FeederCore {
   /// Whole days of feeding left in the tray under the active schedule; 255 = more than the planning horizon.
   uint8_t runway_days() const { return this->runway_days_; }
   bool schedule_oversubscribed() const { return this->oversubscribed_; }
+  /// Portions a profile feeds on its busiest weekday (enabled events, fast days excluded). -1 = active profile.
+  uint16_t max_portions_per_day(int profile = -1) const;
+  /// True if the active profile's busiest day needs more portions than the daily cap allows, so some of its
+  /// events would be refused every such day. Only while the scheduler is on.
+  bool schedule_over_cap() const;
   uint32_t last_feed_epoch() const { return this->state_.last_feed_epoch; }
   uint8_t last_feed_source() const { return this->state_.last_src; }
   uint32_t next_event_epoch() const { return static_cast<uint32_t>(this->next_event_epoch_); }
+  /// Portions the next scheduled or one-shot feed asks for (0 = none due, or the clock is not set).
+  uint8_t next_event_portions() const { return this->next_event_portions_; }
+  /// True when the tray is empty, or the next due feed needs more portions than remain (it would be cut
+  /// short). False while the position is unknown: that needs checking, not food, and Faults reports it.
+  bool needs_food() const {
+    if (this->state_.unknown)
+      return false;
+    return this->remaining() == 0 || (this->next_event_portions_ != 0 && this->next_event_portions_ > this->remaining());
+  }
   bool solar_fault() const { return this->solar_fault_; }
   bool reload_pause_active();
   bool hold_active();
@@ -289,6 +303,8 @@ class FeederCore {
   std::string last_result_text() const;
   std::string faults_text();
   std::string schedule_summary();
+  /// The same summary for the profile selected in the editor, with a warning if it exceeds the daily cap.
+  std::string edited_profile_summary();
   std::string recent_feeds_text();
   std::string oneshots_text();
   /// 0 ok, 1 time not valid, 2 tray empty, 3 position unknown, 4 moving, 5 calibrating, 6 hold or reload pause
@@ -357,6 +373,7 @@ class FeederCore {
   void project_();
   int32_t today_();
   std::string format_local_(int64_t epoch, bool with_date = true);
+  std::string profile_summary_(uint8_t profile);
 
   float sweep_{175.0f};
   bool invert_{false};
@@ -413,6 +430,7 @@ class FeederCore {
   uint8_t runway_days_{255};
   bool oversubscribed_{false};
   int64_t next_event_epoch_{0};
+  uint8_t next_event_portions_{0};
   int64_t empty_on_epoch_{0};
 };
 

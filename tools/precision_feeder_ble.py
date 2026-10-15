@@ -92,6 +92,8 @@ FLAGS = {
     8: "time_stale",
     9: "position_unknown",
     10: "tray_empty",
+    11: "schedule_over_cap",
+    12: "needs_food",
 }
 
 # Config keys.

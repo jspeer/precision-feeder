@@ -24,6 +24,10 @@ tracked without any sensor, so the firmware is careful about power loss: if a
 move is interrupted the position is marked *unknown* and feeding stops until you
 say where the tray is.
 
+> **Use pellets or other hard food. Flake food is not advised.** Hard food drops
+> out of each slot cleanly. Flakes can stick to the sides and bottom of the
+> slots while the disc turns, so portions come out unevenly or not at all.
+
 ## Features
 
 - **On-board scheduler.** Feeding continues with no Home Assistant and no network
@@ -81,7 +85,8 @@ signal line to GND.
 5. Calibrate the tray ([docs/CALIBRATION.md](docs/CALIBRATION.md)).
 6. Press **Tray Reload** first (it closes the tray so food cannot fall out), then
    fill the tray. Set your **Latitude/Longitude**
-   if you use sunrise/sunset events, and set up a profile in the schedule editor.
+   if you use sunrise/sunset events, and set up a profile in the schedule editor:
+   [docs/SCHEDULING.md](docs/SCHEDULING.md) walks through it.
 
 ## Repository layout
 
@@ -93,7 +98,7 @@ components/precision_feeder_ble/  the BLE protocol (optional; compiled only if u
 examples/                      ready-to-edit configurations (basic, and with BLE)
 tests/                         host-side C++ tests for the pure logic and the protocol
 tools/                         Python reference client for the BLE protocol, and its tests
-docs/                          calibration walkthrough, BLE protocol
+docs/                          scheduling guide, calibration walkthrough, BLE protocol
 DESIGN.md                      design, decisions and open questions
 AGENTS.md                      guidance for AI agents and contributors
 ```

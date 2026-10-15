@@ -546,6 +546,10 @@ proto::StatusSnapshot PrecisionFeederBle::snapshot_() {
     flags |= FLAG_POSITION_UNKNOWN;
   if (f.remaining() == 0)
     flags |= FLAG_TRAY_EMPTY;
+  if (f.schedule_over_cap())
+    flags |= FLAG_OVER_CAP;
+  if (f.needs_food())
+    flags |= FLAG_NEEDS_FOOD;
   s.flags = flags;
 
   s.last_feed_epoch = f.last_feed_epoch();

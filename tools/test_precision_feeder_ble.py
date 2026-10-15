@@ -30,6 +30,10 @@ class GoldenVectors(unittest.TestCase):
         self.assertEqual(s.next_event_epoch, 1760427600)
         self.assertEqual((s.runway_days, s.time_source, s.time_age_min), (3, 2, 125))
         self.assertIn("NTP", s.describe())
+        over = pf.parse_status(data[:4] + b(0x11, 0x08) + data[6:])
+        self.assertIn("schedule_over_cap", over.flag_names)
+        food = pf.parse_status(data[:4] + b(0x11, 0x10) + data[6:])
+        self.assertIn("needs_food", food.flag_names)
         kept = pf.parse_status(data[:17] + b(0x00) + data[18:])  # source 0, clock valid
         self.assertIn("kept across restart", kept.describe())
         unset = pf.parse_status(data[:4] + b(0x10, 0x00) + data[6:17] + b(0x00) + data[18:])  # source 0, not valid

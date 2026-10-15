@@ -325,8 +325,8 @@ path.
 
 Editor pattern, to keep the entity count low.
 
-Status (read-only): tray position, remaining portions, tray state, active
-profile name, next feed time, last feed time and source, last feeds log (text),
+Status (read-only): tray position, remaining portions, tray state, needs food
+(binary, for automations), active profile name, next feed time, last feed time and source, last feeds log (text),
 feeds today, runway days, empty-on date, schedule summary (text), time source
 and sync age, fault flags, firmware version, uptime, WiFi RSSI.
 
@@ -449,6 +449,7 @@ precision-feeder/
   README.md  LICENSE  DESIGN.md  AGENTS.md
   docs/PROTOCOL.md     BLE protocol (authoritative)
   docs/CALIBRATION.md  setup and calibration walkthrough
+  docs/SCHEDULING.md   building schedule profiles
   components/precision_feeder/      feeder_core.* (all logic, plain C++), calendar.h,
                                     solar.h (pure, host-tested), precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log)
@@ -515,7 +516,7 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.3.1, 2026-10-14)
+## 15. Implementation status (v0.3.3, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -608,6 +609,27 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
   the saved tray state from earlier versions is discarded).
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.3.3 (Needs Food, 2026-10-14):
+- New "Needs Food" binary sensor (status package, device class problem): on
+  when the tray is empty, or the next scheduled or one-shot feed needs more
+  portions than remain (the firmware would feed what is left, so the meal would
+  come up short). Off while the position is unknown. Meant as an automation
+  trigger. Also BLE Status flag bit 12 (an addition within protocol 1) and a
+  Faults line. The projection now keeps the next feed's portions.
+
+Changes in v0.3.2 (scheduling clarity, 2026-10-14):
+- New docs/SCHEDULING.md: building a profile step by step, field reference,
+  rules and worked examples. Linked from the README and the editor package.
+- New "Edited Profile" text sensor (editor package): the summary of the
+  profile being edited, marked [active] / [not active], with a warning when its
+  busiest day exceeds the daily cap. A separate sensor rather than part of
+  "Active Schedule", which could then exceed Home Assistant's 255-character
+  limit for a text sensor.
+- Over-cap warning: when the active profile's busiest weekday (enabled events,
+  fast days excluded) needs more portions than the daily cap, Faults says so
+  and BLE Status flag bit 11 is set (an addition within protocol 1). The check
+  is per weekday; the cap itself is a rolling 24 h window.
 
 Changes in v0.3.1 (bench fixes, 2026-10-14):
 - "Next Feed" and the runway no longer include an event that already fed today
@@ -820,5 +842,12 @@ apart: the test used a bare wire, not a switch, so those were real repeated
 contacts. The 50 ms filter stays; recheck with the real button if presses
 double up.
 
-Not yet checked: drift with food in the tray.
+Food (owner, 2026-10-14): hard food dispenses cleanly, and the tray holds its
+position with food in it. Flake food is finicky: it sticks to the sides and
+bottom of the slots while the disc turns. Flake is not advised (README).
+
+0.3.3 on hardware: flashed over USB with a new API key (OTA could not be used for
+the key change, since OTA is encrypted with the old key); the API connects with
+the new key; "Edited Profile" and "Active Schedule" report; "Needs Food" off with
+6 portions left and nothing scheduled. Not yet seen: "Needs Food" turning on.
 

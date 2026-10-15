@@ -147,7 +147,10 @@ wrongly reported as NTP).
 Flags: bit 0 clock valid, 1 hold, 2 calibrating, 3 moving, 4 scheduler enabled,
 5 reload pause, 6 sunrise/sunset unavailable, 7 schedule needs more portions than
 remain before the next refill, 8 clock not re-synchronised for over a week,
-9 position unknown, 10 tray empty.
+9 position unknown, 10 tray empty, 11 the active profile feeds more portions on its
+busiest day than the daily cap allows (added in firmware 0.3.2; 0 before), 12 needs
+food: the tray is empty, or the next scheduled or one-shot feed needs more portions
+than remain (added in 0.3.3; never set while the position is unknown).
 
 ## Profile (read, write)
 

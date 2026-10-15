@@ -528,6 +528,67 @@ static void test_edit_portions_24h() {
   CHECK(adjustments == 0, "an adjustment is never reported as a feed");
 }
 
+static void test_cap_warning_and_edited_summary() {
+  current = "over-cap warning and edited-profile summary";
+  Flash flash;
+  auto f = boot(flash, T0);
+  enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60, 2);
+  enable_event(*f, 0, 1, Anchor::CLOCK, 18 * 60, 2);
+  CHECK(f->max_portions_per_day() == 4 && !f->schedule_over_cap(), "2 + 2 fits the default cap of 4");
+  enable_event(*f, 0, 2, Anchor::CLOCK, 20 * 60, 1, 0x02);  // Mondays only
+  CHECK(f->max_portions_per_day() == 5 && f->schedule_over_cap(), "5 on Mondays exceeds the cap");
+  CHECK(f->faults_text().find("daily cap") != std::string::npos, "shown in Faults");
+  f->cfg.profiles[0].fast_days = 0x02;  // fast on Mondays
+  f->cfg_changed();
+  CHECK(f->max_portions_per_day() == 4 && !f->schedule_over_cap(), "a fast day does not count");
+  f->cfg.profiles[0].fast_days = 0;
+  f->cfg.scheduler_enabled = 0;
+  CHECK(!f->schedule_over_cap(), "no warning while the scheduler is off");
+  f->cfg.scheduler_enabled = 1;
+
+  f->editor_profile = 0;
+  std::string s = f->edited_profile_summary();
+  CHECK(s.rfind("A: 08:00 x2", 0) == 0, "edited summary lists profile A");
+  CHECK(s.find("[active]") != std::string::npos && s.find("5 portions/day > cap 4") != std::string::npos,
+        "marked active, with the cap warning");
+  f->editor_profile = 1;
+  s = f->edited_profile_summary();
+  CHECK(s.find("B: no events") == 0 && s.find("[not active]") != std::string::npos, "profile B: empty, not active");
+  CHECK(f->schedule_summary().rfind("A:", 0) == 0, "Active Schedule still shows the active profile");
+}
+
+static void test_needs_food() {
+  current = "needs food";
+  Flash flash;
+  auto f = boot(flash, T0);  // 07:55, tray full (6)
+  CHECK(!f->needs_food(), "full tray, nothing scheduled");
+  enable_event(*f, 0, 0, Anchor::CLOCK, 18 * 60, 2);
+  f->advance(3000);
+  CHECK(f->next_event_portions() == 2 && !f->needs_food(), "next feed 2, 6 remain");
+  f->declare_position(5);  // 1 portion left
+  f->advance(3000);
+  CHECK(f->needs_food(), "next feed 2, only 1 remains");
+  CHECK(f->faults_text().find("more portions than remain") != std::string::npos, "shown in Faults");
+  f->cfg.profiles[0].ev[0].portions = 1;
+  f->cfg_changed();
+  f->advance(3000);
+  CHECK(!f->needs_food(), "next feed 1, 1 remains");
+  f->declare_position(6);
+  f->advance(3000);
+  CHECK(f->needs_food(), "empty");
+  f->cfg.profiles[0].ev[0].enabled = 0;
+  f->cfg_changed();
+  f->advance(3000);
+  CHECK(f->next_event_portions() == 0 && f->needs_food(), "empty, even with nothing scheduled");
+  f->declare_position(3);
+  f->advance(3000);
+  CHECK(!f->needs_food(), "nothing scheduled, 3 remain");
+  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed");
+  f->advance(300);
+  f->stop();  // interrupted: position unknown
+  CHECK(f->position_unknown() && !f->needs_food(), "position unknown: not 'needs food'");
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -546,6 +607,8 @@ int main() {
   test_next_feed_skips_fired_event();
   test_clock_kept_across_restart();
   test_edit_portions_24h();
+  test_cap_warning_and_edited_summary();
+  test_needs_food();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

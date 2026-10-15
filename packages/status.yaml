@@ -130,6 +130,15 @@ binary_sensor:
     entity_category: diagnostic
     lambda: return id(feeder).time_valid();
 
+  # On when the tray is empty, or the next scheduled or one-shot feed needs more
+  # portions than remain (it would be cut short). Handy as an automation trigger.
+  # Off while the tray position is unknown (Faults reports that).
+  - platform: template
+    name: "Needs Food"
+    device_class: problem
+    icon: mdi:fish-off
+    lambda: return id(feeder).needs_food();
+
   - platform: template
     name: "Schedule Over Capacity"
     icon: mdi:alert-outline
