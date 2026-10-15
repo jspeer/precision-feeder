@@ -109,7 +109,7 @@ struct StatusSnapshot {
   uint8_t active_profile{0};
   uint16_t flags{0};
   uint32_t last_feed_epoch{0};
-  uint8_t last_feed_source{0};  // 0 schedule, 1 home assistant, 2 ble, 3 button, 4 one-shot
+  uint8_t last_feed_source{0};  // 0 schedule, 1 ESPHome, 2 ble, 3 button, 4 one-shot
   uint8_t feeds_today{0};
   uint32_t next_event_epoch{0};
   uint8_t runway_days{255};  // 255 = more than the planning horizon

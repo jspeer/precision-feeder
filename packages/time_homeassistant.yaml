@@ -6,8 +6,16 @@
 #
 # Useful when the internet (and so NTP) is down but Home Assistant is still
 # reachable. NTP stays the primary source: with both enabled, whichever
-# synchronises last sets the clock, and both are trustworthy. Home Assistant
-# also pushes its own timezone to the device while connected.
+# synchronises last sets the clock, and both are trustworthy.
+#
+# Timezone: by default Home Assistant also pushes its own timezone to the
+# device (Home Assistant 2026.3 or newer), replacing the `timezone`
+# substitution while connected. To keep yours (for example a fixed offset that
+# an older timezone database gets wrong), add this to your own YAML:
+#
+#   time:
+#     - id: !extend ha_time
+#       timezone: ${timezone}
 
 time:
   - platform: homeassistant

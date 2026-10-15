@@ -131,7 +131,7 @@ or a feed request. 20 bytes:
 | 3 | active profile (0 to 2) | u8 |
 | 4 | flags | u16 |
 | 6 | last feed epoch (0 = never or clock was unset) | u32 |
-| 10 | last feed source: 0 schedule, 1 home assistant, 2 ble, 3 button, 4 one-shot | u8 |
+| 10 | last feed source: 0 schedule, 1 ESPHome (a feed button pressed in Home Assistant or the web UI; called "home assistant" before firmware 0.3.4), 2 ble, 3 button, 4 one-shot | u8 |
 | 11 | portions fed today | u8 |
 | 12 | next scheduled feed epoch (0 = none) | u32 |
 | 16 | runway in days (255 = more than 30) | u8 |

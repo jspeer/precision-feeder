@@ -26,7 +26,7 @@ static constexpr uint8_t NO_PENDING = static_cast<uint8_t>(Result::NONE);
 
 static const char *const DAY_NAMES[7] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
 static const char *const DAY_ABBR[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-static const char *const SOURCE_NAMES[6] = {"schedule", "home assistant", "ble", "button", "one-shot", "adjustment"};
+static const char *const SOURCE_NAMES[6] = {"schedule", "ESPHome", "ble", "button", "one-shot", "adjustment"};
 
 static const char *source_name(Source s) { return SOURCE_NAMES[static_cast<uint8_t>(s) % 6]; }
 

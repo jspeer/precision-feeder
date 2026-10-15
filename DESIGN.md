@@ -516,7 +516,7 @@ Importable with ESPHome `packages:` / `github://`.
 5. Check the Printables model licence before shipping derived files.
 6. Confirm whether the HA-time package should ship in v1.
 
-## 15. Implementation status (v0.3.3, 2026-10-14)
+## 15. Implementation status (v0.3.4, 2026-10-14)
 
 **Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
 2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
@@ -609,6 +609,14 @@ Changes in v0.2.1 (review fixes, 2026-10-14):
   the saved tray state from earlier versions is discarded).
 - "Minutes Since Clock Sync" is unknown until the clock has been set.
 - Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+Changes in v0.3.4 (source label, 2026-10-14):
+- The feed source for the device's own feed buttons (pressed in Home Assistant
+  or the web UI) is labelled "ESPHome" instead of "home assistant" in logs,
+  "Last Feed" and "Recent Feeds" (owner request: it is an ESPHome entity call).
+  Code name `Source::ESPHOME`. The BLE value is still 1, so the protocol is
+  unchanged; only the label in PROTOCOL.md and the Python client changed. The
+  clock source "Home Assistant" (HA time) keeps its name.
 
 Changes in v0.3.3 (Needs Food, 2026-10-14):
 - New "Needs Food" binary sensor (status package, device class problem): on

@@ -13,13 +13,13 @@ button:
     name: "Feed One Portion"
     icon: mdi:fish
     on_press:
-      - lambda: id(feeder).request_feed(1, precision_feeder::Source::HOME_ASSISTANT);
+      - lambda: id(feeder).request_feed(1, precision_feeder::Source::ESPHOME);
 
   - platform: template
     name: "Feed Selected Portions"
     icon: mdi:fish
     on_press:
-      - lambda: id(feeder).request_feed((uint8_t) id(manual_portions).state, precision_feeder::Source::HOME_ASSISTANT);
+      - lambda: id(feeder).request_feed((uint8_t) id(manual_portions).state, precision_feeder::Source::ESPHOME);
 
   - platform: template
     name: "Tray Reload"

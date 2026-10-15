@@ -75,7 +75,7 @@ RESULTS = {
     14: "unsupported",
     15: "calibration mode is off",
 }
-SOURCES = {0: "schedule", 1: "home assistant", 2: "ble", 3: "button", 4: "one-shot"}
+SOURCES = {0: "schedule", 1: "ESPHome", 2: "ble", 3: "button", 4: "one-shot"}
 TRAY_STATES = {0: "loaded", 1: "empty", 2: "unknown", 3: "calibrating", 4: "moving"}
 TIME_SOURCES = {0: "none", 1: "BLE", 2: "NTP", 3: "Home Assistant"}
 

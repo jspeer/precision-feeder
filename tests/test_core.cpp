@@ -148,7 +148,7 @@ static void test_feed_motion() {
   CHECK(f->position() == 0 && f->remaining() == 6, "fresh tray");
   f->angles.clear();
   const int releases = f->releases;
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed accepted");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feed accepted");
   CHECK(flash.state.moving_to == 1, "intent saved before the move");
   CHECK(f->tray_state() == TrayState::MOVING, "moving");
   f->advance(3500);
@@ -159,24 +159,24 @@ static void test_feed_motion() {
     CHECK(f->angles[0] == f->angles[2] && f->angles[1] < f->angles[0], "wiggle pattern");
   f->advance(1500);
   CHECK(f->releases == releases + 1, "servo released after the move");
-  CHECK(f->count(Source::HOME_ASSISTANT, Result::OK) == 1, "one accepted record");
+  CHECK(f->count(Source::ESPHOME, Result::OK) == 1, "one accepted record");
 }
 
 static void test_guard() {
   current = "guard";
   Flash flash;
   auto f = boot(flash, T0);
-  CHECK(f->request_feed(2, Source::HOME_ASSISTANT) == Result::PORTION_LIMIT, "per-command limit (default 1)");
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "first feed");
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::BUSY, "busy while moving");
+  CHECK(f->request_feed(2, Source::ESPHOME) == Result::PORTION_LIMIT, "per-command limit (default 1)");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "first feed");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::BUSY, "busy while moving");
   f->advance(5000);
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::TOO_SOON, "minimum gap");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::TOO_SOON, "minimum gap");
   for (int i = 0; i < 3; i++) {
     f->advance(61000);
-    CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "spaced feeds accepted");
+    CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "spaced feeds accepted");
   }
   f->advance(61000);
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::DAILY_CAP, "daily cap of 4 reached");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::DAILY_CAP, "daily cap of 4 reached");
   f->set_calibration_mode(true);
   CHECK(f->request_feed(1, Source::BUTTON) == Result::CALIBRATING, "refused while calibrating");
   f->set_calibration_mode(false);
@@ -199,12 +199,12 @@ static void test_power_loss_mid_step_and_button() {
   Flash flash;
   {
     auto f = boot(flash, T0);
-    CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed starts");
+    CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feed starts");
     f->advance(500);  // power lost in the middle of the step
   }
   auto f = boot(flash, T0 + 10);
   CHECK(f->position_unknown() && f->tray_state() == TrayState::UNKNOWN, "position unknown after reboot");
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::UNKNOWN_POSITION, "feeds refused");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::UNKNOWN_POSITION, "feeds refused");
   f->button_press();  // bug 1: the button must be able to recover a button-only build
   CHECK(!f->position_unknown() && f->position() == 0, "button reloads when the position is unknown");
 
@@ -258,7 +258,7 @@ static void test_retry_is_silent() {
   auto f = boot(flash, local_epoch(2026, 10, 14, 7, 59, 0));
   enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60);
   f->advance(30000);  // 07:59:30
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "manual feed at 07:59:30");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "manual feed at 07:59:30");
   f->advance(90000);  // to 08:01:00
   CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "scheduled feed happened once the gap allowed it");
   CHECK(f->count_source(Source::SCHEDULE) == 1, "no refusals reported while retrying");
@@ -275,14 +275,14 @@ static void test_refusal_reported_once() {
   CHECK(f->count_source(Source::SCHEDULE) == 1, "exactly one record for the held event");
   CHECK(f->count(Source::SCHEDULE, Result::HOLD) == 1, "reported as HOLD");
   CHECK(f->position() == 0, "not fed during the hold");
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "manual feeds still work during a hold");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "manual feeds still work during a hold");
 
   // A definitive refusal (daily cap) is reported once, not every second.
   Flash flash2;
   auto g = boot(flash2, T0);
   g->cfg.daily_cap = 1;
   enable_event(*g, 0, 0, Anchor::CLOCK, 7 * 60 + 56);
-  CHECK(g->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "use up the cap");
+  CHECK(g->request_feed(1, Source::ESPHOME) == Result::OK, "use up the cap");
   g->advance(5 * 60 * 1000);
   CHECK(g->count(Source::SCHEDULE, Result::DAILY_CAP) == 1, "daily cap reported once");
 }
@@ -326,10 +326,10 @@ static void test_cap_after_reboot_without_clock() {
   {
     auto f = boot(flash, T0);
     for (int i = 0; i < 4; i++) {
-      CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "four feeds");
+      CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "four feeds");
       f->advance(61000);
     }
-    CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::DAILY_CAP, "cap reached");
+    CHECK(f->request_feed(1, Source::ESPHOME) == Result::DAILY_CAP, "cap reached");
   }
   // Power cut, comes back with no network: the old feeds cannot be aged, so they do not block feeding.
   auto f = boot(flash, T0 + 3600, false);
@@ -504,9 +504,9 @@ static void test_edit_portions_24h() {
   current = "edit the 24 h count";
   Flash flash;
   auto f = boot(flash, T0);
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed 1");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feed 1");
   f->advance(61000);
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed 2");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feed 2");
   f->advance(61000);
   CHECK(f->portions_24h() == 2, "two portions counted");
   f->set_portions_24h(0);
@@ -515,9 +515,9 @@ static void test_edit_portions_24h() {
   f->set_portions_24h(3);
   CHECK(f->portions_24h() == 3, "raised to 3");
   CHECK(f->recent_feeds_text().find("adjustment") != std::string::npos, "adjustment shown in the history");
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "3 + 1 is within the cap of 4");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "3 + 1 is within the cap of 4");
   f->advance(61000);
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::DAILY_CAP, "4 counted: refused");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::DAILY_CAP, "4 counted: refused");
   f->set_portions_24h(2);  // takes 2 of the 3 adjustment portions (oldest first)
   CHECK(f->portions_24h() == 2, "lowered to 2 (partial entry)");
   CHECK(flash.have_state, "saved");
@@ -583,7 +583,7 @@ static void test_needs_food() {
   f->declare_position(3);
   f->advance(3000);
   CHECK(!f->needs_food(), "nothing scheduled, 3 remain");
-  CHECK(f->request_feed(1, Source::HOME_ASSISTANT) == Result::OK, "feed");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feed");
   f->advance(300);
   f->stop();  // interrupted: position unknown
   CHECK(f->position_unknown() && !f->needs_food(), "position unknown: not 'needs food'");

@@ -39,7 +39,8 @@ constexpr uint16_t PULSE_MAX_HI = 3000;
 constexpr uint16_t PULSE_SPAN_MIN = 500;  // max - min
 
 /// Where a feed request came from.
-enum class Source : uint8_t { SCHEDULE = 0, HOME_ASSISTANT = 1, BLE = 2, BUTTON = 3, ONE_SHOT = 4,
+// ESPHOME: a feed button of the device itself, pressed in Home Assistant (native API) or the web UI.
+enum class Source : uint8_t { SCHEDULE = 0, ESPHOME = 1, BLE = 2, BUTTON = 3, ONE_SHOT = 4,
                               // A hand edit of the 24 h count (set_portions_24h). Only ever in the feed history:
                               // never a feed request, never sent over BLE.
                               ADJUSTMENT = 5 };
