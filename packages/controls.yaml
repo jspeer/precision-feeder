@@ -71,15 +71,15 @@ switch:
 
 select:
   - platform: template
+    id: pf_active_profile
     name: "Active Profile"
     icon: mdi:calendar-multiple
     options: ["A", "B", "C"]
-    lambda: return std::string(1, (char) ('A' + id(feeder).cfg.active_profile));
     set_action:
       - lambda: |-
           id(feeder).cfg.active_profile = x[0] - 'A';
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
 number:
   - platform: template
@@ -108,6 +108,7 @@ number:
 
   # --- Guard settings -------------------------------------------------------
   - platform: template
+    id: pf_minimum_gap_between_feeds
     name: "Minimum Gap Between Feeds"
     entity_category: config
     unit_of_measurement: s
@@ -115,14 +116,14 @@ number:
     max_value: 3600
     step: 1
     mode: box
-    lambda: return id(feeder).cfg.min_gap_s;
     set_action:
       - lambda: |-
           id(feeder).cfg.min_gap_s = (uint16_t) x;
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
   - platform: template
+    id: pf_gap_between_portions
     name: "Gap Between Portions"
     entity_category: config
     unit_of_measurement: s
@@ -130,14 +131,14 @@ number:
     max_value: 60
     step: 1
     mode: box
-    lambda: return id(feeder).cfg.portion_gap_s;
     set_action:
       - lambda: |-
           id(feeder).cfg.portion_gap_s = (uint16_t) x;
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
   - platform: template
+    id: pf_daily_portion_cap
     name: "Daily Portion Cap"
     entity_category: config
     icon: mdi:shield-check
@@ -145,18 +146,18 @@ number:
     max_value: 6
     step: 1
     mode: box
-    lambda: return id(feeder).cfg.daily_cap;
     set_action:
       - lambda: |-
           id(feeder).cfg.daily_cap = (uint8_t) x;
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
   # Debugging and recovery (owner decision 2026-10-14): the number of portions the
   # daily cap is counting right now (rolling 24 h). Setting it lower forgets the
   # oldest counted feeds; setting it higher adds an "adjustment" to the feed
   # history. It never feeds or moves the tray, and every change is logged.
   - platform: template
+    id: pf_portions_counted_24_h
     name: "Portions Counted (24 h)"
     entity_category: diagnostic
     icon: mdi:counter
@@ -164,12 +165,12 @@ number:
     max_value: 24
     step: 1
     mode: box
-    lambda: return id(feeder).portions_24h();
     set_action:
       - lambda: id(feeder).set_portions_24h((uint16_t) x);
-    update_interval: 5s
+    update_interval: never
 
   - platform: template
+    id: pf_max_portions_per_command
     name: "Max Portions Per Command"
     entity_category: config
     icon: mdi:shield-check
@@ -177,14 +178,14 @@ number:
     max_value: 6
     step: 1
     mode: box
-    lambda: return id(feeder).cfg.max_portions_cmd;
     set_action:
       - lambda: |-
           id(feeder).cfg.max_portions_cmd = (uint8_t) x;
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
   - platform: template
+    id: pf_reload_pause
     name: "Reload Pause"
     entity_category: config
     unit_of_measurement: min
@@ -193,14 +194,14 @@ number:
     step: 1
     mode: box
     # Scheduled feeding pauses this long after "Tray Reload", so you can finish loading the tray.
-    lambda: return id(feeder).cfg.reload_pause_min;
     set_action:
       - lambda: |-
           id(feeder).cfg.reload_pause_min = (uint16_t) x;
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
   - platform: template
+    id: pf_refill_interval
     name: "Refill Interval"
     entity_category: config
     unit_of_measurement: d
@@ -209,15 +210,15 @@ number:
     step: 1
     mode: box
     # How often you expect to refill. The schedule is flagged if it needs more portions than the tray holds before then.
-    lambda: return id(feeder).cfg.refill_interval_days;
     set_action:
       - lambda: |-
           id(feeder).cfg.refill_interval_days = (uint16_t) x;
           id(feeder).cfg_changed();
-    update_interval: 5s
+    update_interval: never
 
   # --- Location (needed only for sunrise/sunset events) --------------------
   - platform: template
+    id: pf_latitude
     name: "Latitude"
     entity_category: config
     unit_of_measurement: "°"
@@ -225,14 +226,14 @@ number:
     max_value: 90
     step: 0.0001
     mode: box
-    lambda: return id(feeder).cfg.latitude;
     set_action:
       - lambda: |-
           id(feeder).cfg.latitude = x;
           id(feeder).cfg_changed();
-    update_interval: 30s
+    update_interval: never
 
   - platform: template
+    id: pf_longitude
     name: "Longitude"
     entity_category: config
     unit_of_measurement: "°"
@@ -240,9 +241,25 @@ number:
     max_value: 180
     step: 0.0001
     mode: box
-    lambda: return id(feeder).cfg.longitude;
     set_action:
       - lambda: |-
           id(feeder).cfg.longitude = x;
           id(feeder).cfg_changed();
-    update_interval: 30s
+    update_interval: never
+
+# Publish the entities above only when their value changes (see packages/status.yaml).
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          publish_option(id(pf_active_profile), std::string(1, (char) ('A' + id(feeder).cfg.active_profile)));
+          publish_number(id(pf_minimum_gap_between_feeds), id(feeder).cfg.min_gap_s);
+          publish_number(id(pf_gap_between_portions), id(feeder).cfg.portion_gap_s);
+          publish_number(id(pf_daily_portion_cap), id(feeder).cfg.daily_cap);
+          publish_number(id(pf_portions_counted_24_h), id(feeder).portions_24h());
+          publish_number(id(pf_max_portions_per_command), id(feeder).cfg.max_portions_cmd);
+          publish_number(id(pf_reload_pause), id(feeder).cfg.reload_pause_min);
+          publish_number(id(pf_refill_interval), id(feeder).cfg.refill_interval_days);
+          publish_number(id(pf_latitude), id(feeder).cfg.latitude);
+          publish_number(id(pf_longitude), id(feeder).cfg.longitude);

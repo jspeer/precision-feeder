@@ -1,7 +1,8 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **firmware v0.2.1 built and host-tested; not yet run on hardware**
-(implementation status in section 15). First written 2026-10-13.
+Status: **firmware v0.5.0, tested on a bench build** (section 15). This is the
+current design; history is in [CHANGELOG.md](CHANGELOG.md) and hardware results
+in [docs/BENCH.md](docs/BENCH.md). First written 2026-10-13.
 
 ## 0. Disclosure and licence
 
@@ -363,27 +364,14 @@ host. BLE is a build option: HA-only builds leave the package out and pay nothin
 20-byte payload, so no MTU negotiation is needed. UUID base:
 `02dd1dd9-ba75-4bbc-bdea-306d2101xxxx` (generated 2026-10-13; this project's own).
 
-Changes from the first draft, all deliberate:
-- `HOLD` takes a 32-bit number of minutes (0 cancels, `0xFFFFFFFF` until
-  cancelled), because the hold has no maximum (section 13).
-- Profile records follow the data model that was built: a header
-  (`every_n`, `fast_mask`, `anchor_day`) and events, plus a *query* write that
-  selects the record the next read returns (GATT reads take no parameters). Config
-  and Calibration use the same query-then-read pattern (`key | 0x80`).
-- Writes to Profile, Config and Calibration are answered on Response with `seq 0`
-  and opcodes `0x80` to `0x82`, so a client learns about validation failures.
-- Response is also readable, in case a notification is missed.
-- New result codes 14 (UNSUPPORTED) and 15 (NOT_CALIBRATING).
-- `SET_TIMEZONE` is reserved and answered UNSUPPORTED (section 6: no on-device
-  timezone parser). `SET_TIME` still carries a UTC offset for forward
-  compatibility; the device ignores it.
-- Idempotency: the last 8 commands are remembered for 30 seconds, not forever,
-  and a retry must repeat the *whole* command (sequence number, opcode and
-  arguments). A command that reuses a sequence number with different contents is
-  executed as new, so a client that restarts and reuses numbers is not mistaken
-  for a retry. A replay returns the original answer.
-- Status gained flag bits for hold, reload pause, stale clock, unknown position
-  and empty tray, and reports the clock source and age.
+Protocol 2 (firmware 0.4.0 and later) authenticates every write (section 10). In
+short: a HOLD takes 32-bit minutes (0 cancels, `0xFFFFFFFF` until cancelled);
+Profile, Config and Calibration use a query-then-read pattern (GATT reads take no
+parameters); every write carries a sequence number and a tag and is answered on
+Response with that sequence number; Response is also readable; exact retries are
+answered from a 30 s cache of the last 8 writes and never act twice;
+`SET_TIMEZONE` is reserved (section 6). Status reports the tray, the schedule,
+the clock source and age, and fault flags.
 
 ## 9. Operational behaviour
 
@@ -399,38 +387,16 @@ Changes from the first draft, all deliberate:
 
 ### 9.1 YAML configuration surface
 
-Each feature is its own package. The example YAML enables or disables them
-and documents every setting with a comment saying what it does and when to
-change it. Sketch:
+Each feature is its own package (`packages/`), and the examples
+(`examples/basic.yaml`, `examples/ble.yaml`) include them; a feature is switched
+off by commenting its line out. Every setting is a substitution with a comment
+saying what it does and when to change it. A user's own settings go in a
+git-ignored `examples/local.yaml` that includes an example and overrides
+substitutions. The README lists every package and substitution.
 
-```yaml
-substitutions:
-  # Pins. Defaults suit the Waveshare ESP32-S3-Zero; change for other boards.
-  servo_pin: "GPIO1"       # servo signal
-  button_pin: "GPIO2"      # optional button to GND (button package only)
-  status_led_pin: "GPIO21" # onboard WS2812 on the S3-Zero
-  # NTP is the primary time source. Leave the default pool servers, or point
-  # at a local NTP server if your network has no internet.
-  ntp_server_1: "0.pool.ntp.org"
-  # BLE time push, for fallback AP mode or a PLC-managed unit:
-  #   fallback_only = accepted only if NTP has not synced recently (recommended)
-  #   always        = accepted any time
-  #   off           = SET_TIME is rejected
-  ble_time_policy: "fallback_only"
-  ble_time_ntp_stale_hours: "24"
-
-packages:
-  core: !include packages/core.yaml
-  scheduler: !include packages/scheduler.yaml
-  ble_gatt: !include packages/ble_gatt.yaml        # comment out for HA-only builds
-  time_ha: !include packages/time_homeassistant.yaml  # internet down, HA up
-  button: !include packages/button.yaml            # only if your print has the button
-  web_ui: !include packages/web_server.yaml        # the original's web dashboard
-```
-
-Leaving BLE out of an HA-only build saves its RAM and flash. **Verify how
-ESPHome handles conditional package inclusion;** commenting a package in or out
-is the safe fallback.
+Entities publish only when their value changes: each package refreshes its
+entities from one 1-second interval through `publish_number/text/bool/option`
+(`precision_feeder.h`), instead of each entity polling on its own.
 
 ## 10. BLE security
 
@@ -479,25 +445,25 @@ the only add-on, because the original firmware supports it.
 
 ```
 precision-feeder/
-  README.md  LICENSE  DESIGN.md  AGENTS.md
+  README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
   docs/PROTOCOL.md     BLE protocol (authoritative)
-  docs/CALIBRATION.md  setup and calibration walkthrough
   docs/SCHEDULING.md   building schedule profiles
-  components/precision_feeder/      feeder_core.* (all logic, plain C++), calendar.h,
-                                    solar.h (pure, host-tested), precision_feeder.*
-                                    (ESPHome adapter: clock, servo, flash, log)
-  components/precision_feeder_ble/  optional BLE protocol: protocol.h (pure,
+  docs/CALIBRATION.md  setup and calibration walkthrough
+  docs/BENCH.md        hardware test results
+  components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
+                                    feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
+                                    (scheduler, projection), feeder_text.cpp (editor, texts),
+                                    feeder_internal.h, calendar.h, solar.h; precision_feeder.*
+                                    (ESPHome adapter: clock, servo, flash, log, publish helpers)
+  components/precision_feeder_ble/  optional BLE protocol: protocol.h and crypto.h (pure,
                                     host-tested) and the GATT handlers
   packages/            core, status, controls, schedule_editor, calibration,
                        status_led, web_server, button, time_homeassistant,
                        diagnostics, ble_gatt
-  examples/            basic.yaml (HA + web UI), ble.yaml (adds BLE, button,
-                       HA time, diagnostics), secrets.example.yaml
+  examples/            basic.yaml, ble.yaml, secrets.example.yaml
   tests/               host-side C++ tests (core, logic, protocol)
-  tools/               Python bleak reference client and its tests
+  tools/               Python reference client (with selftest) and its tests
 ```
-
-Importable with ESPHome `packages:` / `github://`.
 
 ## 13. Decisions log
 
@@ -547,56 +513,28 @@ Importable with ESPHome `packages:` / `github://`.
 
 1. ~~Polar/no-sun fallback.~~ Decided 2026-10-14: fixed 06:00 / 18:00 fallback (section 5.2).
 2. ~~Confirm the slot/position mapping on the printed tray.~~ Done on the
-   bench, 2026-10-14 (section 17): all 7 positions line up. Still to watch:
-   whether the servo strains at position 6 in daily use.
-3. ~~Servo (GPIO1) and button (GPIO2) pins.~~ Done on the bench (section 17):
-   no servo twitch at boot, pull-down not needed; button works on GPIO2.
-4. Confirm ESPHome `esp32_ble_server`, pairing, multi-`time:` and conditional
-   package behaviour against current docs; check flash size.
+   bench (docs/BENCH.md). Still to watch: whether the servo strains at
+   position 6 in daily use.
+3. ~~Servo (GPIO1) and button (GPIO2) pins.~~ Done on the bench (docs/BENCH.md).
+4. ~~ESPHome BLE server, pairing, two time sources, packages, flash size.~~
+   Checked in ESPHome's source and on the bench (section 10, docs/BENCH.md).
 5. Check the Printables model licence before shipping derived files.
 6. ~~HA-time package in v1.~~ Decided 2026-10-14: enabled in both examples.
 
-## 15. Implementation status (v0.4.1, 2026-10-14)
+## 15. Implementation status (v0.5.0)
 
-**Compiles with no warnings; not yet run on hardware.** Compiled with ESPHome
-2026.9.1 / ESP-IDF 5.5.5 for the ESP32-S3: about 972 KB (53% of the 1.8 MB app
-partition) without BLE, about 1.30 MB (71%) with it (section 16).
+Everything in sections 3 to 10 is built. On a bench build (Waveshare
+ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
+power cuts, schedules on NTP, Home Assistant and BLE time, every BLE command,
+the button, Needs Food and the over-cap warning ([docs/BENCH.md](docs/BENCH.md)).
+Host tests (`tests/`, `tools/`) cover the core logic with a simulated clock, the
+calendar and sun maths, the BLE protocol and its cryptography, and the Python
+client. Version history: [CHANGELOG.md](CHANGELOG.md).
 
-What has been run, on a host (a `ziglang` C++ compiler installed with pip into a
-scratch virtualenv; any C++17 compiler works):
-- `tests/test_logic.cpp`: calendar maths and sunrise/sunset for Indianapolis,
-  London and Sydney, plus polar night and midnight sun. Passes.
-- `tests/test_protocol.cpp`: BLE packing, record validation, config ranges, the
-  time-acceptance policy and the retry cache, against golden byte vectors. Passes.
-- `tools/test_precision_feeder_ble.py`: the Python client against the same
-  vectors, and a check that its UUIDs match `packages/ble_gatt.yaml`. Passes.
-- `tests/test_core.cpp` (from v0.2.1): the tray state machine, guard, scheduler,
-  one-shots, hold, reload pause, cadence, fast days, sunset-after-midnight,
-  runway and clock tracking, against a simulated clock with a fixed UTC-5
-  timezone. Passes.
+Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5: about 53% of the 1.8 MB app
+partition without BLE, 71% with it.
 
-Only compiled, not run: the ESPHome adapter (`precision_feeder.cpp`: real clock,
-PWM, flash, daylight-saving resolution) and the BLE handlers
-(`precision_feeder_ble.cpp`).
-
-| Area | Where | State |
-|---|---|---|
-| Tray state machine, persisted intent, interrupted-move recovery | component | built |
-| Feed guard (gap, 24 h cap, per-command limit, state, hold, time) | component | built |
-| Scheduler: 3 profiles x 4 events, clock/sunrise/sunset anchors, weekdays, every-N-days, fast days | component | built |
-| One-shot feeds, hold (any duration or until cancelled), reload pause | component | built |
-| Runway, next feed, oversubscription flag | component | built |
-| Calibration (7 offsets), position declaration | component | built |
-| HA entities (status, controls, editor, calibration) | YAML templates | built |
-| Optional button, status LED, web UI, HA time source | YAML packages | built |
-| BLE GATT table, diagnostics package | `ble_gatt.yaml`, `diagnostics.yaml` | built, size benchmarked (section 16) |
-| BLE protocol v1: commands, status, profile/config/calibration records, event log, retry cache | `precision_feeder_ble` component | built, compiled, pure parts tested on a host |
-| Clock: source tracking (NTP, Home Assistant, BLE), `SET_TIME` policy, age and stale flag | core + BLE component | built |
-| Reference client | `tools/precision_feeder_ble.py` | built; pure parts tested, the BLE client class needs a device |
-| Runtime timezone | | **blocked** (section 6 finding) |
-| BLE authentication (protocol 2) | `crypto.h`, `protocol.h` Session, `precision_feeder_ble.cpp` | built, host-tested, bench-tested (section 17) |
-
-Deviations from this design, all deliberate:
+Deviations from the first draft of this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said
   reject); empty still rejects.
 - The per-command portion limit applies to manual/remote sources only; scheduled
@@ -606,356 +544,19 @@ Deviations from this design, all deliberate:
   dropped on reboot.
 - After a reboot, until the clock is set again, feeds saved before the reboot
   are not counted toward the daily cap (their age is unknown); they count again
-  once the clock is back (decision 2026-10-14, replacing "count them for 24 h of
-  uptime", which refused manual feeds for a day after a power cut with no
-  network). A feed interrupted by the power cut still counts once the clock is
-  known.
+  once the clock is back (decision 2026-10-14). A feed interrupted by the power
+  cut still counts once the clock is known.
 - The minimum gap uses uptime when available, otherwise the saved epoch.
-- Sunrise/sunset events skip (and flag a fault) when there is no sun event or
-  no location set, as proposed.
+- Polar days use a 06:00 / 18:00 fallback instead of skipping (section 5.2).
 
-Known gaps and risks to check on the bench:
-1. Servo end stops, release-without-drift, power-up twitch (section 14).
-2. Template entities poll every few seconds; fine for HA but chatty on the API.
-3. Event times on daylight-saving change days use wall-clock conversion; not
-   exercised on a real changeover.
-4. `esp32_rmt_led_strip` defaults to `use_psram: true`; harmless without PSRAM
-   (falls back to internal RAM) but worth knowing.
+Saved data: three records, each with its own preference key and version
+(`feeder_core.h`): settings (schedule, guard, location), calibration (pulse range
+and offsets) and tray state. A layout change gets a new key and a migration from
+the old layout; saved data is never simply discarded.
 
-Changes in v0.1.1 (cleanup after reviewing the original firmware's behaviour):
-- Late feeds removed: the "Late Start Grace" setting is gone and events fire only
-  in the minute they are due (section 5.5). Settings version bumped to 2.
-- Hold has no maximum: "Hold Duration" is in hours, 0 means until cancelled, and
-  an indefinite hold needs no clock. A "Hold" status sensor shows what is active.
-- The cancel-backlog step on tray reload is gone (nothing to cancel).
+Not yet exercised: a real daylight-saving changeover (event times use wall-clock
+conversion through the platform's timezone rules); a BLE client that pairs.
 
-Changes in v0.2.1 (review fixes, 2026-10-14):
-- Refactor: all logic moved into `FeederCore` (`feeder_core.h/.cpp`), plain C++
-  with the clock, servo, storage and log behind `hal_*` hooks. `PrecisionFeeder`
-  is now a thin ESPHome adapter. `tests/test_core.cpp` runs the tray, guard and
-  scheduler against a simulated clock (13 test groups).
-- The push button reloads the tray when its position is unknown, not only when
-  empty, so a button-only build can recover from a power cut mid-feed.
-- Scheduled and one-shot feeds refused with BUSY / TOO_SOON / hold are retried
-  silently; the outcome is reported once (section 5.5). Previously every retry
-  logged, changed "Last Result" and sent a BLE event-log notification.
-- The BLE retry cache matches the whole command, not just the sequence number.
-- Daily cap after a reboot without a clock (section 15 deviations).
-- One-shot feeds run with the Scheduler switch off; "Next Feed", runway and the
-  over-capacity flag no longer count recurring events while it is off.
-- The sunrise/sunset fault is evaluated every tick, and clears while the
-  scheduler is off.
-- The reload pause survives a reboot when the clock was known (state version 2;
-  the saved tray state from earlier versions is discarded).
-- "Minutes Since Clock Sync" is unknown until the clock has been set.
-- Python client: answers matched on (seq, opcode); commands never use seq 0.
+## 16. Bench results
 
-Changes in v0.4.1 (HA time on by default, 2026-10-14):
-- `examples/basic.yaml` and `examples/ble.yaml` include the
-  `time_homeassistant` package (it was commented out). No code change.
-
-Changes in v0.4.0 (BLE protocol 2: authentication, 2026-10-14):
-- Every BLE write must be authenticated with the shared `ble_key` (section 10,
-  docs/PROTOCOL.md). New Auth characteristic (000A), AUTH opcode (0x0D), result
-  16 NOT_AUTHORIZED, capability bit 6. Profile, Config and Calibration writes
-  gained a leading sequence number and are answered with it. **Not compatible
-  with protocol 1 clients**: the PLC-side driver must implement protocol 2.
-- `esp32_ble`: `auth_req_mode: sc_bond`.
-- Retry cache entries carry the characteristic (channel), and the cache is
-  cleared on every connect and disconnect.
-- Each clock sync is logged ("Clock set by NTP" / "Home Assistant" / "BLE").
-- Python client: `--key` / PRECISION_FEEDER_BLE_KEY; authenticates on connect
-  and signs every write.
-
-Changes in v0.3.5 (polar days, 2026-10-14):
-- On a day without a sunrise or sunset at the set location, sun events use
-  06:00 (sunrise) or 18:00 (sunset) plus their offset instead of being skipped.
-  Faults: "no sunrise or sunset today: sun events use 06:00 / 18:00"; BLE flag
-  bit 6 stays set (it means a sun event could not use the real sun). No
-  location set: still skipped. Test: `test_polar_fallback` (89 degrees N).
-
-Changes in v0.3.4 (source label, 2026-10-14):
-- The feed source for the device's own feed buttons (pressed in Home Assistant
-  or the web UI) is labelled "ESPHome" instead of "home assistant" in logs,
-  "Last Feed" and "Recent Feeds" (owner request: it is an ESPHome entity call).
-  Code name `Source::ESPHOME`. The BLE value is still 1, so the protocol is
-  unchanged; only the label in PROTOCOL.md and the Python client changed. The
-  clock source "Home Assistant" (HA time) keeps its name.
-
-Changes in v0.3.3 (Needs Food, 2026-10-14):
-- New "Needs Food" binary sensor (status package, device class problem): on
-  when the tray is empty, or the next scheduled or one-shot feed needs more
-  portions than remain (the firmware would feed what is left, so the meal would
-  come up short). Off while the position is unknown. Meant as an automation
-  trigger. Also BLE Status flag bit 12 (an addition within protocol 1) and a
-  Faults line. The projection now keeps the next feed's portions.
-
-Changes in v0.3.2 (scheduling clarity, 2026-10-14):
-- New docs/SCHEDULING.md: building a profile step by step, field reference,
-  rules and worked examples. Linked from the README and the editor package.
-- New "Edited Profile" text sensor (editor package): the summary of the
-  profile being edited, marked [active] / [not active], with a warning when its
-  busiest day exceeds the daily cap. A separate sensor rather than part of
-  "Active Schedule", which could then exceed Home Assistant's 255-character
-  limit for a text sensor.
-- Over-cap warning: when the active profile's busiest weekday (enabled events,
-  fast days excluded) needs more portions than the daily cap, Faults says so
-  and BLE Status flag bit 11 is set (an addition within protocol 1). The check
-  is per weekday; the cap itself is a rolling 24 h window.
-
-Changes in v0.3.1 (bench fixes, 2026-10-14):
-- "Next Feed" and the runway no longer include an event that already fed today
-  (it could be moved later in the day, then shown as due while it would not
-  feed). Test: `test_next_feed_skips_fired_event`.
-- A clock kept by the RTC across a soft reset is no longer reported as an NTP
-  sync (section 6). It shows as "kept across restart" (BLE: source 0 with the
-  clock-valid flag) and does not block BLE `SET_TIME`. The sntp hook now calls
-  `note_sntp_sync()`, which checks ESP-IDF's SNTP sync status.
-- New Home Assistant diagnostic number "Portions Counted (24 h)": shows and
-  sets the count the daily cap uses (decision log, 2026-10-14). New history
-  source "adjustment" (internal; never sent over BLE).
-- Docs: MG90S datasheet values and the deadband in docs/CALIBRATION.md;
-  `examples/local*.yaml` for personal overrides (git-ignored).
-
-Changes in v0.3.0 (servo pulse range settable at run time, 2026-10-14):
-- First bench result: the MG90S turned about 12% less per microsecond than the
-  544 to 2400 us range assumes (slot 0 needed +11 degrees, slot 1 +14.5, and an
-  uncalibrated position 6 stopped just past slot 5). The +-15 degree per-slot
-  offsets cannot absorb that, and fixing it in YAML needs a reflash per try.
-- The pulse range is now part of the saved settings and can be changed at run
-  time: Home Assistant "Servo Min Pulse" / "Servo Max Pulse" (calibration
-  package), BLE Config keys 10 and 11, capability bit 5. In calibration mode the
-  servo moves to the selected position after each change. The YAML
-  `min_pulse` / `max_pulse` are the defaults for a fresh device; saved values win.
-  Limits 300 to 1500 / 1500 to 3000 us, at least 500 us apart.
-- Settings version 3: **saved settings from earlier versions are discarded** on
-  the first boot (schedule, guard settings, calibration offsets, location). The
-  tray state is kept.
-- BLE: an addition within protocol 1 (new keys and capability bit); nothing
-  existing changed.
-
-Changes in v0.2.2 (servo default, 2026-10-13):
-- Default `min_pulse` is 544 us (was 500), the pulse range the original firmware
-  drives (ESP32Servo's default, 544 to 2400 us), so a fresh build starts the tray
-  where the original did. The original was tuned on an SG92R; this build uses an
-  MG90S, so the range still needs the bench check. Existing builds that set
-  `min_pulse` themselves are unaffected; others will see every position shift by
-  up to about 4 degrees and should re-check calibration.
-- Docs: the tray geometry measured from the printed model (section 3).
-
-Changes in v0.2.0 (BLE protocol, and the two warnings fixed):
-- BLE protocol v1 implemented (section 8, `docs/PROTOCOL.md`).
-- OTA authenticates with the API encryption key (no separate OTA password), and
-  the web server's own `/update` page is disabled (`ota: false`), because it would
-  accept an image in plaintext. Firmware uploads go through the encrypted ESPHome
-  OTA only.
-- `rgb_order` replaced by `channel_colors` (deprecated in ESPHome).
-- The clock source is tracked and shown in Home Assistant ("Time Source",
-  "Minutes Since Clock Sync").
-
-## 16. BLE benchmark (2026-10-13)
-
-The question was whether BLE fits the 4 MB flash of the ESP32-S3FH4R2. Measured
-by compiling `examples/basic.yaml` and `examples/ble.yaml` (same packages, plus
-`packages/ble_gatt.yaml`, a skeleton of the full planned GATT table whose
-handlers only log) with ESPHome 2026.9.1 / ESP-IDF 5.5.5, Bluedroid, ESP-IDF
-framework, WiFi, API, web server and status LED all enabled.
-
-| Build | Flash (app slot 1,835,008 B) | Static RAM (341,760 B) |
-|---|---|---|
-| No BLE (`basic.yaml`) | 993,835 B (54.2%) | 112,079 B (32.8%) |
-| BLE skeleton | 1,312,107 B (71.5%) | 142,663 B (41.7%) |
-| BLE + diagnostics package | 1,315,179 B (71.7%) | 142,879 B (41.8%) |
-| BLE with the protocol implemented (v0.2.0) | 1,319,791 B (71.9%) | 143,231 B (41.9%) |
-| v0.2.1, no BLE (`basic.yaml`) | 971,847 B (53.0%) | 112,223 B (32.8%) |
-| v0.2.1, BLE + button + HA time + diagnostics | 1,300,123 B (70.9%) | 143,739 B (42.1%) |
-| v0.2.1 rebuilt on the dev machine, no BLE | 971,863 B (53.0%) | 112,223 B (32.8%) |
-| v0.2.1 rebuilt on the dev machine, BLE build | 1,297,611 B (70.7%) | 143,383 B (42.0%) |
-
-- **BLE costs about 318 KB of flash and about 31 KB of static RAM.**
-- **Flash is not a problem.** With BLE the app is 72% of its OTA slot, leaving
-  about 520 KB for the protocol code, which should be a few tens of KB. OTA still
-  needs only one free slot of the same size, so it keeps working.
-- **RAM is the open question.** About 199 KB of static RAM remains, but Bluedroid
-  also allocates working memory from the heap when it starts, and that cannot be
-  measured without running hardware. The `diagnostics` package reports free heap,
-  the largest free block and fragmentation so it can be read on the first boot,
-  with BLE on and off.
-- **PSRAM is not a switch.** ESPHome's `esp32_ble: use_psram` only enables
-  Bluedroid's dynamic environment memory on the S3 (it does not force the stack
-  into PSRAM; the "allocate from SPIRAM first" option applies to the classic
-  ESP32 only), and it needs the `psram` component with the right mode for the
-  module (quad for the H4R2; a wrong mode fails at boot). Not enabled; try it
-  only if the heap numbers say it is needed.
-- Decision rule for the MCU question: flash does not justify a different MCU.
-  Re-evaluate only if measured free heap with WiFi, API, web server and BLE all
-  running leaves too little headroom.
-
-The protocol itself added only about 4.6 KB over the skeleton. If the heap turns
-out tight on real hardware, enabling PSRAM is an accepted fallback and may become
-a requirement of the firmware (decision 2026-10-13); the board's 2 MB of quad
-PSRAM is otherwise unused.
-
-Two ESPHome warnings found while validating were fixed in v0.2.0: the deprecated
-`rgb_order` and the OTA password.
-
-## 17. Bench results
-
-### Calibration, first build (2026-10-14, firmware 0.3.0)
-
-Waveshare ESP32-S3-Zero, MG90S, tray printed from the `REV2 (Feeding hole,
-Small) v6` model. The servo horn was re-seated once so that slot 0 needs a
-positive correction (position 0 is commanded to 2.5 degrees and the firmware
-never goes below 0).
-
-With the default 544 to 2400 us range, slot 0 needed +11 degrees, slot 1 about
-+11 and slot 2 +14.5, and an uncalibrated position 6 stopped just past slot 5:
-this MG90S turns less per microsecond than the range (taken from the original's
-SG92R) assumes. The per-slot offsets (+-15) could not absorb it, which is why
-v0.3.0 made the pulse range settable at run time.
-
-Final calibration, every position lined up with the opening:
-
-| Setting | Value |
-|---|---|
-| Servo Min Pulse | 637 us |
-| Servo Max Pulse | 2675 us |
-| Offsets, positions 0 to 6 | 0, 0, 0, +2.8, +3.3, +3.3, 0 degrees |
-
-That is about 283 us per 25 degree step (2038 us span; about 11.3 us per
-degree), against 258 us with the default range, about 10% more. Position 6 is
-driven at about 2364 us. The bump at positions 3 to 5 that returns to 0 at 6 is
-ordinary servo non-linearity; the offsets absorb it.
-
-Conclusions:
-- The pulse range has to be calibrated per servo; the default is only a start.
-  Calibrate the range first (slot 0 with the minimum, slot 6 with the maximum),
-  then the offsets. Written up in docs/CALIBRATION.md.
-- The YAML defaults stay at the original's 544 to 2400 us: one servo is not
-  enough to change them, and the run-time range makes that unnecessary.
-
-### Other bench checks (2026-10-14)
-
-- Power-up: no servo twitch on GPIO1, so the 10 kOhm pull-down is not needed on
-  this build (open item 3, servo part).
-- Release: outside calibration mode the servo goes limp after the detach delay
-  (the LEDC output at level 0 stops the pulses). In calibration mode it keeps
-  holding, by design, so the slot being adjusted stays put.
-- A one-portion feed runs the wiggle as designed: 0 -> 1 -> 0 -> 1.
-- No drift after release: the tray stays at its position once the servo goes
-  limp (empty tray; recheck with food in it).
-
-- Power loss mid-feed: after power was pulled during a feed, the device booted
-  with the tray position Unknown and feeding blocked, and the owner recovered it
-  (the persisted-intent design in section 3.1 works on hardware).
-
-- Heap with WiFi, API, web server and BLE all running (`ble.yaml`, diagnostics
-  package): free 154.5 KB, largest free block 110.6 KB, fragmentation about 28%.
-  Comfortable; PSRAM is not needed (section 16's open RAM question is answered
-  for this build). Loop time is normally about 30 ms; a peak of 394 ms was seen,
-  probably at boot or WiFi connect; keep an eye on it.
-- BLE, from a Linux PC with the reference client (bleak): Info (protocol 1,
-  capability bit 5), Status, Config writes and reads (including the pulse keys,
-  out-of-range and too-close pulse pairs refused), SET_TIME ignored while NTP is
-  fresh, SET_TIMEZONE and unknown opcodes UNSUPPORTED, wrong length INVALID_ARG.
-  Retry: an exact repeat replays the stored answer without acting (one event-log
-  record), and the same seq with different arguments is a new command.
-- Retry of an *accepted* BLE feed: the first run was refused with DAILY_CAP (six
-  portions already in the 24 h window). With the owner's permission, a temporary
-  debug build allowed a daily cap of up to 12 over BLE (one line in
-  `protocol.h`, never committed); with the cap at 7 the feed was accepted (tray
-  0 -> 1, "ok, 1 portion") and the exact retry replayed that answer without
-  moving the tray, one event-log record. The cap was set back to 4, the source
-  reverted, the committed firmware reflashed, and the device then refused a cap
-  of 7 again.
-
-### Full BLE and schedule run (2026-10-14, firmware 0.3.0 + temporary debug builds)
-
-With the owner's approval, temporary builds (never committed, since reverted)
-allowed a daily cap of up to 12 over BLE, and one had no reachable WiFi.
-Tray empty; owner settings saved first and restored afterwards (checked).
-
-- Every command, success and refusal: FEED (OK; BUSY, TOO_SOON,
-  PORTION_LIMIT, DAILY_CAP, CALIBRATING, UNKNOWN_POSITION, EMPTY,
-  INVALID_ARG), TRAY_RELOAD (OK; CALIBRATING, INVALID_ARG), SET_PROFILE,
-  HOLD (minutes, until cancelled, cancel; INVALID_ARG; TIME_INVALID without a
-  clock), STOP (mid-feed -> position unknown; INVALID_ARG), SET_TIME (OK
-  without network time; IGNORED_NTP_ACTIVE; before 2019 and wrong length
-  INVALID_ARG), SET_LOCATION, CALIBRATE, JOG (OK; NOT_CALIBRATING,
-  INVALID_ARG), SAVE_CALIBRATION, SET_POSITION (OK; CALIBRATING,
-  INVALID_ARG), SET_TIMEZONE (UNSUPPORTED). Profile, Config and Calibration
-  records written, read back and refused when out of range. All pass.
-- Status updates at most every 500 ms (as PROTOCOL.md says); a client must not
-  expect it to change the instant a command is answered.
-- Schedules on NTP time: a clock event and a sunset event (a test location,
-  offset -131 min onto the test minute) each fed once, inside their minute,
-  and not again. An event due during a hold was refused (HOLD), reported once
-  when its minute ended, and never made up.
-- Real power cut with no WiFi (build with an unknown SSID): clock unset at
-  boot, timed HOLD refused TIME_INVALID, indefinite hold and manual feed work,
-  SET_TIME accepted, source BLE, and a scheduled event then fed on the BLE
-  clock. No reboot from the missing WiFi.
-- Found: Next Feed showed an event that had already fed today (fixed in 0.3.1);
-  a clock kept by the RTC across a soft reset was reported as NTP (fixed in
-  0.3.1); faking the NTP server names does not take network time away on the
-  owner's network (something answers NTP anyway, probably a firewall
-  redirect), so "no network" tests need WiFi removed.
-
-0.3.1 on hardware (2026-10-14): after the soft reset of the flash the clock
-showed "kept across restart", then "NTP" about 30 s later; a daily cap of 7 was
-refused again; "Portions Counted (24 h)" set from 8 to 0 in Home Assistant,
-logged as a warning ("set by hand: 8 -> 0").
-
-Push button (GPIO2 to GND, `packages/button.yaml`, 2026-10-14): a short press
-fed one portion; presses inside the minimum gap were refused (TOO_SOON) without
-moving; a 3 s press turned calibration mode on and another turned it off; a
-short press after the gap fed again. Some refusals came in pairs 0.3 to 0.4 s
-apart: the test used a bare wire, not a switch, so those were real repeated
-contacts. The 50 ms filter stays; recheck with the real button if presses
-double up.
-
-Food (owner, 2026-10-14): hard food dispenses cleanly, and the tray holds its
-position with food in it. Flake food is finicky: it sticks to the sides and
-bottom of the slots while the disc turns. Flake is not advised (README).
-
-0.3.3 on hardware: flashed over USB with a new API key (OTA could not be used for
-the key change, since OTA is encrypted with the old key); the API connects with
-the new key; "Edited Profile" and "Active Schedule" report; "Needs Food" off with
-6 portions left and nothing scheduled. Needs Food on hardware (owner, from Home
-Assistant): with a 21:00 x2 event and the tray declared at 5 (1 left), "Needs
-Food" went to Problem and Faults read "next feed needs more portions than
-remain; schedule needs more portions than the tray holds before the next
-refill"; "Schedule Over Capacity" on. Next Feed showed tomorrow 21:00, correctly:
-that event slot had already fed today during testing (once a day per event).
-Disabling the event cleared it within a second: Needs Food OK (nothing
-scheduled, so 1 portion is enough), Schedule Over Capacity off, Next Feed none,
-Tray Empty On "not within 30 days". Over-cap warning on hardware: with events
-21:00 x2 and 12:00 x3 and a daily cap of 3, Edited Profile read "A: 21:00 x2,
-12:00 x3 [active] ! 5 portions/day > cap 3" and Faults added "schedule feeds
-more per day than the daily cap allows (some events will be refused)". Every
-v0.3.3 feature has now been seen on hardware. (The summary lists events in slot
-order, not time order; a possible tidy-up.)
-
-### BLE protocol 2 on hardware (2026-10-14, firmware 0.4.0)
-
-From a Linux PC with the reference client, never feeding: Info shows protocol 2
-and capability bit 6; the Auth nonce is 16 random bytes; Status reads as zeros
-before AUTH; an unsigned command and a record write are refused (not
-authenticated); AUTH with a wrong key is refused, the nonce then changes, and even
-the right key is refused within a second; the right key is accepted after that.
-Authenticated: Status, Config and Profile reads, a Config write answered with its
-sequence number, SET_TIMEZONE UNSUPPORTED, HOLD and its exact retry (the stored
-answer replayed), and refusals for a stale sequence number, a tampered byte, a
-write signed for another characteristic, and a proof for an earlier
-connection's nonce. 22/22. `sc_bond` did not get in the way of the client.
-
-### Home Assistant time on hardware (2026-10-14, firmware 0.4.0)
-
-`time_homeassistant` package enabled, timezone pinned (`!extend ha_time` with
-`timezone`). After a hard power cycle (clock lost), the log showed "Clock set by
-Home Assistant" first, which made the clock valid, and "Clock set by NTP" 4.4 s
-later, so the source then reads NTP (last sync wins, as designed). Home
-Assistant alone is therefore enough to set the clock when the internet is down.
-In normal running both re-sync every 15 minutes within seconds of each other, so
-"Time Source" almost always shows NTP.
-
+Moved to [docs/BENCH.md](docs/BENCH.md).

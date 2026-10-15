@@ -18,13 +18,26 @@ static const char *const TAG = "precision_feeder";
 static constexpr float SERVO_PERIOD_US = 20000.0f;  // 50 Hz
 
 void PrecisionFeeder::setup() {
-  this->pref_settings_ = global_preferences->make_preference<Settings>(fnv1_hash("precision_feeder.settings"));
+  // Each record layout has its own key (see SETTINGS_VERSION in feeder_core.h), so an older record can still be
+  // loaded and migrated after an update instead of failing to load and being replaced by defaults.
+  this->pref_settings_ = global_preferences->make_preference<Settings>(fnv1_hash("precision_feeder.settings.v4"));
+  this->pref_calibration_ =
+      global_preferences->make_preference<Calibration>(fnv1_hash("precision_feeder.calibration.v1"));
   this->pref_state_ = global_preferences->make_preference<State>(fnv1_hash("precision_feeder.state"));
   Settings settings;
+  Calibration calibration;
   State state;
   const bool have_settings = this->pref_settings_.load(&settings);
+  const bool have_calibration = this->pref_calibration_.load(&calibration);
   const bool have_state = this->pref_state_.load(&state);
-  this->core_start(have_settings ? &settings : nullptr, have_state ? &state : nullptr);
+  legacy::SettingsV3 v3;
+  bool have_v3 = false;
+  if (!have_settings) {
+    auto pref_v3 = global_preferences->make_preference<legacy::SettingsV3>(fnv1_hash("precision_feeder.settings"));
+    have_v3 = pref_v3.load(&v3);
+  }
+  this->core_start(have_settings ? &settings : nullptr, have_calibration ? &calibration : nullptr,
+                   have_state ? &state : nullptr, have_v3 ? &v3 : nullptr);
 }
 
 void PrecisionFeeder::dump_config() {
@@ -32,7 +45,7 @@ void PrecisionFeeder::dump_config() {
   ESP_LOGCONFIG(TAG, "  Sweep: %.1f deg, pitch %.1f deg, invert: %s", this->sweep_, this->sweep_ / NUM_POSITIONS,
                 YESNO(this->invert_));
   ESP_LOGCONFIG(TAG, "  Pulse: %u-%u us (saved), step time %u ms, wiggle: %s, detach delay %u ms",
-                (unsigned) this->cfg.min_pulse_us, (unsigned) this->cfg.max_pulse_us, (unsigned) this->step_ms_,
+                (unsigned) this->calib.min_pulse_us, (unsigned) this->calib.max_pulse_us, (unsigned) this->step_ms_,
                 YESNO(this->wiggle_), (unsigned) this->detach_ms_);
   ESP_LOGCONFIG(TAG, "  Tray position: %u (%s), remaining: %u", this->position(), this->tray_state_text().c_str(),
                 this->remaining());
@@ -81,8 +94,8 @@ int64_t PrecisionFeeder::hal_local_to_epoch(int year, int month, int day, int ho
 }
 
 void PrecisionFeeder::hal_servo_write(float angle) {
-  const float span = static_cast<float>(this->cfg.max_pulse_us) - static_cast<float>(this->cfg.min_pulse_us);
-  const float pulse = static_cast<float>(this->cfg.min_pulse_us) + (angle / 180.0f) * span;
+  const float span = static_cast<float>(this->calib.max_pulse_us) - static_cast<float>(this->calib.min_pulse_us);
+  const float pulse = static_cast<float>(this->calib.min_pulse_us) + (angle / 180.0f) * span;
   this->output_->set_level(pulse / SERVO_PERIOD_US);
 }
 
@@ -90,6 +103,12 @@ void PrecisionFeeder::hal_servo_release() { this->output_->set_level(0.0f); }
 
 void PrecisionFeeder::hal_save_settings(const Settings &settings, bool flush) {
   this->pref_settings_.save(&settings);
+  if (flush)
+    global_preferences->sync();
+}
+
+void PrecisionFeeder::hal_save_calibration(const Calibration &calibration, bool flush) {
+  this->pref_calibration_.save(&calibration);
   if (flush)
     global_preferences->sync();
 }

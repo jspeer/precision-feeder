@@ -15,6 +15,10 @@ Examples:
     python precision_feeder_ble.py scan
     export PRECISION_FEEDER_BLE_KEY='...base64 from secrets.yaml...'
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF status
+    python precision_feeder_ble.py AA:BB:CC:DD:EE:FF selftest
+    python precision_feeder_ble.py AA:BB:CC:DD:EE:FF config get all
+    python precision_feeder_ble.py AA:BB:CC:DD:EE:FF profile A show
+    python precision_feeder_ble.py AA:BB:CC:DD:EE:FF profile A event 1 on clock 08:00 1 all
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF feed 1
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF set-time
     python precision_feeder_ble.py AA:BB:CC:DD:EE:FF hold forever
@@ -494,6 +498,95 @@ class FeederClient:
         await self.write_record(CONFIG_UUID, config_query(key))
         return parse_config(bytes(await self._client.read_gatt_char(CONFIG_UUID)))[1]
 
+    async def read_calibration(self, index: int) -> int:
+        """A position's offset, tenths of a degree."""
+        await self.write_record(CALIBRATION_UUID, calibration_query(index))
+        return parse_calibration(bytes(await self._client.read_gatt_char(CALIBRATION_UUID)))[1]
+
+
+def parse_event_time(anchor: str, text: str) -> int:
+    """'08:30' for a clock event; '+01:30', '-00:45' or '+90' (minutes) for sunrise/sunset."""
+    sign = -1 if text.startswith("-") else 1
+    body = text.lstrip("+-")
+    minutes = int(body.split(":")[0]) * 60 + int(body.split(":")[1]) if ":" in body else int(body)
+    if anchor == "clock":
+        if text[0] in "+-" or not 0 <= minutes <= 1439:
+            raise ValueError("a clock time is HH:MM, 00:00 to 23:59")
+        return minutes
+    if minutes > 720:
+        raise ValueError("a sunrise/sunset offset is at most 12 hours")
+    return sign * minutes
+
+
+def parse_day_list(text: str) -> int:
+    """'all', 'none', 'weekdays', 'weekend' or day names ('mon,wed,fri')."""
+    words = {"all": 0x7F, "none": 0, "weekdays": 0x3E, "weekend": 0x41}
+    mask = 0
+    for word in text.replace(" ", ",").lower().split(","):
+        if word:
+            mask |= words[word] if word in words else days_mask(word)
+    return mask
+
+
+def describe_event(ev: dict) -> str:
+    if ev["anchor"] == "clock":
+        when = f"{ev['offset_min'] // 60:02d}:{ev['offset_min'] % 60:02d}"
+    else:
+        m = abs(ev["offset_min"])
+        when = f"{ev['anchor']}{'-' if ev['offset_min'] < 0 else '+'}{m // 60:02d}:{m % 60:02d}"
+    days = "all" if ev["days"] == 0x7F else ",".join(d for i, d in enumerate(WEEKDAYS) if ev["days"] >> i & 1) or "none"
+    return f"event {ev['event'] + 1}: {'on ' if ev['enabled'] else 'off'} {when} x{ev['portions']} ({days})"
+
+
+async def selftest(feeder: FeederClient) -> list[tuple[str, bool, str]]:
+    """Check the protocol against a real feeder without feeding: reads, writes of the same values back, a hold that
+    is cancelled again, retries, and refusals of stale, tampered and misdirected writes."""
+    results = []
+
+    def check(name, ok, detail=""):
+        results.append((name, bool(ok), detail))
+
+    info = await feeder.info()
+    check("Info: protocol 2 with authentication", info.protocol_version == PROTOCOL_VERSION and info.capabilities >> 6 & 1,
+          str(info))
+    await asyncio.sleep(1.0)  # Status refreshes at most twice a second
+    status = await feeder.status()
+    check("Status readable", status.tray_position <= 6, status.describe().splitlines()[0])
+    values = {}
+    for name, key in CONFIG_KEYS.items():
+        values[name] = await feeder.read_config(key)
+    check("every Config key readable", len(values) == len(CONFIG_KEYS), ", ".join(f"{k}={v}" for k, v in values.items()))
+    r = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS["daily_cap"], values["daily_cap"]))
+    check("Config write (same value back) answered with its seq", r.ok and r.seq != 0, r.result_text)
+    r = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS["daily_cap"], 0))
+    check("out-of-range Config value refused", r.result == 8, r.result_text)
+    header = await feeder.read_profile_header(status.active_profile)
+    check("Profile header readable", 1 <= header["every_n"] <= 14, str(header))
+    offsets = [await feeder.read_calibration(i) for i in range(7)]
+    check("Calibration readable", all(-150 <= o <= 150 for o in offsets), str(offsets))
+    r = await feeder.command(OP_SET_TIMEZONE)
+    check("reserved opcode answered UNSUPPORTED", r.result == 14, r.result_text)
+    body = command(feeder._next(), OP_HOLD, hold_args(HOLD_FOREVER))
+    data = signed(feeder._session, CHANNEL_COMMAND, body)
+    first = await feeder._send(OP_HOLD, data)
+    again = await feeder._send(OP_HOLD, data)
+    check("HOLD, and its exact retry gets the same answer", first.ok and (again.result, again.detail) == (first.result, first.detail))
+    r = await feeder.command(OP_HOLD, hold_args(0))
+    check("hold cancelled again", r.ok, r.result_text)
+    stale = signed(feeder._session, CHANNEL_COMMAND, command(body[0], OP_HOLD, hold_args(1)))
+    r = await feeder._send(OP_HOLD, stale)
+    check("a new write with an old sequence number is refused", r.result == 16 and r.detail == 2, f"detail {r.detail}")
+    tampered = bytearray(signed(feeder._session, CHANNEL_COMMAND, command(feeder._next(), OP_HOLD, hold_args(0))))
+    tampered[2] ^= 1
+    r = await feeder._send(OP_HOLD, bytes(tampered))
+    check("a tampered write is refused", r.result == 16 and r.detail == 1, f"detail {r.detail}")
+    moved = signed(feeder._session, CHANNEL_CONFIG, command(feeder._next(), OP_HOLD, hold_args(0)))
+    r = await feeder._send(OP_HOLD, moved)
+    check("a write signed for another characteristic is refused", r.result == 16 and r.detail == 1, f"detail {r.detail}")
+    r = await feeder.command(OP_HOLD, hold_args(0))
+    check("commands still work afterwards", r.ok, r.result_text)
+    return results
+
 
 # ---- command line -------------------------------------------------------------------------------------
 
@@ -547,6 +640,53 @@ async def _run(args: argparse.Namespace) -> None:
             resp = await feeder.command(OP_SAVE_CALIBRATION)
         elif cmd == "set-position":
             resp = await feeder.command(OP_SET_POSITION, struct.pack("<B", args.position))
+        elif cmd == "config":
+            if args.action == "get":
+                names = list(CONFIG_KEYS) if args.key in (None, "all") else [args.key]
+                for name in names:
+                    print(f"{name} = {await feeder.read_config(CONFIG_KEYS[name])}")
+                return
+            if args.key not in CONFIG_KEYS or args.value is None:
+                raise SystemExit(f"usage: config set KEY VALUE, KEY one of {', '.join(CONFIG_KEYS)}")
+            resp = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS[args.key], args.value))
+        elif cmd == "profile":
+            p = "ABC".index(args.profile.upper())
+            if args.action == "show":
+                h = await feeder.read_profile_header(p)
+                print(f"profile {'ABC'[p]}: every {h['every_n']} day(s), fast days mask 0x{h['fast_mask']:02X}, "
+                      f"cycle anchor day {h['anchor_day']}")
+                for e in range(4):
+                    print("  " + describe_event(await feeder.read_profile_event(p, e)))
+                return
+            if args.action == "event":
+                ev = args.values
+                if len(ev) != 6:
+                    raise SystemExit("usage: profile A event N on|off clock|sunrise|sunset TIME PORTIONS DAYS")
+                n, state, anchor, when, portions, days = ev
+                record = profile_event(p, int(n) - 1, state == "on", anchor, parse_event_time(anchor, when),
+                                       int(portions), parse_day_list(days))
+            else:  # header
+                if len(args.values) != 2:
+                    raise SystemExit("usage: profile A header EVERY_N FAST_DAYS (fast days: none, sun, ...)")
+                record = profile_header(p, int(args.values[0]), parse_day_list(args.values[1]))
+            resp = await feeder.write_record(PROFILE_UUID, record)
+        elif cmd == "calibration":
+            if args.action == "get":
+                for i in range(7):
+                    print(f"position {i}: {await feeder.read_calibration(i) / 10:+.1f} degrees")
+                return
+            if args.position is None or args.tenths is None:
+                raise SystemExit("usage: calibration set POSITION TENTHS")
+            resp = await feeder.write_record(CALIBRATION_UUID, calibration_set(args.position, args.tenths))
+        elif cmd == "selftest":
+            results = await selftest(feeder)
+            for name, ok, detail in results:
+                print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}")
+            failed = sum(1 for _, ok, _ in results if not ok)
+            print(f"{len(results) - failed}/{len(results)} passed")
+            if failed:
+                raise SystemExit(1)
+            return
         else:
             raise SystemExit(f"unknown command {cmd}")
         print(f"{resp.result_text} (detail {resp.detail})")
@@ -580,6 +720,19 @@ def main() -> None:
     p.add_argument("tenths", type=int, help="tenths of a degree, negative allowed")
     add("save-calibration")
     add("set-position").add_argument("position", type=int)
+    p = add("config", help="config get [KEY|all] | config set KEY VALUE")
+    p.add_argument("action", choices=["get", "set"])
+    p.add_argument("key", nargs="?")
+    p.add_argument("value", type=int, nargs="?")
+    p = add("profile", help="profile A show | profile A header EVERY_N FAST_DAYS | profile A event N on|off ANCHOR TIME PORTIONS DAYS")
+    p.add_argument("profile", choices=["A", "B", "C", "a", "b", "c"])
+    p.add_argument("action", choices=["show", "header", "event"])
+    p.add_argument("values", nargs="*")
+    p = add("calibration", help="calibration get | calibration set POSITION TENTHS")
+    p.add_argument("action", choices=["get", "set"])
+    p.add_argument("position", type=int, nargs="?")
+    p.add_argument("tenths", type=int, nargs="?")
+    add("selftest", help="check the protocol against this feeder; never feeds")
 
     # The address comes first on the command line ("ADDRESS status"), then the subcommand.
     import sys

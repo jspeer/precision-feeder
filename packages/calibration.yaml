@@ -28,16 +28,17 @@ switch:
 
 select:
   - platform: template
+    id: pf_calibration_position
     name: "Calibration Position"
     icon: mdi:numeric
     options: ["0", "1", "2", "3", "4", "5", "6"]
-    lambda: return std::string(1, (char) ('0' + id(feeder).calibration_position()));
     set_action:
       - lambda: id(feeder).calibration_select(x[0] - '0');
-    update_interval: 2s
+    update_interval: never
 
 number:
   - platform: template
+    id: pf_calibration_offset
     name: "Calibration Offset"
     icon: mdi:angle-acute
     unit_of_measurement: "°"
@@ -46,16 +47,16 @@ number:
     step: 0.1
     mode: box
     # Added to the nominal angle of the selected position. Saved when calibration mode is turned off.
-    lambda: return id(feeder).calibration_offset() / 10.0f;
     set_action:
       - lambda: id(feeder).set_calibration_offset((int16_t) std::lround(x * 10.0f));
-    update_interval: 2s
+    update_interval: never
 
   # --- Servo pulse range ------------------------------------------------------
   # Pulse widths for 0 and 180 degrees. The YAML min_pulse/max_pulse are only the
   # starting values; changes here are saved and win from then on. In calibration
   # mode the servo moves to the selected position again on every change.
   - platform: template
+    id: pf_servo_min_pulse
     name: "Servo Min Pulse"
     icon: mdi:pulse
     entity_category: config
@@ -64,11 +65,11 @@ number:
     max_value: 1500
     step: 1
     mode: box
-    lambda: return id(feeder).min_pulse_us();
     set_action:
       - lambda: id(feeder).set_pulse_range((uint16_t) x, id(feeder).max_pulse_us());
-    update_interval: 2s
+    update_interval: never
   - platform: template
+    id: pf_servo_max_pulse
     name: "Servo Max Pulse"
     icon: mdi:pulse
     entity_category: config
@@ -77,10 +78,9 @@ number:
     max_value: 3000
     step: 1
     mode: box
-    lambda: return id(feeder).max_pulse_us();
     set_action:
       - lambda: id(feeder).set_pulse_range(id(feeder).min_pulse_us(), (uint16_t) x);
-    update_interval: 2s
+    update_interval: never
 
   # --- Position recovery ----------------------------------------------------
   # After a power loss in the middle of a feed the tray position is "unknown"
@@ -102,3 +102,14 @@ button:
     icon: mdi:map-marker-check
     on_press:
       - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);
+
+# Publish the entities above only when their value changes (see packages/status.yaml).
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          publish_option(id(pf_calibration_position), std::string(1, (char) ('0' + id(feeder).calibration_position())));
+          publish_number(id(pf_calibration_offset), id(feeder).calibration_offset() / 10.0f);
+          publish_number(id(pf_servo_min_pulse), id(feeder).min_pulse_us());
+          publish_number(id(pf_servo_max_pulse), id(feeder).max_pulse_us());

@@ -1,0 +1,189 @@
+# Changelog
+
+Firmware versions (`fw_version` in packages/core.yaml), newest first. The BLE
+protocol has its own version (docs/PROTOCOL.md). Bench results are in
+[docs/BENCH.md](docs/BENCH.md).
+
+*Written with the assistance of an AI (Anthropic's Claude).*
+
+## 0.5.0: review fixes, publish on change, settings migration (2026-10-14)
+
+- **BLE fix (found by the owner):** repeating a valid AUTH on an authenticated
+  connection reset the last accepted sequence number, and the handler cleared
+  the retry cache, so a write already executed in that session (a FEED, say)
+  could run again if the guard allowed it. A repeated AUTH is now answered OK and
+  changes nothing; the retry cache is only cleared on connect and disconnect.
+  Regression test in tests/test_protocol.cpp (fails without the fix).
+- Sun events that resolve to the evening before their day (for example
+  "sunrise - 10 h") now feed; the scheduler only looked at today's and
+  yesterday's events, so they never did, while Next Feed showed them.
+- Setting and cancelling a hold is written to flash at once (a power cut within
+  ESPHome's write interval could lose it).
+- Settings layout version 4: the servo calibration (pulse range and offsets) is
+  its own saved record, so a future settings change can never lose it. Version 3
+  settings (firmware 0.3.0 to 0.4.x) are **migrated, not discarded**: schedule,
+  guard settings, location and calibration are kept. Each record layout now has
+  its own preference key, so an old record stays loadable for migration.
+- Entities publish only when their value changes: the status, control, editor
+  and calibration entities have no polling of their own; one 1-second interval
+  per package compares and publishes (`publish_number/text/bool/option` in
+  `precision_feeder.h`). Home Assistant and the log no longer see the same value
+  every 2 to 30 seconds.
+- Scheduler work: day contexts are cached for an hour, the sun-time cache covers
+  the whole 30-day projection, and the projection refreshes every minute (and on
+  any change) instead of every 30 seconds.
+- Day names must be three letters or the full name (plural allowed); "sunshine"
+  is no longer Sunday. Profile summaries list events in time order. An ordinary
+  boot no longer rewrites the settings.
+- `feeder_core.cpp` split into `feeder_core.cpp` (tray, guard, clock),
+  `feeder_schedule.cpp` (scheduler, projection) and `feeder_text.cpp` (editor and
+  status texts), with shared constants in `feeder_internal.h`.
+- Python client: `config get/set`, `profile show/header/event`,
+  `calibration get/set`, and `selftest` (checks a feeder's protocol without
+  feeding).
+- Docs: DESIGN.md is the current design only; this changelog and
+  docs/BENCH.md hold the history and the bench results. README: how to put a
+  password on the web dashboard.
+
+## 0.4.1: HA time on by default, 2026-10-14
+
+- `examples/basic.yaml` and `examples/ble.yaml` include the
+  `time_homeassistant` package (it was commented out). No code change.
+
+## 0.4.0: BLE protocol 2: authentication, 2026-10-14
+
+- Every BLE write must be authenticated with the shared `ble_key` (section 10,
+  docs/PROTOCOL.md). New Auth characteristic (000A), AUTH opcode (0x0D), result
+  16 NOT_AUTHORIZED, capability bit 6. Profile, Config and Calibration writes
+  gained a leading sequence number and are answered with it. **Not compatible
+  with protocol 1 clients**: the PLC-side driver must implement protocol 2.
+- `esp32_ble`: `auth_req_mode: sc_bond`.
+- Retry cache entries carry the characteristic (channel), and the cache is
+  cleared on every connect and disconnect.
+- Each clock sync is logged ("Clock set by NTP" / "Home Assistant" / "BLE").
+- Python client: `--key` / PRECISION_FEEDER_BLE_KEY; authenticates on connect
+  and signs every write.
+
+## 0.3.5: polar days, 2026-10-14
+
+- On a day without a sunrise or sunset at the set location, sun events use
+  06:00 (sunrise) or 18:00 (sunset) plus their offset instead of being skipped.
+  Faults: "no sunrise or sunset today: sun events use 06:00 / 18:00"; BLE flag
+  bit 6 stays set (it means a sun event could not use the real sun). No
+  location set: still skipped. Test: `test_polar_fallback` (89 degrees N).
+
+## 0.3.4: source label, 2026-10-14
+
+- The feed source for the device's own feed buttons (pressed in Home Assistant
+  or the web UI) is labelled "ESPHome" instead of "home assistant" in logs,
+  "Last Feed" and "Recent Feeds" (owner request: it is an ESPHome entity call).
+  Code name `Source::ESPHOME`. The BLE value is still 1, so the protocol is
+  unchanged; only the label in PROTOCOL.md and the Python client changed. The
+  clock source "Home Assistant" (HA time) keeps its name.
+
+## 0.3.3: Needs Food, 2026-10-14
+
+- New "Needs Food" binary sensor (status package, device class problem): on
+  when the tray is empty, or the next scheduled or one-shot feed needs more
+  portions than remain (the firmware would feed what is left, so the meal would
+  come up short). Off while the position is unknown. Meant as an automation
+  trigger. Also BLE Status flag bit 12 (an addition within protocol 1) and a
+  Faults line. The projection now keeps the next feed's portions.
+
+## 0.3.2: scheduling clarity, 2026-10-14
+
+- New docs/SCHEDULING.md: building a profile step by step, field reference,
+  rules and worked examples. Linked from the README and the editor package.
+- New "Edited Profile" text sensor (editor package): the summary of the
+  profile being edited, marked [active] / [not active], with a warning when its
+  busiest day exceeds the daily cap. A separate sensor rather than part of
+  "Active Schedule", which could then exceed Home Assistant's 255-character
+  limit for a text sensor.
+- Over-cap warning: when the active profile's busiest weekday (enabled events,
+  fast days excluded) needs more portions than the daily cap, Faults says so
+  and BLE Status flag bit 11 is set (an addition within protocol 1). The check
+  is per weekday; the cap itself is a rolling 24 h window.
+
+## 0.3.1: bench fixes, 2026-10-14
+
+- "Next Feed" and the runway no longer include an event that already fed today
+  (it could be moved later in the day, then shown as due while it would not
+  feed). Test: `test_next_feed_skips_fired_event`.
+- A clock kept by the RTC across a soft reset is no longer reported as an NTP
+  sync (section 6). It shows as "kept across restart" (BLE: source 0 with the
+  clock-valid flag) and does not block BLE `SET_TIME`. The sntp hook now calls
+  `note_sntp_sync()`, which checks ESP-IDF's SNTP sync status.
+- New Home Assistant diagnostic number "Portions Counted (24 h)": shows and
+  sets the count the daily cap uses (decision log, 2026-10-14). New history
+  source "adjustment" (internal; never sent over BLE).
+- Docs: MG90S datasheet values and the deadband in docs/CALIBRATION.md;
+  `examples/local*.yaml` for personal overrides (git-ignored).
+
+## 0.3.0: servo pulse range settable at run time, 2026-10-14
+
+- First bench result: the MG90S turned about 12% less per microsecond than the
+  544 to 2400 us range assumes (slot 0 needed +11 degrees, slot 1 +14.5, and an
+  uncalibrated position 6 stopped just past slot 5). The +-15 degree per-slot
+  offsets cannot absorb that, and fixing it in YAML needs a reflash per try.
+- The pulse range is now part of the saved settings and can be changed at run
+  time: Home Assistant "Servo Min Pulse" / "Servo Max Pulse" (calibration
+  package), BLE Config keys 10 and 11, capability bit 5. In calibration mode the
+  servo moves to the selected position after each change. The YAML
+  `min_pulse` / `max_pulse` are the defaults for a fresh device; saved values win.
+  Limits 300 to 1500 / 1500 to 3000 us, at least 500 us apart.
+- Settings version 3: **saved settings from earlier versions are discarded** on
+  the first boot (schedule, guard settings, calibration offsets, location). The
+  tray state is kept.
+- BLE: an addition within protocol 1 (new keys and capability bit); nothing
+  existing changed.
+
+## 0.2.2: servo default, 2026-10-13
+
+- Default `min_pulse` is 544 us (was 500), the pulse range the original firmware
+  drives (ESP32Servo's default, 544 to 2400 us), so a fresh build starts the tray
+  where the original did. The original was tuned on an SG92R; this build uses an
+  MG90S, so the range still needs the bench check. Existing builds that set
+  `min_pulse` themselves are unaffected; others will see every position shift by
+  up to about 4 degrees and should re-check calibration.
+- Docs: the tray geometry measured from the printed model (section 3).
+
+## 0.2.1: review fixes, 2026-10-14
+
+- Refactor: all logic moved into `FeederCore` (`feeder_core.h/.cpp`), plain C++
+  with the clock, servo, storage and log behind `hal_*` hooks. `PrecisionFeeder`
+  is now a thin ESPHome adapter. `tests/test_core.cpp` runs the tray, guard and
+  scheduler against a simulated clock (13 test groups).
+- The push button reloads the tray when its position is unknown, not only when
+  empty, so a button-only build can recover from a power cut mid-feed.
+- Scheduled and one-shot feeds refused with BUSY / TOO_SOON / hold are retried
+  silently; the outcome is reported once (section 5.5). Previously every retry
+  logged, changed "Last Result" and sent a BLE event-log notification.
+- The BLE retry cache matches the whole command, not just the sequence number.
+- Daily cap after a reboot without a clock (CHANGELOG.md deviations).
+- One-shot feeds run with the Scheduler switch off; "Next Feed", runway and the
+  over-capacity flag no longer count recurring events while it is off.
+- The sunrise/sunset fault is evaluated every tick, and clears while the
+  scheduler is off.
+- The reload pause survives a reboot when the clock was known (state version 2;
+  the saved tray state from earlier versions is discarded).
+- "Minutes Since Clock Sync" is unknown until the clock has been set.
+- Python client: answers matched on (seq, opcode); commands never use seq 0.
+
+## 0.2.0: BLE protocol, and the two warnings fixed
+
+- BLE protocol v1 implemented (section 8, `docs/PROTOCOL.md`).
+- OTA authenticates with the API encryption key (no separate OTA password), and
+  the web server's own `/update` page is disabled (`ota: false`), because it would
+  accept an image in plaintext. Firmware uploads go through the encrypted ESPHome
+  OTA only.
+- `rgb_order` replaced by `channel_colors` (deprecated in ESPHome).
+- The clock source is tracked and shown in Home Assistant ("Time Source",
+  "Minutes Since Clock Sync").
+
+## 0.1.1: cleanup after reviewing the original firmware's behaviour
+
+- Late feeds removed: the "Late Start Grace" setting is gone and events fire only
+  in the minute they are due (section 5.5). Settings version bumped to 2.
+- Hold has no maximum: "Hold Duration" is in hours, 0 means until cancelled, and
+  an indefinite hold needs no clock. A "Hold" status sensor shows what is active.
+- The cancel-backlog step on tray reload is gone (nothing to cancel).

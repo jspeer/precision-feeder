@@ -35,6 +35,7 @@ from being over-fed.
 - [Setting it up](#setting-it-up)
 - [Everyday use](#everyday-use)
 - [Settings you can change](#settings-you-can-change)
+- [The web dashboard password](#the-web-dashboard-password)
 - [Safety behaviour](#safety-behaviour)
 - [Troubleshooting](#troubleshooting)
 - [Limits](#limits)
@@ -129,7 +130,7 @@ you switch a feature on or off by adding or removing one line.
 | `controls` | buttons and settings: feed, tray reload, hold, active profile, guard settings, location | **always** |
 | `schedule_editor` | editing profiles and events, one-shot feeds | **always** (unless something else, like a PLC over BLE, owns the schedule) |
 | `calibration` | calibration mode, servo pulse range, per-slot offsets, recovery after a power cut | **always** |
-| `web_server` | a dashboard at `http://precision-feeder.local` | recommended; leave it out to save memory, or turn on its password on a shared network |
+| `web_server` | a dashboard at `http://precision-feeder.local` | recommended; no password by default (see [the dashboard password](#the-web-dashboard-password)); leave it out to save memory |
 | `status_led` | colour-coded state on the board's LED | recommended if your board has the LED |
 | `button` | a physical button: short press feeds (or reloads when empty), long press toggles calibration | only if you fitted one |
 | `time_homeassistant` | Home Assistant as a second clock source | **on in both examples**: keeps the clock right when the internet is down but Home Assistant is up (harmless without Home Assistant). It also uses Home Assistant's timezone unless you pin yours (see the package's comment) |
@@ -276,6 +277,18 @@ Portions (5 s), Daily Portion Cap (4), Max Portions Per Command (1), Reload Paus
 (10 min), Refill Interval (3 days, for the runway warning), Latitude, Longitude,
 the servo pulse range and calibration offsets.
 
+## The web dashboard password
+
+The dashboard (`web_server` package) has no password by default. To add one,
+uncomment the `auth` lines in [`packages/web_server.yaml`](packages/web_server.yaml)
+and add `web_username` and `web_password` to your `secrets.yaml`.
+
+Be aware that the dashboard is plain HTTP: the password is sent unencrypted on
+every request, so it only keeps casual visitors out. It is not real security on a
+network you do not trust. Home Assistant's connection (the encrypted API) and BLE
+(the shared key) do not have this weakness; if you do not use the dashboard,
+leave the `web_server` package out instead.
+
 ## Safety behaviour
 
 These are deliberate, so a fault ends in a missed meal rather than an
@@ -331,7 +344,9 @@ over-fed tank:
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | building schedule profiles |
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | lining up the tray |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the BLE protocol, for controller and app developers |
-| [DESIGN.md](DESIGN.md) | design, decisions, open questions, bench results |
+| [DESIGN.md](DESIGN.md) | the design and the decisions behind it |
+| [CHANGELOG.md](CHANGELOG.md) | what changed in each firmware version |
+| [docs/BENCH.md](docs/BENCH.md) | what has been tested on real hardware |
 | [AGENTS.md](AGENTS.md) | rules for contributors (human or AI) |
 
 ```

@@ -32,7 +32,10 @@ constexpr uint32_t HOLD_FOREVER = UINT32_MAX;  // State::hold_until marker: unti
 // (before their offset), so the animals are still fed at a sensible hour (owner decision 2026-10-14).
 constexpr int POLAR_SUNRISE_MIN = 6 * 60;
 constexpr int POLAR_SUNSET_MIN = 18 * 60;
-constexpr uint32_t SETTINGS_VERSION = 3;       // 2: late-start grace removed; 3: servo pulse range
+// Saved records. When a record's layout changes: bump its version, give it a new preference key in the adapter,
+// keep the old layout below (namespace legacy) and migrate it in core_start(). Never just discard saved data.
+constexpr uint32_t SETTINGS_VERSION = 4;       // 2: no late start; 3: servo pulse range; 4: calibration moved out
+constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
 // Servo pulse range limits (microseconds for 0 and 180 degrees). Wide enough for servos that turn less than
 // the nominal amount per microsecond; the firmware never commands more than about 155 degrees.
@@ -106,7 +109,6 @@ struct Settings {
   uint32_t version;
   Profile profiles[NUM_PROFILES];
   OneShot oneshots[MAX_ONESHOTS];
-  int16_t cal[NUM_POSITIONS];  // per-position calibration offsets, tenths of a degree
   float latitude;
   float longitude;
   uint16_t min_gap_s;          // minimum seconds between feed requests
@@ -117,9 +119,37 @@ struct Settings {
   uint8_t max_portions_cmd;    // max portions per manual/remote command
   uint8_t active_profile;
   uint8_t scheduler_enabled;   // recurring profile events; one-shot feeds run regardless
-  uint16_t min_pulse_us;       // servo pulse for 0 degrees (tuned at run time; YAML gives the default)
-  uint16_t max_pulse_us;       // servo pulse for 180 degrees
 };
+
+/// The servo calibration, saved on its own so that a change to the other settings never loses it.
+struct Calibration {
+  uint32_t version;
+  int16_t offsets[NUM_POSITIONS];  // per-position offsets, tenths of a degree
+  uint16_t min_pulse_us;           // servo pulse for 0 degrees (tuned at run time; YAML gives the default)
+  uint16_t max_pulse_us;           // servo pulse for 180 degrees
+};
+
+namespace legacy {
+/// Settings as saved by firmware 0.3.0 to 0.4.x (version 3, with the calibration inside). Migrated, not discarded.
+struct SettingsV3 {
+  uint32_t version;
+  Profile profiles[NUM_PROFILES];
+  OneShot oneshots[MAX_ONESHOTS];
+  int16_t cal[NUM_POSITIONS];
+  float latitude;
+  float longitude;
+  uint16_t min_gap_s;
+  uint16_t portion_gap_s;
+  uint16_t reload_pause_min;
+  uint16_t refill_interval_days;
+  uint8_t daily_cap;
+  uint8_t max_portions_cmd;
+  uint8_t active_profile;
+  uint8_t scheduler_enabled;
+  uint16_t min_pulse_us;
+  uint16_t max_pulse_us;
+};
+}  // namespace legacy
 
 /// Runtime state that must survive a reboot (flushed to flash on every feed).
 struct State {
@@ -178,8 +208,10 @@ class FeederCore {
            max_us >= min_us + PULSE_SPAN_MIN;
   }
 
-  /// Start up. Pass what was loaded from storage (nullptr if nothing was): wrong versions are ignored.
-  void core_start(const Settings *settings, const State *state);
+  /// Start up. Pass what was loaded from storage (nullptr if nothing was); wrong versions are ignored. `legacy_v3`
+  /// is the old settings record, used only when there are no current settings: it is migrated.
+  void core_start(const Settings *settings, const Calibration *calibration, const State *state,
+                  const legacy::SettingsV3 *legacy_v3 = nullptr);
   /// Call often (every main-loop pass). Runs motion, the scheduler and debounced saving.
   void core_loop();
 
@@ -210,7 +242,7 @@ class FeederCore {
   void calibration_select(uint8_t position);
   uint8_t calibration_position() const { return this->cal_pos_; }
   void set_calibration_offset(int16_t tenths);
-  int16_t calibration_offset() const { return this->cfg.cal[this->cal_pos_]; }
+  int16_t calibration_offset() const { return this->calib.offsets[this->cal_pos_]; }
   /// Set the offset (tenths of a degree) of a specific position without changing the selected one.
   void set_calibration_offset_at(uint8_t position, int16_t tenths);
   /// Nudge a position's offset and move the servo there. Needs calibration mode.
@@ -220,8 +252,9 @@ class FeederCore {
   /// Change the servo pulse range at run time (saved like other settings). In calibration mode the servo
   /// moves to the selected position again so the effect can be seen. INVALID_ARG if out of range.
   Result set_pulse_range(uint16_t min_us, uint16_t max_us);
-  uint16_t min_pulse_us() const { return this->cfg.min_pulse_us; }
-  uint16_t max_pulse_us() const { return this->cfg.max_pulse_us; }
+  uint16_t min_pulse_us() const { return this->calib.min_pulse_us; }
+  uint16_t max_pulse_us() const { return this->calib.max_pulse_us; }
+  Calibration calib{};
 
   // ---- schedule editing (the "editor" selects a profile and event) ----
   Settings cfg{};
@@ -334,6 +367,7 @@ class FeederCore {
   virtual void hal_servo_write(float angle_degrees) = 0;
   virtual void hal_servo_release() = 0;
   virtual void hal_save_settings(const Settings &settings, bool flush) = 0;
+  virtual void hal_save_calibration(const Calibration &calibration, bool flush) = 0;
   virtual void hal_save_state(const State &state, bool flush) = 0;
   virtual void hal_log(LogLevel /*level*/, const char * /*message*/) {}
 
@@ -349,6 +383,7 @@ class FeederCore {
   void log_(LogLevel level, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
   void defaults_();
   void clamp_loaded_();
+  void migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration);
   void save_state_(bool flush);
 
   // servo
@@ -403,8 +438,16 @@ class FeederCore {
   State state_{};
   uint32_t hist_ms_[HISTORY_SIZE]{};    // hal_millis() stamp per history entry
   bool hist_this_boot_[HISTORY_SIZE]{};  // entry was recorded since this boot (so hist_ms_ is meaningful)
-  SunCache sun_cache_[3];
+  // Enough for the whole projection (yesterday + 30 days + tomorrow's anchor), so it does not thrash.
+  static constexpr uint8_t DAY_CACHE_SIZE = 34;
+  SunCache sun_cache_[DAY_CACHE_SIZE];
   uint8_t sun_cache_next_{0};
+  // Day contexts (midnight, weekday, UTC offset) are recomputed at most once an hour, so a timezone pushed by
+  // Home Assistant or a daylight-saving change is picked up within the hour.
+  DayCtx day_cache_[DAY_CACHE_SIZE]{};
+  bool day_cache_used_[DAY_CACHE_SIZE]{};
+  uint8_t day_cache_next_{0};
+  int64_t day_cache_hour_{-1};
 
   Phase phase_{Phase::IDLE};
   uint32_t phase_start_{0};

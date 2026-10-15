@@ -1,6 +1,6 @@
 // Host-side tests for the feeder logic (components/precision_feeder/feeder_core.*), with a simulated clock.
 // Build and run:
-//   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_core.cpp -o /tmp/test_core && /tmp/test_core
+//   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp -o /tmp/test_core && /tmp/test_core
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -26,8 +26,14 @@ static const char *current = "";
 struct Flash {
   bool have_settings{false};
   bool have_state{false};
+  bool have_calibration{false};
+  bool have_v3{false};
   Settings settings{};
   State state{};
+  Calibration calibration{};
+  legacy::SettingsV3 v3{};
+  int settings_saves{0};
+  bool state_flushed{false};  // whether the last state save asked for an immediate flush
 };
 
 static constexpr int64_t TZ = -5 * 3600;  // fixed UTC-5, no daylight saving
@@ -42,7 +48,9 @@ class FakeFeeder : public FeederCore {
 
   void start() {
     this->set_detach_delay(1000);
-    this->core_start(flash_.have_settings ? &flash_.settings : nullptr, flash_.have_state ? &flash_.state : nullptr);
+    this->core_start(flash_.have_settings ? &flash_.settings : nullptr,
+                     flash_.have_calibration ? &flash_.calibration : nullptr,
+                     flash_.have_state ? &flash_.state : nullptr, flash_.have_v3 ? &flash_.v3 : nullptr);
     this->set_feed_listener([this](const FeedRecord &r) { this->records.push_back(r); });
   }
 
@@ -103,10 +111,16 @@ class FakeFeeder : public FeederCore {
   void hal_servo_write(float angle) override { this->angles.push_back(angle); }
   void hal_servo_release() override { this->releases++; }
   void hal_save_settings(const Settings &s, bool) override {
+    flash_.settings_saves++;
     flash_.settings = s;
     flash_.have_settings = true;
   }
-  void hal_save_state(const State &s, bool) override {
+  void hal_save_calibration(const Calibration &c, bool) override {
+    flash_.calibration = c;
+    flash_.have_calibration = true;
+  }
+  void hal_save_state(const State &s, bool flush) override {
+    flash_.state_flushed = flush;
     flash_.state = s;
     flash_.have_state = true;
   }
@@ -180,7 +194,7 @@ static void test_guard() {
   f->set_calibration_mode(true);
   CHECK(f->request_feed(1, Source::BUTTON) == Result::CALIBRATING, "refused while calibrating");
   f->set_calibration_mode(false);
-  CHECK(f->cfg.cal[0] == 0, "calibration untouched");
+  CHECK(f->calib.offsets[0] == 0, "calibration untouched");
 
   // Empty tray.
   Flash flash2;
@@ -451,7 +465,7 @@ static void test_pulse_range() {
     f->set_pulse_range(654, 2770);
     CHECK(f->angles.size() == 1, "calibration mode: servo moves to the selected position again");
     f->set_calibration_mode(false);
-    CHECK(flash.have_settings && flash.settings.min_pulse_us == 654 && flash.settings.max_pulse_us == 2770,
+    CHECK(flash.have_calibration && flash.calibration.min_pulse_us == 654 && flash.calibration.max_pulse_us == 2770,
           "saved with the settings");
   }
   {
@@ -461,7 +475,7 @@ static void test_pulse_range() {
     CHECK(f->min_pulse_us() == 654 && f->max_pulse_us() == 2770, "saved range wins over the YAML defaults");
   }
   {
-    flash.settings.min_pulse_us = 0;  // corrupt
+    flash.calibration.min_pulse_us = 0;  // corrupt
     auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
     f->set_default_pulse_range(544, 2400);
     f->start();
@@ -615,6 +629,119 @@ static void test_polar_fallback() {
   CHECK(!f->polar_fallback() && !f->solar_fault(), "normal latitude: no fallback, no fault");
 }
 
+static void test_review_fixes() {
+  current = "review fixes";
+  {
+    // A sun event that resolves to the evening before its day still feeds.
+    Flash flash;
+    auto f = boot(flash, local_epoch(2026, 10, 14, 12, 0));
+    f->cfg.latitude = 51.5f;
+    f->cfg.longitude = -0.13f;
+    f->cfg_changed();
+    enable_event(*f, 0, 0, Anchor::SUNRISE, -600);  // sunrise - 10 h
+    f->advance(3000);
+    const uint32_t due = f->next_event_epoch();
+    CHECK(due > static_cast<uint32_t>(f->now()), "next feed is ahead");
+    f->advance((static_cast<int64_t>(due) - f->now() + 30) * 1000);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "pre-midnight sun event fed in its minute");
+    f->advance(3 * 3600 * 1000LL);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "and only once");
+  }
+  {
+    // Holds are written to flash straight away.
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->set_hold_minutes(60);
+    CHECK(flash.state_flushed && flash.state.hold_until != 0, "timed hold flushed");
+    f->set_hold_indefinite();
+    CHECK(flash.state_flushed && flash.state.hold_until == HOLD_FOREVER, "indefinite hold flushed");
+    f->cancel_hold();
+    CHECK(flash.state_flushed && flash.state.hold_until == 0, "cancel flushed");
+  }
+  {
+    // A boot with a valid clock and nothing new to anchor does not rewrite the settings.
+    Flash flash;
+    { auto f = boot(flash, T0); f->advance(5000); }
+    const int saves = flash.settings_saves;
+    { auto f = boot(flash, T0 + 3600); f->advance(5000); }
+    CHECK(flash.settings_saves == saves, "no settings write on an ordinary boot");
+  }
+  {
+    // Day names: three letters or the full name, nothing else.
+    uint8_t m = 0;
+    CHECK(FeederCore::parse_days("monday, wed fridays", m) && m == 0x2A, "full, short and plural names");
+    CHECK(!FeederCore::parse_days("sunshine", m), "a word that only starts with a day name is refused");
+    CHECK(!FeederCore::parse_days("mo", m), "too short is refused");
+  }
+  {
+    // Summaries list events in time order, not slot order.
+    Flash flash;
+    auto f = boot(flash, T0);
+    enable_event(*f, 0, 0, Anchor::CLOCK, 20 * 60);
+    enable_event(*f, 0, 1, Anchor::CLOCK, 8 * 60);
+    CHECK(f->schedule_summary().rfind("A: 08:00 x1, 20:00 x1", 0) == 0, "time order");
+  }
+}
+
+static void test_settings_migration() {
+  current = "settings migration";
+  {
+    // Firmware 0.3.0 to 0.4.x saved one record (version 3) with the calibration inside: keep all of it.
+    Flash flash;
+    flash.have_v3 = true;
+    flash.v3.version = 3;
+    for (auto &p : flash.v3.profiles)
+      p.every_n = 1;
+    flash.v3.profiles[1].ev[2] = Event{1, static_cast<uint8_t>(Anchor::SUNSET), -30, 2, 0x3E};
+    flash.v3.profiles[1].every_n = 2;
+    flash.v3.cal[3] = 28;
+    flash.v3.cal[5] = -10;
+    flash.v3.latitude = 51.5f;
+    flash.v3.longitude = -0.13f;
+    flash.v3.min_gap_s = 90;
+    flash.v3.portion_gap_s = 5;
+    flash.v3.reload_pause_min = 0;
+    flash.v3.refill_interval_days = 3;
+    flash.v3.daily_cap = 3;
+    flash.v3.max_portions_cmd = 1;
+    flash.v3.active_profile = 1;
+    flash.v3.scheduler_enabled = 1;
+    flash.v3.min_pulse_us = 637;
+    flash.v3.max_pulse_us = 2675;
+    auto f = boot(flash, T0);
+    const Event &e = f->cfg.profiles[1].ev[2];
+    CHECK(e.enabled && e.anchor == static_cast<uint8_t>(Anchor::SUNSET) && e.offset_min == -30 && e.portions == 2 &&
+              e.days == 0x3E,
+          "event migrated");
+    CHECK(f->cfg.profiles[1].every_n == 2 && f->cfg.active_profile == 1 && f->cfg.daily_cap == 3 &&
+              f->cfg.min_gap_s == 90 && f->cfg.latitude == 51.5f,
+          "profile and guard settings migrated");
+    CHECK(f->calib.offsets[3] == 28 && f->calib.offsets[5] == -10 && f->min_pulse_us() == 637 &&
+              f->max_pulse_us() == 2675,
+          "calibration migrated");
+    f->advance(3000);
+    CHECK(flash.have_settings && flash.settings.version == SETTINGS_VERSION && flash.have_calibration &&
+              flash.calibration.min_pulse_us == 637,
+          "saved in the new format");
+    flash.have_v3 = false;  // (the old record would still be there; it is ignored once current settings exist)
+    auto g = boot(flash, T0 + 60);
+    CHECK(g->cfg.profiles[1].ev[2].offset_min == -30 && g->calib.offsets[3] == 28, "and loads from it next boot");
+  }
+  {
+    // A future settings change: settings unreadable, calibration record intact -> calibration survives.
+    Flash flash;
+    {
+      auto f = boot(flash, T0);
+      f->set_calibration_offset_at(2, 33);
+      f->set_pulse_range(640, 2600);
+      f->save_calibration();
+    }
+    flash.settings.version = 999;  // pretend the layout changed
+    auto g = boot(flash, T0 + 60);
+    CHECK(g->calib.offsets[2] == 33 && g->min_pulse_us() == 640, "calibration kept when settings are reset");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -636,6 +763,8 @@ int main() {
   test_cap_warning_and_edited_summary();
   test_needs_food();
   test_polar_fallback();
+  test_review_fixes();
+  test_settings_migration();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

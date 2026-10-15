@@ -14,10 +14,39 @@
 #include "esphome/components/output/float_output.h"
 #include "esphome/components/time/real_time_clock.h"
 
+#include <cmath>
+#include <string>
+
 #include "feeder_core.h"
 
 namespace esphome {
 namespace precision_feeder {
+
+// ---- Publishing entity states only when they change ---------------------------------------------------
+// The YAML packages refresh their entities from one interval each and call these, so Home Assistant, the web UI
+// and the log only see real changes (template entities would otherwise republish the same value every poll).
+// They take any ESPHome entity with the matching `state` / publish_state(), so this header needs no entity headers.
+
+template<typename E> void publish_number(E *e, float v) {
+  if (e->has_state() && (e->state == v || (std::isnan(e->state) && std::isnan(v))))
+    return;
+  e->publish_state(v);
+}
+template<typename E> void publish_text(E *e, const std::string &v) {
+  if (e->has_state() && e->state == v)
+    return;
+  e->publish_state(v);
+}
+template<typename E> void publish_bool(E *e, bool v) {
+  if (e->has_state() && e->state == v)
+    return;
+  e->publish_state(v);
+}
+template<typename E> void publish_option(E *e, const std::string &v) {
+  if (e->has_state() && e->current_option() == v)
+    return;
+  e->publish_state(v);
+}
 
 class PrecisionFeeder : public Component, public FeederCore {
  public:
@@ -45,12 +74,14 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_servo_write(float angle_degrees) override;
   void hal_servo_release() override;
   void hal_save_settings(const Settings &settings, bool flush) override;
+  void hal_save_calibration(const Calibration &calibration, bool flush) override;
   void hal_save_state(const State &state, bool flush) override;
   void hal_log(LogLevel level, const char *message) override;
 
   output::FloatOutput *output_{nullptr};
   time::RealTimeClock *time_{nullptr};
   ESPPreferenceObject pref_settings_;
+  ESPPreferenceObject pref_calibration_;
   ESPPreferenceObject pref_state_;
 };
 

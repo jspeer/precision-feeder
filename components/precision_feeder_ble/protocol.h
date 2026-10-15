@@ -445,6 +445,10 @@ class Session {
 
   /// Handle AUTH. Returns RES_OK, or RES_NOT_AUTHORIZED with `detail` set. After a failure the caller must issue a
   /// new nonce (start()), and further attempts are refused for RETRY_DELAY_MS.
+  ///
+  /// A valid AUTH on a session that is already authenticated (a retry, or a replay of the same bytes: the nonce has
+  /// not changed, so the proof is still valid) is answered OK and changes nothing. In particular the last accepted
+  /// sequence number never moves backwards, or writes already executed in this session would count as new again.
   uint8_t authenticate(uint8_t seq, const uint8_t *proof, size_t n, uint64_t now_ms, uint8_t &detail) {
     detail = 0;
     if (now_ms < this->locked_until_ms_) {
@@ -459,6 +463,8 @@ class Session {
       detail = AUTH_DETAIL_BAD_PROOF;
       return RES_NOT_AUTHORIZED;
     }
+    if (this->authenticated_)
+      return RES_OK;  // already authenticated with this nonce: nothing to do
     crypto::session_key(this->key_, this->nonce_, this->session_);
     this->authenticated_ = true;
     this->last_seq_ = seq;

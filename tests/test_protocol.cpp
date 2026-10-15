@@ -387,6 +387,16 @@ int main() {
           "the same seq again is stale (a retry is answered from the retry cache instead)");
     CHECK(s.check(CHANNEL_COMMAND, w, 8, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_TOO_SHORT,
           "too short for a tag");
+    // Repeating a valid AUTH (a retry, or a replay of the same bytes) must not rewind the sequence number, or the
+    // FEED already accepted with seq 5 would count as new again.
+    CHECK(s.authenticate(1, proof, sizeof(proof), 6000, detail) == RES_OK, "repeated AUTH is answered OK");
+    CHECK(s.authenticated() && s.last_seq() == 5, "and changes nothing: last seq stays 5");
+    CHECK(s.check(CHANNEL_COMMAND, w, 11, detail) == RES_NOT_AUTHORIZED && detail == AUTH_DETAIL_STALE_SEQ,
+          "the FEED from before the repeated AUTH is still stale, so it cannot execute twice");
+    uint8_t w6[12] = {6, 0x01, 0x01};
+    write_tag(ks, CHANNEL_COMMAND, w6, 3, w6 + 3);
+    CHECK(s.check(CHANNEL_COMMAND, w6, 11, detail) == RES_OK, "new writes continue from seq 6");
+
     uint8_t other[NONCE_SIZE] = {};
     s.start(other);
     CHECK(!s.authenticated() && s.check(CHANNEL_COMMAND, w, 11, detail) == RES_NOT_AUTHORIZED,

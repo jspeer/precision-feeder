@@ -70,7 +70,11 @@ substitutions.
   web UI) must compile out cleanly.
 - Keep the BLE protocol backwards compatible. Changing a packet layout or an
   opcode means bumping the protocol version and updating docs/PROTOCOL.md.
-- Bump the firmware version (`major.minor.revision`) when behaviour changes.
+- Bump the firmware version (`major.minor.revision`) when behaviour changes, and
+  add the change to CHANGELOG.md. Record hardware results in docs/BENCH.md.
+- A saved record's layout (Settings, Calibration, State in `feeder_core.h`) only
+  changes with a new version, a new preference key and a migration from the old
+  layout. Never let an update silently discard a user's settings or calibration.
 - No secrets, WiFi credentials, API keys or personal data in the repo. Use
   `!secret` and keep `secrets.yaml` out of version control.
 - Generic naming only. No references to any particular user's home setup.
@@ -82,12 +86,13 @@ substitutions.
   ESPHome docs and, where relevant, real hardware before being relied on.
 - Run the host tests after touching the feeder logic, the protocol or the Python
   client. With any C++17 compiler, from `tests/`:
-  `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_core.cpp`,
+  `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`; and
   `python3 -m unittest test_precision_feeder_ble` in `tools/`. The C++ and Python
   protocol tests share golden byte vectors; change them together.
-- Feeder logic belongs in `FeederCore` (`feeder_core.*`), which must stay free of
+- Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
+  `feeder_schedule.cpp` and `feeder_text.cpp`), which must stay free of
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
   `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.
@@ -103,11 +108,13 @@ substitutions.
 ## Layout
 
 ```
-README.md  LICENSE  DESIGN.md  AGENTS.md
-docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md
-components/   precision_feeder/ (feeder_core: tray, guard, scheduler; calendar.h and solar.h,
-              pure and host-tested; precision_feeder: ESPHome adapter)
-              and precision_feeder_ble/ (optional BLE protocol; protocol.h is pure and host-tested)
+README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
+docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md
+components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
+              scheduler and projection; feeder_text.cpp editor and status texts; calendar.h and
+              solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
+              and precision_feeder_ble/ (optional BLE protocol; protocol.h and crypto.h are pure and
+              host-tested)
 packages/     reusable YAML packages
 examples/     basic.yaml, ble.yaml
 tests/        host-side C++ tests (test_core.cpp, test_logic.cpp, test_protocol.cpp)

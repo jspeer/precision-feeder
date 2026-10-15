@@ -127,6 +127,19 @@ class GoldenVectors(unittest.TestCase):
         self.assertLessEqual(1 + len(pf.profile_event(0, 0, True, "clock", 0, 1)) + pf.TAG_SIZE, 20)
         self.assertLessEqual(len(pf.command(1, pf.OP_AUTH, bytes(pf.PROOF_SIZE))), 20)
 
+    def test_event_and_day_parsing(self):
+        self.assertEqual(pf.parse_event_time("clock", "08:30"), 510)
+        self.assertEqual(pf.parse_event_time("sunset", "-00:30"), -30)
+        self.assertEqual(pf.parse_event_time("sunrise", "+90"), 90)
+        with self.assertRaises(ValueError):
+            pf.parse_event_time("clock", "+01:00")
+        with self.assertRaises(ValueError):
+            pf.parse_event_time("sunset", "+13:00")
+        self.assertEqual(pf.parse_day_list("weekdays"), 0x3E)
+        self.assertEqual(pf.parse_day_list("mon,wed fri"), 0x2A)
+        ev = {"event": 0, "enabled": True, "anchor": "sunset", "offset_min": -30, "portions": 2, "days": 0x3E}
+        self.assertEqual(pf.describe_event(ev), "event 1: on  sunset-00:30 x2 (mon,tue,wed,thu,fri)")
+
     def test_uuids_follow_the_base(self):
         self.assertEqual(pf.SERVICE_UUID, "02dd1dd9-ba75-4bbc-bdea-306d21010001")
         self.assertEqual(pf.EVENT_LOG_UUID, "02dd1dd9-ba75-4bbc-bdea-306d21010009")

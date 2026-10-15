@@ -1,0 +1,396 @@
+// Precision Feeder core: local time, the scheduler (profiles, sun events, one-shots) and the projection.
+//
+// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Designed and written with the assistance of an AI (Anthropic's Claude);
+// reviewed by a human, but it may still contain mistakes.
+#include "feeder_internal.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
+namespace esphome {
+namespace precision_feeder {
+
+// ---------------------------------------------------------------------------------------------
+// Local time helpers
+// ---------------------------------------------------------------------------------------------
+
+int64_t FeederCore::local_offset_s_(int64_t epoch) {
+  const LocalTime l = this->hal_local(epoch);
+  const int64_t local = static_cast<int64_t>(days_from_civil(l.year, l.month, l.day)) * 86400 + l.hour * 3600 +
+                        l.minute * 60 + l.second;
+  return local - epoch;
+}
+
+/// Epoch of a wall-clock moment: `minutes` after local midnight of day `day_no` (may be negative or past
+/// 1440). Going through local fields keeps events right on daylight-saving change days.
+int64_t FeederCore::wall_to_epoch_(int32_t day_no, int minutes) {
+  const int32_t extra = minutes >= 0 ? minutes / 1440 : -((-minutes + 1439) / 1440);
+  const int in_day = minutes - extra * 1440;
+  int y;
+  unsigned m, d;
+  civil_from_days(day_no + extra, y, m, d);
+  return this->hal_local_to_epoch(y, static_cast<int>(m), static_cast<int>(d), in_day / 60, in_day % 60);
+}
+
+int32_t FeederCore::today_() {
+  const LocalTime l = this->hal_local(this->hal_epoch());
+  return days_from_civil(l.year, l.month, l.day);
+}
+
+FeederCore::DayCtx FeederCore::make_day_(int32_t day_no) {
+  const int64_t hour = this->hal_epoch() / 3600;
+  if (hour != this->day_cache_hour_) {
+    for (auto &used : this->day_cache_used_)
+      used = false;
+    this->day_cache_hour_ = hour;
+  }
+  for (uint8_t i = 0; i < DAY_CACHE_SIZE; i++) {
+    if (this->day_cache_used_[i] && this->day_cache_[i].day_no == day_no)
+      return this->day_cache_[i];
+  }
+  DayCtx d;
+  d.day_no = day_no;
+  d.wday = weekday_from_days(day_no);
+  d.midnight = this->wall_to_epoch_(day_no, 0);
+  d.tz_min = static_cast<int>(this->local_offset_s_(this->wall_to_epoch_(day_no, 12 * 60)) / 60);
+  this->day_cache_[this->day_cache_next_] = d;
+  this->day_cache_used_[this->day_cache_next_] = true;
+  this->day_cache_next_ = (this->day_cache_next_ + 1) % DAY_CACHE_SIZE;
+  return d;
+}
+
+std::string FeederCore::format_local_(int64_t epoch, bool with_date) {
+  const LocalTime l = this->hal_local(epoch);
+  char buf[40];
+  if (with_date) {
+    const int wday = weekday_from_days(days_from_civil(l.year, l.month, l.day));
+    std::snprintf(buf, sizeof(buf), "%s %04d-%02d-%02d %02d:%02d", DAY_ABBR[wday], l.year, l.month, l.day, l.hour,
+                  l.minute);
+  } else {
+    std::snprintf(buf, sizeof(buf), "%02d:%02d", l.hour, l.minute);
+  }
+  return buf;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------------------------
+
+bool FeederCore::sun_cached_(const DayCtx &d, double &rise, double &set) {
+  for (auto &c : this->sun_cache_) {
+    if (c.day_no == d.day_no && c.tz_min == d.tz_min && c.lat == this->cfg.latitude && c.lon == this->cfg.longitude) {
+      rise = c.rise;
+      set = c.set;
+      return c.ok;
+    }
+  }
+  SunCache &c = this->sun_cache_[this->sun_cache_next_];
+  this->sun_cache_next_ = (this->sun_cache_next_ + 1) % DAY_CACHE_SIZE;
+  c.day_no = d.day_no;
+  c.tz_min = d.tz_min;
+  c.lat = this->cfg.latitude;
+  c.lon = this->cfg.longitude;
+  c.ok = sun_times(d.day_no, c.lat, c.lon, d.tz_min, c.rise, c.set);
+  rise = c.rise;
+  set = c.set;
+  return c.ok;
+}
+
+bool FeederCore::resolve_minutes_(const Event &e, const DayCtx &d, int &minutes) {
+  if (e.anchor == static_cast<uint8_t>(Anchor::CLOCK)) {
+    minutes = e.offset_min;
+    return true;
+  }
+  if (this->cfg.latitude == 0.0f && this->cfg.longitude == 0.0f)
+    return false;  // location not set: skipped (a setup mistake, reported in Faults)
+  const bool sunrise = e.anchor == static_cast<uint8_t>(Anchor::SUNRISE);
+  double rise, set;
+  double base;
+  if (this->sun_cached_(d, rise, set))
+    base = sunrise ? rise : set;
+  else
+    base = sunrise ? POLAR_SUNRISE_MIN : POLAR_SUNSET_MIN;  // no sunrise or sunset that day: fixed fallback
+  minutes = static_cast<int>(std::lround(base)) + e.offset_min;
+  return true;
+}
+
+bool FeederCore::day_active_(const Profile &p, const DayCtx &d) const {
+  if (p.fast_days & (1 << d.wday))
+    return false;
+  const int32_t n = std::max<int32_t>(1, p.every_n);
+  const int32_t anchor = p.anchor_day != 0 ? static_cast<int32_t>(p.anchor_day) : d.day_no;
+  const int32_t diff = d.day_no - anchor;
+  return ((diff % n) + n) % n == 0;
+}
+
+void FeederCore::on_time_valid_() {
+  const int32_t today = this->today_();
+  bool anchored = false;
+  for (auto &p : this->cfg.profiles) {
+    if (p.anchor_day == 0) {
+      p.anchor_day = static_cast<uint32_t>(today);
+      anchored = true;
+    }
+  }
+  // Feeds made before the clock was set count as happening now: the conservative choice for the daily cap.
+  const uint32_t now = static_cast<uint32_t>(this->hal_epoch());
+  for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
+    if (this->state_.hist_n[i] != 0 && this->state_.hist_ts[i] == 0)
+      this->state_.hist_ts[i] = now;
+  }
+  if (anchored)
+    this->cfg_changed();  // only then is there anything new to save
+  this->project_dirty_ = true;
+  this->save_state_(false);
+  this->log_(LogLevel::kInfo, "Clock is valid, scheduler running");
+}
+
+void FeederCore::schedule_tick_() {
+  const bool valid = this->time_valid();
+  if (valid && !this->was_time_valid_)
+    this->on_time_valid_();
+  this->was_time_valid_ = valid;
+  if (!valid) {
+    this->solar_fault_ = false;
+    this->polar_fallback_ = false;
+    return;
+  }
+
+  const int64_t now = this->hal_epoch();
+  if (this->state_.hold_until != 0 && this->state_.hold_until != HOLD_FOREVER &&
+      now >= static_cast<int64_t>(this->state_.hold_until)) {
+    this->state_.hold_until = 0;
+    this->save_state_(false);
+    this->project_dirty_ = true;
+    this->log_(LogLevel::kInfo, "Hold ended");
+  }
+  if (this->state_.reload_until != 0 && now >= static_cast<int64_t>(this->state_.reload_until)) {
+    this->state_.reload_until = 0;
+    this->save_state_(false);
+  }
+  this->update_solar_fault_();
+  if (this->project_dirty_ || this->hal_millis() - this->last_project_ > 60000)
+    this->project_();
+  this->fire_due_();
+}
+
+void FeederCore::update_solar_fault_() {
+  // Only meaningful while recurring events can actually run.
+  this->solar_fault_ = false;
+  this->polar_fallback_ = false;
+  if (!this->cfg.scheduler_enabled)
+    return;
+  const Profile &p = this->cfg.profiles[this->cfg.active_profile];
+  const DayCtx d = this->make_day_(this->today_());
+  if (!this->day_active_(p, d))
+    return;
+  for (const Event &ev : p.ev) {
+    if (!ev.enabled || ev.anchor == static_cast<uint8_t>(Anchor::CLOCK) || !(ev.days & (1 << d.wday)))
+      continue;
+    if (this->cfg.latitude == 0.0f && this->cfg.longitude == 0.0f) {
+      this->solar_fault_ = true;
+      return;
+    }
+    double rise, set;
+    if (!this->sun_cached_(d, rise, set))
+      this->polar_fallback_ = true;
+  }
+}
+
+static bool deferrable(Result r) { return r == Result::BUSY || r == Result::TOO_SOON; }
+
+void FeederCore::fire_due_() {
+  const int64_t now = this->hal_epoch();
+  const int32_t today = this->today_();
+  const bool held = this->hold_active() || this->reload_pause_active();
+  bool state_dirty = false;
+
+  // Recurring events: only while the scheduler is enabled.
+  if (this->cfg.scheduler_enabled) {
+    const uint8_t ap = this->cfg.active_profile;
+    Profile &p = this->cfg.profiles[ap];
+    // Yesterday is included because an event such as "sunset + 3 h" can land after midnight, and tomorrow because
+    // one such as "sunrise - 10 h" lands the evening before its day.
+    for (int back = 1; back >= -1; back--) {
+      const DayCtx d = this->make_day_(today - back);
+      if (!this->day_active_(p, d))
+        continue;
+      for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
+        const Event &ev = p.ev[e];
+        if (!ev.enabled || !(ev.days & (1 << d.wday)))
+          continue;
+        if (this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no))
+          continue;
+        int minutes;
+        if (!this->resolve_minutes_(ev, d, minutes))
+          continue;
+        const int64_t fire = this->wall_to_epoch_(d.day_no, minutes);
+        if (fire < 0 || now < fire)
+          continue;
+        uint8_t &pending = this->pending_[ap][e];
+        const bool pending_here = pending != NO_PENDING && this->pending_day_[ap][e] == d.day_no;
+        if (now >= fire + EVENT_WINDOW_S) {
+          // Window closed. If it was refused while open, report that once; otherwise it was simply missed.
+          if (pending_here) {
+            this->report_(Source::SCHEDULE, ev.portions, static_cast<Result>(pending));
+            this->state_.fired[ap][e] = static_cast<uint32_t>(d.day_no);
+            pending = NO_PENDING;
+            state_dirty = true;
+          }
+          continue;
+        }
+        if (held) {
+          pending = static_cast<uint8_t>(Result::HOLD);
+          this->pending_day_[ap][e] = d.day_no;
+          continue;
+        }
+        uint8_t portions = ev.portions;
+        const Result check = this->check_guard_(portions, Source::SCHEDULE);
+        if (deferrable(check)) {
+          // Try again next tick while the window is open, without reporting a refusal yet.
+          pending = static_cast<uint8_t>(check);
+          this->pending_day_[ap][e] = d.day_no;
+          continue;
+        }
+        this->request_feed(ev.portions, Source::SCHEDULE);  // reports the outcome, accepted or refused
+        this->state_.fired[ap][e] = static_cast<uint32_t>(d.day_no);
+        pending = NO_PENDING;
+        state_dirty = true;
+      }
+    }
+  }
+
+  // One-shot (calendar-style) feeds: independent of the scheduler switch.
+  bool cfg_dirty = false;
+  for (uint8_t i = 0; i < MAX_ONESHOTS; i++) {
+    OneShot &os = this->cfg.oneshots[i];
+    if (os.epoch == 0 || os.done)
+      continue;
+    const int64_t at = static_cast<int64_t>(os.epoch);
+    if (now < at)
+      continue;
+    uint8_t &pending = this->oneshot_pending_[i];
+    if (now >= at + EVENT_WINDOW_S) {
+      if (pending != NO_PENDING) {
+        this->report_(Source::ONE_SHOT, os.portions, static_cast<Result>(pending));
+        pending = NO_PENDING;
+      } else {
+        this->log_(LogLevel::kWarn, "One-shot feed at %s missed", this->format_local_(at).c_str());
+      }
+      os.done = 1;
+      cfg_dirty = true;
+      continue;
+    }
+    if (held) {
+      pending = static_cast<uint8_t>(Result::HOLD);
+      continue;
+    }
+    uint8_t portions = os.portions;
+    const Result check = this->check_guard_(portions, Source::ONE_SHOT);
+    if (deferrable(check)) {
+      pending = static_cast<uint8_t>(check);
+      continue;
+    }
+    this->request_feed(os.portions, Source::ONE_SHOT);
+    pending = NO_PENDING;
+    os.done = 1;
+    cfg_dirty = true;
+  }
+  if (state_dirty)
+    this->save_state_(false);
+  if (cfg_dirty)
+    this->cfg_changed();
+}
+
+void FeederCore::project_() {
+  this->project_dirty_ = false;
+  this->last_project_ = this->hal_millis();
+  this->next_event_epoch_ = 0;
+  this->next_event_portions_ = 0;
+  this->empty_on_epoch_ = 0;
+  this->runway_days_ = 255;
+  this->oversubscribed_ = false;
+  if (!this->time_valid())
+    return;
+
+  const int64_t now = this->hal_epoch();
+  const int32_t today = this->today_();
+
+  struct Item {
+    int64_t epoch;
+    uint8_t portions;
+  };
+  std::vector<Item> items;
+  items.reserve(64);
+  if (this->cfg.scheduler_enabled) {
+    const uint8_t ap = this->cfg.active_profile;
+    const Profile &p = this->cfg.profiles[ap];
+    for (int off = -1; off <= HORIZON_DAYS; off++) {
+      const DayCtx d = this->make_day_(today + off);
+      if (!this->day_active_(p, d))
+        continue;
+      for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
+        const Event &ev = p.ev[e];
+        if (!ev.enabled || !(ev.days & (1 << d.wday)))
+          continue;
+        // Each event feeds at most once per (anchor) day. One that already fed today and was then moved later
+        // in the day does not feed again until tomorrow, so it is not "next" either.
+        if (this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no))
+          continue;
+        int minutes;
+        if (!this->resolve_minutes_(ev, d, minutes))
+          continue;
+        const int64_t fire = this->wall_to_epoch_(d.day_no, minutes);
+        if (fire <= now)
+          continue;
+        if (this->state_.hold_until != 0 && fire < static_cast<int64_t>(this->state_.hold_until))
+          continue;
+        items.push_back({fire, ev.portions});
+      }
+    }
+  }
+  for (const OneShot &os : this->cfg.oneshots) {
+    if (os.epoch == 0 || os.done || static_cast<int64_t>(os.epoch) <= now)
+      continue;
+    if (this->state_.hold_until != 0 && os.epoch < this->state_.hold_until)
+      continue;
+    items.push_back({static_cast<int64_t>(os.epoch), os.portions});
+  }
+  std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) { return a.epoch < b.epoch; });
+
+  if (!items.empty()) {
+    this->next_event_epoch_ = items.front().epoch;
+    this->next_event_portions_ = items.front().portions;
+  }
+
+  const uint32_t remaining = this->remaining();
+  if (remaining == 0) {
+    this->runway_days_ = 0;
+    return;
+  }
+  uint32_t cumulative = 0;
+  uint32_t within_refill = 0;
+  const int64_t refill_end = now + static_cast<int64_t>(this->cfg.refill_interval_days) * 86400;
+  bool empty_found = false;
+  for (const Item &it : items) {
+    cumulative += it.portions;
+    if (it.epoch < refill_end)
+      within_refill += it.portions;
+    if (!empty_found && cumulative >= remaining) {
+      empty_found = true;
+      this->empty_on_epoch_ = it.epoch;
+      this->runway_days_ = static_cast<uint8_t>(std::min<int64_t>((it.epoch - now) / 86400, 254));
+    }
+  }
+  this->oversubscribed_ = within_refill > remaining;
+}
+
+}  // namespace precision_feeder
+}  // namespace esphome

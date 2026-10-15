@@ -17,49 +17,44 @@
 
 text_sensor:
   - platform: template
+    id: pf_edited_profile
     name: "Edited Profile"
     icon: mdi:calendar-edit
     # Summary of the profile chosen in "Edit Profile", marked [active] or [not active], with a
     # warning when its busiest day needs more portions than the Daily Portion Cap.
-    lambda: return id(feeder).edited_profile_summary();
-    update_interval: 2s
+    update_interval: never
 
 select:
   - platform: template
+    id: pf_edit_profile
     name: "Edit Profile"
     icon: mdi:pencil
     options: ["A", "B", "C"]
-    lambda: return std::string(1, (char) ('A' + id(feeder).editor_profile));
     set_action:
       - lambda: id(feeder).editor_profile = x[0] - 'A';
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
+    id: pf_edit_event
     name: "Edit Event"
     icon: mdi:pencil
     options: ["1", "2", "3", "4"]
-    lambda: return std::string(1, (char) ('1' + id(feeder).editor_event));
     set_action:
       - lambda: id(feeder).editor_event = x[0] - '1';
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
+    id: pf_event_anchor
     name: "Event Anchor"
     icon: mdi:weather-sunset
     options: ["clock", "sunrise", "sunset"]
-    lambda: |-
-      switch (id(feeder).edit_event().anchor) {
-        case 1: return std::string("sunrise");
-        case 2: return std::string("sunset");
-        default: return std::string("clock");
-      }
     set_action:
       - lambda: |-
           uint8_t a = 0;
           if (x == "sunrise") a = 1;
           else if (x == "sunset") a = 2;
           id(feeder).set_event_anchor(a);
-    update_interval: 2s
+    update_interval: never
 
 switch:
   - platform: template
@@ -77,26 +72,26 @@ switch:
 
 text:
   - platform: template
+    id: pf_event_time
     name: "Event Time"
     icon: mdi:clock-edit-outline
     mode: text
     min_length: 0
     max_length: 8
-    lambda: return id(feeder).event_time_text();
     set_action:
       - lambda: |-
           if (!id(feeder).set_event_time_text(x)) {
             ESP_LOGW("schedule_editor", "Event time '%s' not understood", x.c_str());
           }
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
+    id: pf_event_days
     name: "Event Days"
     icon: mdi:calendar-week
     mode: text
     min_length: 0
     max_length: 40
-    lambda: return precision_feeder::PrecisionFeeder::format_days(id(feeder).edit_event().days);
     set_action:
       - lambda: |-
           uint8_t mask;
@@ -106,16 +101,16 @@ text:
           } else {
             ESP_LOGW("schedule_editor", "Days '%s' not understood", x.c_str());
           }
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
+    id: pf_profile_fast_days
     name: "Profile Fast Days"
     icon: mdi:calendar-remove
     mode: text
     min_length: 0
     max_length: 40
     # Weekdays with no feeding at all in this profile (a "fasting day"). Same format as Event Days.
-    lambda: return precision_feeder::PrecisionFeeder::format_days(id(feeder).edit_profile().fast_days);
     set_action:
       - lambda: |-
           uint8_t mask;
@@ -125,40 +120,41 @@ text:
           } else {
             ESP_LOGW("schedule_editor", "Days '%s' not understood", x.c_str());
           }
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
+    id: pf_add_one_shot_feed
     name: "Add One-shot Feed"
     icon: mdi:calendar-plus
     mode: text
     min_length: 0
     max_length: 20
     # A single dated feed, local time: "2026-10-20 18:00". Uses "One-shot Portions".
-    lambda: return std::string("");
     set_action:
       - lambda: |-
           if (x.empty()) return;
           if (!id(feeder).add_oneshot(x, (uint8_t) id(oneshot_portions).state)) {
             ESP_LOGW("schedule_editor", "One-shot '%s' rejected (format YYYY-MM-DD HH:MM, in the future, list not full)", x.c_str());
           }
-    update_interval: 5s
+    update_interval: never
 
 number:
   - platform: template
+    id: pf_event_portions
     name: "Event Portions"
     icon: mdi:fish
     min_value: 1
     max_value: 6
     step: 1
     mode: box
-    lambda: return id(feeder).edit_event().portions;
     set_action:
       - lambda: |-
           id(feeder).edit_event().portions = (uint8_t) x;
           id(feeder).cfg_changed();
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
+    id: pf_profile_every_n_days
     name: "Profile Every N Days"
     icon: mdi:calendar-sync
     min_value: 1
@@ -166,12 +162,11 @@ number:
     step: 1
     mode: box
     # 1 = every day, 2 = every other day, and so on. The cycle starts on the day it was first set; use "Restart Cycle Today" to move it.
-    lambda: return id(feeder).edit_profile().every_n;
     set_action:
       - lambda: |-
           id(feeder).edit_profile().every_n = (uint8_t) x;
           id(feeder).cfg_changed();
-    update_interval: 2s
+    update_interval: never
 
   - platform: template
     id: oneshot_portions
@@ -196,3 +191,21 @@ button:
     icon: mdi:calendar-remove
     on_press:
       - lambda: id(feeder).clear_oneshots();
+
+# Publish the entities above only when their value changes (see packages/status.yaml).
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          static const char *const ANCHORS[3] = {"clock", "sunrise", "sunset"};
+          publish_text(id(pf_edited_profile), id(feeder).edited_profile_summary());
+          publish_option(id(pf_event_anchor), ANCHORS[id(feeder).edit_event().anchor % 3]);
+          publish_option(id(pf_edit_profile), std::string(1, (char) ('A' + id(feeder).editor_profile)));
+          publish_option(id(pf_edit_event), std::string(1, (char) ('1' + id(feeder).editor_event)));
+          publish_text(id(pf_event_time), id(feeder).event_time_text());
+          publish_text(id(pf_event_days), precision_feeder::PrecisionFeeder::format_days(id(feeder).edit_event().days));
+          publish_text(id(pf_profile_fast_days), precision_feeder::PrecisionFeeder::format_days(id(feeder).edit_profile().fast_days));
+          publish_text(id(pf_add_one_shot_feed), "");  // an input box: shown empty
+          publish_number(id(pf_event_portions), id(feeder).edit_event().portions);
+          publish_number(id(pf_profile_every_n_days), id(feeder).edit_profile().every_n);

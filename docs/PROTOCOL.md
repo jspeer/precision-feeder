@@ -95,6 +95,12 @@ After a failed AUTH the nonce changes (read Auth again), and AUTH is refused for
 one second. A disconnect ends the session; the next connection starts again at
 step 1.
 
+A valid AUTH on a connection that is already authenticated (a retry after a lost
+answer, or a replay of the same bytes) is answered OK and **changes nothing**: the
+session key, the last accepted sequence number and the retry cache stay as they
+are. (Firmware 0.4.0 to 0.4.1 reset the sequence number here, which could let a
+write already executed in the session run a second time; fixed in 0.5.0.)
+
 ### 3. Sign every write
 
 Every write after AUTH, to Command, Profile, Config or Calibration, is

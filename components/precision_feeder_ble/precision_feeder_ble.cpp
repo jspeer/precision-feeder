@@ -136,11 +136,15 @@ void PrecisionFeederBle::clear_reads_() {
 
 void PrecisionFeederBle::handle_auth_(uint8_t seq, const uint8_t *proof, size_t n, uint64_t now) {
   uint8_t detail = 0;
+  const bool was_authenticated = this->session_.authenticated();
   const uint8_t result = this->session_.authenticate(seq, proof, n, now, detail);
   if (result == proto::RES_OK) {
-    ESP_LOGI(TAG, "BLE client authenticated");
-    this->replay_.clear();
-    this->force_status_ = true;  // send fresh status straight away
+    // The retry cache is NOT cleared here: connect and disconnect already start every session with an empty one,
+    // and clearing it on a repeated AUTH would let a retried write execute a second time.
+    if (!was_authenticated) {
+      ESP_LOGI(TAG, "BLE client authenticated");
+      this->force_status_ = true;  // send fresh status straight away
+    }
   } else {
     ESP_LOGW(TAG, "BLE authentication refused (detail %u)", detail);
     if (detail == proto::AUTH_DETAIL_BAD_PROOF)
@@ -487,10 +491,10 @@ bool PrecisionFeederBle::get_config_(uint8_t key, int32_t &value) const {
       value = static_cast<int32_t>(std::lround(c.longitude * 100000.0f));
       return true;
     case CFG_MIN_PULSE_US:
-      value = c.min_pulse_us;
+      value = this->feeder_->min_pulse_us();
       return true;
     case CFG_MAX_PULSE_US:
-      value = c.max_pulse_us;
+      value = this->feeder_->max_pulse_us();
       return true;
     default:
       return false;
@@ -566,8 +570,8 @@ void PrecisionFeederBle::handle_config_(std::span<const uint8_t> d) {
     case CFG_MIN_PULSE_US:
     case CFG_MAX_PULSE_US: {
       // The pair must stay at least 500 us apart; the core checks it and moves the servo in calibration mode.
-      const uint16_t lo = key == CFG_MIN_PULSE_US ? static_cast<uint16_t>(v) : c.min_pulse_us;
-      const uint16_t hi = key == CFG_MAX_PULSE_US ? static_cast<uint16_t>(v) : c.max_pulse_us;
+      const uint16_t lo = key == CFG_MIN_PULSE_US ? static_cast<uint16_t>(v) : f.min_pulse_us();
+      const uint16_t hi = key == CFG_MAX_PULSE_US ? static_cast<uint16_t>(v) : f.max_pulse_us();
       if (f.set_pulse_range(lo, hi) != Result::OK) {
         this->respond_write_(OP_CONFIG_WRITE, RES_INVALID_ARG, key);
         return;
@@ -589,7 +593,7 @@ void PrecisionFeederBle::set_calibration_read_(uint8_t index) {
     return;
   uint8_t out[proto::CALIBRATION_SET_SIZE];
   out[0] = index;
-  proto::put_i16(out + 1, this->feeder_->cfg.cal[index]);
+  proto::put_i16(out + 1, this->feeder_->calib.offsets[index]);
   this->calibration_->set_value(to_vector(out, sizeof(out)));
 }
 
