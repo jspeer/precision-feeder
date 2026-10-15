@@ -94,23 +94,143 @@ function toastError(err) {
 }
 
 // ---- dialogs ----
-/** A modal question. body: text or nodes. Resolves true for OK, false for Cancel or Escape. */
-function confirmDialog({ title, body, ok = 'OK', cancel = 'Cancel', danger = false }) {
+/** Show a dialog whose form has buttons valued "ok" and "cancel"; resolve true for OK, false otherwise. Resolves on
+ *  the submit itself (and on Escape): browsers may hold back a dialog's "close" event while the page is not being
+ *  drawn (a hidden tab), so that event is only a fallback. validate() may return a message to keep it open. */
+function runDialog(dlg, form, validate, error) {
   return new Promise(resolve => {
-    const dlg = h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' },
-      h('form', { method: 'dialog' },
-        h('h2', { id: 'dlg-title' }, title),
-        h('div', { class: 'dialog-body' }, typeof body === 'string' ? h('p', {}, body) : body),
-        h('div', { class: 'dialog-actions' },
-          h('button', { value: 'cancel', class: 'btn' }, cancel),
-          h('button', { value: 'ok', class: danger ? 'btn btn-danger' : 'btn btn-primary' }, ok))));
-    dlg.addEventListener('close', () => {
-      resolve(dlg.returnValue === 'ok');
-      dlg.remove();
+    let done = false;
+    const finish = ok => {
+      if (done) return;
+      done = true;
+      if (dlg.open) dlg.close(ok ? 'ok' : 'cancel');
+      setTimeout(() => dlg.remove(), 0);
+      resolve(ok);
+    };
+    form.addEventListener('submit', ev => {
+      const ok = !!ev.submitter && ev.submitter.value === 'ok';
+      const message = ok && validate ? validate() : '';
+      ev.preventDefault();
+      if (message) {
+        setText(error, message);
+        return;
+      }
+      finish(ok);
     });
+    dlg.addEventListener('cancel', () => finish(false));
+    dlg.addEventListener('close', () => finish(dlg.returnValue === 'ok'));
     document.body.appendChild(dlg);
     dlg.showModal();
   });
+}
+
+/** A modal question. body: text or nodes. Resolves true for OK, false for Cancel or Escape. */
+function confirmDialog({ title, body, ok = 'OK', cancel = 'Cancel', danger = false }) {
+  const form = h('form', { method: 'dialog' },
+    h('h2', { id: 'dlg-title' }, title),
+    h('div', { class: 'dialog-body' }, typeof body === 'string' ? h('p', {}, body) : body),
+    h('div', { class: 'dialog-actions' },
+      h('button', { value: 'cancel', class: 'btn' }, cancel),
+      h('button', { value: 'ok', class: danger ? 'btn btn-danger' : 'btn btn-primary' }, ok)));
+  return runDialog(h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' }, form), form);
+}
+
+/** A modal form. body: nodes with the inputs. validate() returns an error message to keep it open, or ''.
+ *  Resolves true for OK (after validation), false for Cancel or Escape. */
+function formDialog({ title, body, ok = 'Save', cancel = 'Cancel', validate = () => '' }) {
+  const error = h('p', { class: 'dialog-error', role: 'alert' });
+  const form = h('form', { method: 'dialog' },
+    h('h2', { id: 'dlg-title' }, title),
+    h('div', { class: 'dialog-body dialog-form' }, body),
+    error,
+    h('div', { class: 'dialog-actions' },
+      h('button', { value: 'cancel', class: 'btn', formnovalidate: true }, cancel),
+      h('button', { value: 'ok', class: 'btn btn-primary' }, ok)));
+  // Enter in a field means OK (the browser would otherwise use the first button, Cancel).
+  form.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') {
+      ev.preventDefault();
+      form.requestSubmit(form.querySelector('button[value="ok"]'));
+    }
+  });
+  form.addEventListener('input', () => setText(error, ''));
+  return runDialog(h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' }, form), form, validate, error);
+}
+
+// ---- weekday chips (Monday first; names from the browser's locale; masks as the firmware: bit 0 = Sunday) ----
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+function weekdayName(day, style) {
+  return new Date(Date.UTC(2023, 0, 1 + day)).toLocaleDateString(undefined, { weekday: style, timeZone: 'UTC' });
+}
+
+/** Seven day chips for a weekday mask. Editable chips toggle; read the result from .mask. */
+function dayChips(mask, editable = false, label = 'Days') {
+  // Read-only chips are hidden from screen readers; the page states the days in words next to them.
+  const box = h('div', { class: editable ? 'chips chips-edit' : 'chips', role: editable ? 'group' : null,
+                         'aria-label': editable ? label : null, 'aria-hidden': editable ? null : 'true' });
+  box.mask = mask & 0x7f;
+  for (const day of WEEK_ORDER) {
+    const on = () => !!(box.mask & (1 << day));
+    const chip = h(editable ? 'button' : 'span', {
+      type: editable ? 'button' : null, class: 'chip', title: weekdayName(day, 'long'),
+      'aria-label': editable ? weekdayName(day, 'long') : null,
+      onclick: editable ? () => {
+        box.mask ^= 1 << day;
+        chip.classList.toggle('chip-on', on());
+        chip.setAttribute('aria-pressed', on() ? 'true' : 'false');
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      } : null,
+    }, weekdayName(day, 'narrow'));
+    chip.classList.toggle('chip-on', on());
+    if (editable) chip.setAttribute('aria-pressed', on() ? 'true' : 'false');
+    box.appendChild(chip);
+  }
+  return box;
+}
+
+/** Days in words: "Every day", "Weekdays", "Mon, Wed, Fri", "No days". */
+function daysWords(mask) {
+  mask &= 0x7f;
+  if (mask === 0x7f) return 'Every day';
+  if (mask === 0) return 'No days';
+  if (mask === 0x3e) return 'Weekdays';
+  if (mask === 0x41) return 'Weekends';
+  return WEEK_ORDER.filter(d => mask & (1 << d)).map(d => weekdayName(d, 'short')).join(', ');
+}
+
+/** A row of choices; .value is the chosen one. options: [[value, label], ...]. */
+function segmented(options, value, label, onchange) {
+  const box = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': label });
+  box.value = value;
+  const buttons = options.map(([v, text]) => h('button', { type: 'button', role: 'radio', class: 'seg',
+    'aria-checked': v === value ? 'true' : 'false', onclick: () => {
+      box.value = v;
+      buttons.forEach((b, i) => b.setAttribute('aria-checked', options[i][0] === v ? 'true' : 'false'));
+      if (onchange) onchange(v);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    } }, text));
+  append(box, buttons);
+  return box;
+}
+
+/** A minus / value / plus stepper between lo and hi; .value is the number. */
+function stepper(value, lo, hi, label) {
+  const shown = h('span', { class: 'stepper-value', 'aria-live': 'polite' }, String(value));
+  const box = h('div', { class: 'stepper', role: 'group', 'aria-label': label });
+  box.value = value;
+  const set = v => {
+    box.value = Math.min(hi, Math.max(lo, v));
+    setText(shown, String(box.value));
+  };
+  append(box, h('button', { type: 'button', class: 'btn btn-small', 'aria-label': `${label}: less`, onclick: () => set(box.value - 1) }, '\u2212'),
+         shown, h('button', { type: 'button', class: 'btn btn-small', 'aria-label': `${label}: more`, onclick: () => set(box.value + 1) }, '+'));
+  return box;
+}
+
+/** A labelled field for dialogs. */
+function field(label, control, hint) {
+  return h('div', { class: 'form-field' }, h('span', { class: 'form-label' }, label), control,
+           hint ? h('span', { class: 'hint' }, hint) : null);
 }
 
 // ---- layout helpers ----

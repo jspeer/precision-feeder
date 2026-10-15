@@ -45,6 +45,30 @@ const api = {
     });
   },
 
+  /** Resolve true once done() holds (now, or after one of `ids` changes), false after `ms` (never rejects).
+   *  done() is checked first: the device's update can arrive before the request that caused it has returned. */
+  waitForChange(ids, done, ms = 3500) {
+    return new Promise(resolve => {
+      if (done()) {
+        resolve(true);
+        return;
+      }
+      const timer = setTimeout(() => { unwatch(); resolve(false); }, ms);
+      const unwatch = store.watch(id => {
+        if (ids.includes(id) && done()) {
+          clearTimeout(timer);
+          unwatch();
+          resolve(true);
+        }
+      });
+    });
+  },
+
+  /** Turn a switch on or off and wait until the device reports it. */
+  turnAndConfirm(id, on, ms = 4000) {
+    return this.turn(id, on).then(() => this.waitFor(id, x => x.value === on, ms));
+  },
+
   /** Set a number, select or text, then wait until the device reports the new value. */
   setAndConfirm(id, value, ms = 4000) {
     const e = store.get(id);

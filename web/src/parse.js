@@ -135,3 +135,52 @@ function parseHold(text) {
   const until = parseLocalDateTime(t.replace(/^until /, ''));
   return until ? { until, note: '' } : { until: null, note: t };
 }
+
+const ANCHORS = { c: 'clock', r: 'sunrise', s: 'sunset' };
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];  // bit 0 = Sunday, as the firmware
+
+/** Schedule Data: "1|<A>|<B>|<C>", each profile "every_n,fast,ev1,ev2,ev3,ev4", each event
+ *  "<0|1><c|r|s><offset>/<portions>/<days>" (DESIGN.md section 7) -> [{everyN, fast, events: [{enabled, anchor,
+ *  offset, portions, days}]}], or null if it is not that format (a newer version, say). */
+function parseScheduleData(text) {
+  const parts = String(text || '').trim().split('|');
+  if (parts[0] !== '1' || parts.length < 2) return null;
+  const profiles = [];
+  for (const p of parts.slice(1)) {
+    const f = p.split(',');
+    if (f.length !== 6) return null;
+    const events = [];
+    for (const ev of f.slice(2)) {
+      const m = /^([01])([crs])(-?\d+)\/(\d+)\/([0-9a-f]{2})$/.exec(ev);
+      if (!m) return null;
+      events.push({ enabled: m[1] === '1', anchor: ANCHORS[m[2]], offset: +m[3], portions: +m[4], days: parseInt(m[5], 16) });
+    }
+    profiles.push({ everyN: +f[0], fast: parseInt(f[1], 16), events });
+  }
+  return profiles;
+}
+
+/** A weekday mask as the firmware's Event Days text: "all", "none" or "sun,mon,...". */
+function daysText(mask) {
+  mask &= 0x7f;
+  if (mask === 0x7f) return 'all';
+  if (mask === 0) return 'none';
+  return DAY_KEYS.filter((_, i) => mask & (1 << i)).join(',');
+}
+
+/** An event's time as the firmware's Event Time text: "08:30" (clock) or "+01:30" / "-00:45" (sun). */
+function eventTimeText(anchor, offset) {
+  const a = Math.abs(offset), hh = String(Math.floor(a / 60)).padStart(2, '0'), mm = String(a % 60).padStart(2, '0');
+  return anchor === 'clock' ? `${hh}:${mm}` : `${offset < 0 ? '-' : '+'}${hh}:${mm}`;
+}
+
+/** One-shot Feeds: "Thu 2026-10-20 18:00 x1; ..." -> [{when: parts, portions}]. */
+function parseOneshots(text) {
+  const out = [];
+  for (const part of parseList(text)) {
+    const m = /^(.*) x(\d+)$/.exec(part);
+    const when = m && parseLocalDateTime(m[1]);
+    if (when) out.push({ when, portions: +m[2] });
+  }
+  return out;
+}

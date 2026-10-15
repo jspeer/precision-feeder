@@ -1,7 +1,8 @@
 # Scheduling
 
-How to set up the feeder's on-board schedule from Home Assistant (or the web UI,
-which shows the same controls). The schedule runs on the feeder itself: once it is
+How to set up the feeder's on-board schedule from Home Assistant. The built-in web app
+(firmware 1.1.0 and later) has a Schedule page that does the same with an editor per
+event: it sets the fields below for you, in this order, and checks the result. The schedule runs on the feeder itself: once it is
 set, feeding carries on with no Home Assistant and no network, as long as the
 clock is set.
 

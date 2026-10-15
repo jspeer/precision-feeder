@@ -1,20 +1,6 @@
 // Dashboard: the tray, the next feed, Feed now, today's feeds, status and the everyday actions. Everything shown
 // is what the device reports; Feed now asks the device, whose guard decides, and reports the device's answer.
 
-/** Resolve true as soon as any of `ids` changes so that done() holds, false after `ms`. */
-function waitForChange(ids, done, ms) {
-  return new Promise(resolve => {
-    const timer = setTimeout(() => { unwatch(); resolve(false); }, ms);
-    const unwatch = store.watch(id => {
-      if (ids.includes(id) && done()) {
-        clearTimeout(timer);
-        unwatch();
-        resolve(true);
-      }
-    });
-  });
-}
-
 /** The tray as seven slots on an arc: closed slot 0, slots already used, slots with food, and the current one. */
 function trayDial(position, unknown) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -250,7 +236,7 @@ PAGES.dashboard = {
     }
     // The device reports its answer as Last Result (a refusal) or a new Recent Feeds entry (a feed). A refusal
     // repeated unchanged produces no update, so after a while its current Last Result is the answer.
-    await waitForChange([E.lastResult, E.recentFeeds],
+    await api.waitForChange([E.lastResult, E.recentFeeds],
       () => store.text(E.lastResult) !== before[0] || store.text(E.recentFeeds) !== before[1], 3500);
     const result = store.text(E.lastResult);
     if (store.text(E.recentFeeds) !== before[1] || result === 'ok') toast(portions > 1 ? `Feeding ${portions} portions` : 'Feeding one portion', 'ok');

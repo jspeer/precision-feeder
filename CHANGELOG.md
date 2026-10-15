@@ -38,7 +38,17 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
     - today's feeds, status, recent feeds;
     - hold with durations, resume, tray reload, and stop while moving.
   - Recovering the tray position after a power cut: pick the slot you see, from the banner.
-  - The Schedule, Configuration, Maintenance and Bluetooth pages follow.
+  - Schedule:
+    - all three profiles at a glance, read from Schedule Data, so looking never moves the editor that Home
+      Assistant shares;
+    - make a profile active; the schedule on or off;
+    - an event editor (clock time or sunrise / sunset with an offset, portions, days, on or off);
+    - cadence and fast days, with "start the cycle today";
+    - one-shot feeds in the feeder's own time, and clearing them.
+    Each save writes the editor fields in the documented order, each confirmed by the device. A live event is
+    switched off before it moves, so a half-applied change can never fire. The end result is checked against
+    Schedule Data.
+  - The Configuration, Maintenance and Bluetooth pages follow.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,

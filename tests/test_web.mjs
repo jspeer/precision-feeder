@@ -13,7 +13,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8');
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
-  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold };`, ctx);
+  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -108,4 +108,38 @@ test('Hold', () => {
   assert.deepEqual(plain(P.parseHold('until cancelled')), { until: null, note: '' });
   assert.equal(P.parseHold('until Sun 2026-10-18 14:28').until.hour, 14);
   assert.equal(P.parseHold('active (clock not set)').note, 'active (clock not set)');
+});
+
+test('Schedule Data', () => {
+  const s = P.parseScheduleData('1|1,01,1c510/1/7e,1c1050/2/7e,0s-30/1/7f,0c720/1/7f|14,41,0c480/1/7f,0c720/1/7f,1s-720/6/3e,0c1200/1/7f|1,00,1r30/1/7f,1c720/1/7f,1s-60/1/7f,0c720/1/7f');
+  assert.equal(s.length, 3);
+  assert.equal(s[0].everyN, 1);
+  assert.equal(s[0].fast, 1);
+  assert.deepEqual(plain(s[0].events[1]), { enabled: true, anchor: 'clock', offset: 1050, portions: 2, days: 0x7e });
+  assert.deepEqual(plain(s[1].events[2]), { enabled: true, anchor: 'sunset', offset: -720, portions: 6, days: 0x3e });
+  assert.equal(s[1].everyN, 14);
+  assert.equal(s[2].events[0].anchor, 'sunrise');
+  assert.equal(P.parseScheduleData('2|...'), null);
+  assert.equal(P.parseScheduleData('1|1,00,0c480/1/7f'), null);
+  assert.equal(P.parseScheduleData(''), null);
+});
+
+test('event texts the firmware reads back the same way', () => {
+  assert.equal(P.daysText(0x7f), 'all');
+  assert.equal(P.daysText(0), 'none');
+  assert.equal(P.daysText(0x2a), 'mon,wed,fri');
+  assert.equal(P.daysText(0x41), 'sun,sat');
+  assert.equal(P.eventTimeText('clock', 510), '08:30');
+  assert.equal(P.eventTimeText('clock', 0), '00:00');
+  assert.equal(P.eventTimeText('sunset', -30), '-00:30');
+  assert.equal(P.eventTimeText('sunrise', 90), '+01:30');
+  assert.equal(P.eventTimeText('sunrise', 0), '+00:00');
+});
+
+test('One-shot Feeds', () => {
+  const o = P.parseOneshots('Tue 2026-10-20 18:00 x1; Wed 2026-10-21 07:30 x2');
+  assert.equal(o.length, 2);
+  assert.equal(o[1].portions, 2);
+  assert.equal(o[1].when.time, '07:30');
+  assert.deepEqual(plain(P.parseOneshots('none')), []);
 });

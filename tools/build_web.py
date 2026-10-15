@@ -34,6 +34,7 @@ SOURCES = [
     "ui.js",         # DOM helpers, icons, dialogs, toasts, form controls
     "banners.js",    # the warning banner
     "pages/dashboard.js",
+    "pages/schedule.js",
     "pages/diagnostics.js",
     "app.js",        # the shell: header, tabs, routing; starts everything
 ]
