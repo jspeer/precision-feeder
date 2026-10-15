@@ -8,6 +8,8 @@ servo-driven tray.
 **The feeder to print:** <https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2>
 (by FlyingGyroscope; the model is CC BY-NC-SA 4.0, see [Licence](#licence)).
 
+**This firmware:** <https://github.com/jspeer/precision-feeder>
+
 It runs the feeder on its own: the schedule lives on the device, so the fish
 are fed with no Home Assistant, no internet and no app, once the clock is set.
 On top of that you get full **Home Assistant** control, a **web dashboard**, and
@@ -147,60 +149,68 @@ you switch a feature on or off by adding or removing one line.
 - [`ble.yaml`](examples/ble.yaml): the same plus the BLE interface and
   diagnostics, for a feeder driven by a PLC or other BLE controller.
 
-**Enabling or disabling a package** is one line in the `packages:` section:
+**Where your configuration lives.** Clone this repository into your ESPHome
+config folder (in Home Assistant: `/config/esphome/`) so it sits there as
+`precision-feeder/`, and copy an example up next to it:
+
+```
+/config/esphome/
+  precision-feeder/          <- this repository (update it with git pull)
+  precision-feeder.yaml      <- your copy of examples/ble.yaml or basic.yaml
+  secrets.yaml               <- your keys (see examples/secrets.example.yaml)
+```
+
+Your copy reads the components and packages from the clone, so updating the
+repository never touches your file or your secrets.
+
+**Enabling or disabling a package** is one line in the `packages:` section of
+your copy:
 
 ```yaml
 packages:
-  core: !include ../packages/core.yaml
+  core: !include precision-feeder/packages/core.yaml
   # ...
-  button: !include ../packages/button.yaml        # enabled
-  # time_ha: !include ../packages/time_homeassistant.yaml   # disabled (commented out)
+  button: !include precision-feeder/packages/button.yaml        # enabled
+  # time_ha: !include precision-feeder/packages/time_homeassistant.yaml   # disabled (commented out)
 ```
 
-**Keep your own settings separate (recommended).** Rather than editing an
-example, make a file next to it, for example `examples/local.yaml` (any
-`examples/local*.yaml` is ignored by git), that includes an example and adds
-your packages and settings on top:
-
-```yaml
-# examples/local.yaml: this feeder's own build
-packages:
-  base: !include ble.yaml                       # or basic.yaml
-  button: !include ../packages/button.yaml      # extra packages
-
-substitutions:                                  # your settings (see below)
-  timezone: Europe/London
-```
-
-Values in your file override the ones from the packages, and updating the
-repository never touches your file.
+Settings (below) go in your copy's `substitutions:`, or anywhere after the
+packages, where they override what the packages set.
 
 ## Setting it up
 
 1. **Install ESPHome 2026.9.1** (the version this was built and tested with;
-   newer versions may need small fixes). It needs Python 3.12 to 3.14:
+   newer versions may need small fixes). Use the ESPHome add-on in Home
+   Assistant, or on a computer (Python 3.12 to 3.14):
    ```sh
    python3 -m venv .venv
    .venv/bin/pip install esphome==2026.9.1
    ```
-   Or use the ESPHome add-on in Home Assistant.
-2. **Get this repository** onto the machine that builds the firmware.
-3. **Secrets.** Copy `examples/secrets.example.yaml` to `examples/secrets.yaml`
-   (ignored by git) and fill it in: WiFi name and password, a password for the
-   fallback hotspot, and an API key. Make the key with
-   `openssl rand -base64 32`. Keep it: Home Assistant asks for it. With the BLE
-   package, also a `ble_key`, made the same way (a different one): your BLE
-   client needs it.
-4. **Your configuration.** Make `examples/local.yaml` as shown above. At least
-   set `timezone` (an IANA name such as `Europe/London`, or a POSIX string such
-   as `<-06>6` for a fixed UTC−6).
-5. **First flash over USB.** The S3-Zero has no USB-serial chip: hold **BOOT**,
-   plug in the USB-C cable, release BOOT, then
+2. **Get this repository** into your ESPHome config folder (the add-on's
+   folder is `/config/esphome/`):
    ```sh
-   .venv/bin/esphome run examples/local.yaml --device /dev/ttyACM0
+   cd /config/esphome
+   git clone https://github.com/jspeer/precision-feeder.git
    ```
-   (macOS: `/dev/cu.usbmodem…`; Windows: `COM3` or similar). The first build
-   downloads the toolchain (1 to 2 GB). Later updates go over WiFi:
+   Later, `git pull` inside `precision-feeder/` updates it.
+3. **Secrets.** In the config folder (not in the clone), add the keys from
+   `precision-feeder/examples/secrets.example.yaml` to your `secrets.yaml`:
+   WiFi name and password, a password for the fallback hotspot, and an API
+   key. Make the key with `openssl rand -base64 32`. Keep it: Home Assistant
+   asks for it. With the BLE package, also a `ble_key`, made the same way (a
+   different one): your BLE client needs it.
+4. **Your configuration.** Copy `precision-feeder/examples/basic.yaml` (or
+   `ble.yaml`) into the config folder as, for example, `precision-feeder.yaml`.
+   At least set `timezone` (an IANA name such as `Europe/London`, or a POSIX
+   string such as `<-06>6` for a fixed UTC−6), and comment packages in or out.
+5. **First flash over USB.** The S3-Zero has no USB-serial chip: hold **BOOT**,
+   plug in the USB-C cable, release BOOT, then, from the config folder,
+   ```sh
+   esphome run precision-feeder.yaml --device /dev/ttyACM0
+   ```
+   (macOS: `/dev/cu.usbmodem…`; Windows: `COM3` or similar; in the add-on,
+   use Install → Plug into this computer). The first build downloads the
+   toolchain (1 to 2 GB). Later updates go over WiFi:
    `--device precision-feeder.local`.
 6. **Add it to Home Assistant.** It is usually discovered automatically
    (Settings → Devices & services). If it is on a different network segment,

@@ -24,6 +24,8 @@ framework, WiFi, API, web server and status LED all enabled.
 | v0.2.1, BLE + button + HA time + diagnostics | 1,300,123 B (70.9%) | 143,739 B (42.1%) |
 | v0.2.1 rebuilt on the dev machine, no BLE | 971,863 B (53.0%) | 112,223 B (32.8%) |
 | v0.2.1 rebuilt on the dev machine, BLE build | 1,297,611 B (70.7%) | 143,383 B (42.0%) |
+| v1.0.1, no BLE (`basic.yaml`) | 979,947 B (53.4%) | 115,055 B (33.7%) |
+| v1.0.1, BLE build (`ble.yaml`) | 1,309,291 B (71.4%) | 145,903 B (42.7%) |
 
 - **BLE costs about 318 KB of flash and about 31 KB of static RAM.**
 - **Flash is not a problem.** With BLE the app is 72% of its OTA slot, leaving
@@ -258,3 +260,15 @@ Flashed over WiFi: the board reports Firmware Version 1.0.0, Faults "none", tray
 loaded; BLE `selftest` 14/14. Builds: no warnings; flash 53.4% (no BLE) and
 71.4% (BLE) of the 1.8 MB app slot; static RAM 33.7% / 42.7%.
 
+## Firmware 1.0.1 on hardware (2026-10-15)
+
+Built from the new layout (the owner's config in the ESPHome config folder, next
+to the clone as `precision-feeder/`: `ble.yaml` plus the button package, the
+timezone `<-06>6` and the Home Assistant timezone pin) and flashed over WiFi:
+the board reports Firmware Version 1.0.1, Faults "none", tray loaded; BLE
+`selftest` 14/14 (settings read back unchanged: pulse 637 / 2675 us, offsets 0,
+-0.7, 0, +2.5, +3.3, +2.3, 0, daily cap 3). Builds of both examples in that
+layout: no warnings; flash 979,947 B (53.4%, no BLE) and 1,309,291 B (71.4%,
+BLE) of the 1.8 MB app slot; static RAM 33.7% / 42.7%, the same as 1.0.0. Not
+watched on hardware: the "Clock set by ..." lines now being DEBUG (they come
+once per 15-minute sync; the change is a log level only).

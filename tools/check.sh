@@ -37,10 +37,18 @@ if [ -z "$ESPHOME" ]; then
   echo "== ESPHome not found: skipping config validation"
   exit 0
 fi
-if [ ! -f examples/secrets.yaml ]; then
+# The examples are meant to sit in an ESPHome config folder next to a clone of this repository named
+# precision-feeder/ (see the README), so validate them in exactly that layout, in a temporary folder.
+CONFIG="$OUT/config"
+mkdir -p "$CONFIG"
+ln -s "$(pwd)" "$CONFIG/precision-feeder"
+cp examples/basic.yaml examples/ble.yaml "$CONFIG/"
+if [ -f examples/secrets.yaml ]; then
+  cp examples/secrets.yaml "$CONFIG/secrets.yaml"
+else
   # Throwaway values, only so the examples validate (CI has no secrets).
-  echo "== examples/secrets.yaml missing: writing throwaway values for validation"
-  cat > examples/secrets.yaml <<SECRETS
+  echo "== no examples/secrets.yaml: using throwaway values for validation"
+  cat > "$CONFIG/secrets.yaml" <<SECRETS
 wifi_ssid: "ci"
 wifi_password: "ci-password"
 fallback_ap_password: "ci-fallback-password"
@@ -48,14 +56,14 @@ api_encryption_key: "$(head -c 32 /dev/urandom | base64)"
 ble_key: "$(head -c 32 /dev/urandom | base64)"
 SECRETS
 fi
-for f in examples/basic.yaml examples/ble.yaml; do
-  echo "== esphome config $f"
-  "$ESPHOME" config "$f" >/dev/null
+for f in basic.yaml ble.yaml; do
+  echo "== esphome config examples/$f (as a copy in a config folder)"
+  "$ESPHOME" config "$CONFIG/$f" >/dev/null
 done
 if [ "${1:-}" = "--compile" ]; then
-  for f in examples/basic.yaml examples/ble.yaml; do
-    echo "== esphome compile $f"
-    "$ESPHOME" compile "$f" 2>&1 | tee "$OUT/compile.log" | grep -E "^(RAM|Flash):" || true
+  for f in basic.yaml ble.yaml; do
+    echo "== esphome compile examples/$f"
+    "$ESPHOME" compile "$CONFIG/$f" 2>&1 | tee "$OUT/compile.log" | grep -E "^(RAM|Flash):" || true
     if grep -q "warning:" "$OUT/compile.log"; then
       echo "compiler warnings in $f:"
       grep "warning:" "$OUT/compile.log"

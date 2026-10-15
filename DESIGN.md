@@ -391,9 +391,11 @@ the clock source and age, and fault flags.
 Each feature is its own package (`packages/`), and the examples
 (`examples/basic.yaml`, `examples/ble.yaml`) include them; a feature is switched
 off by commenting its line out. Every setting is a substitution with a comment
-saying what it does and when to change it. A user's own settings go in a
-git-ignored `examples/local.yaml` that includes an example and overrides
-substitutions. The README lists every package and substitution.
+saying what it does and when to change it. A user clones the repository into the ESPHome
+config folder as `precision-feeder/` and copies an example next to it; the copy
+reads the components and packages from the clone (`precision-feeder/...` paths),
+so `git pull` updates the firmware without touching the user's file or secrets.
+`tools/check.sh` validates the examples in exactly that layout. The README lists every package and substitution.
 
 Entities publish only when their value changes: each package refreshes its
 entities from one 1-second interval through `publish_number/text/bool/option`

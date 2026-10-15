@@ -6,6 +6,14 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## Examples: clone into the config folder (2026-10-15, no firmware change)
+
+- The examples now expect the repository cloned into the ESPHome config folder
+  as `precision-feeder/`, with a copy of an example next to it
+  (`precision-feeder/...` paths). `git pull` updates the firmware; the user's
+  file and `secrets.yaml` stay outside the repository. This replaces
+  `examples/local.yaml`. `tools/check.sh` validates the examples in that layout.
+
 ## 1.0.1: quieter log (2026-10-15)
 
 - "Clock set by NTP / Home Assistant / BLE" is logged at DEBUG instead of INFO.
