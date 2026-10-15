@@ -453,6 +453,7 @@ precision-feeder/
   docs/SCHEDULING.md   building schedule profiles
   docs/CALIBRATION.md  setup and calibration walkthrough
   docs/BENCH.md        hardware test results
+  docs/plans/          release plans: milestones and the decisions behind them
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
@@ -513,6 +514,26 @@ precision-feeder/
 - BLE security: application-layer authentication with a shared key (protocol 2),
   plus LE Secure Connections pairing when the client pairs (owner, 2026-10-14;
   section 10).
+- **Local first (owner, 2026-10-15; planned for 1.1.0, [docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-local-first.md)):**
+  the feeder must be fully usable with no Home Assistant, no internet and no app,
+  from a browser on the same network. Planned, not built yet:
+  - The stock ESPHome web UI (which loads its script from the internet) is replaced
+    by an embedded app (`js_include`/`css_include`, no external runtime
+    dependencies). Its "All entities" page is the debug fallback.
+  - The existing entities are the app's API: entity names become a contract.
+  - Tabs and sections appear only for the entities a build contains; no UI
+    configuration file.
+  - The app never repeats guard or scheduler logic.
+  - Light and dark themes follow the browser. Phones are first-class (a web UI, no
+    native app).
+  - Web auth stays optional and off by default.
+  - Read-only additions: Schedule Data, Device Time, Today, Feed Guard (a
+    side-effect-free dry run of the guard), BLE Info and BLE Session, ESPHome's
+    Wi-Fi info sensors.
+  - A BLE activity ring buffer served behind web auth.
+  - Dual-stack networking with full IPv6 readiness: everything local works on an
+    IPv6-only network; only outside services (GitHub is IPv4-only) may fail, gracefully.
+  - No BLE packet change (protocol 2).
 
 ## 14. Open items
 
@@ -528,6 +549,19 @@ precision-feeder/
    model's files, credits the author, and the README states the model's licence;
    `.gitignore` keeps 3MF/STL files out.
 6. ~~HA-time package in v1.~~ Decided 2026-10-14: enabled in both examples.
+7. Checks for 1.1.0 (milestone M0 in [docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-local-first.md)),
+   against the ESPHome version in use:
+   - How a `js_include` path written in a package resolves (likely relative to the
+     user's YAML, so `precision-feeder/web/...`).
+   - Whether `disabled_by_default` entities appear in `/events`.
+   - The `/events` stream and custom handlers with both `basic` and `digest` auth.
+   - The `network:` IPv6 option.
+   - From the BLE adapter: the peer address and MTU (GATT server events), any read
+     callback on characteristics, and whether advertising restarts after a
+     disconnect.
+8. Profile names: section 5.1 lists a per-profile `name`, but the `Profile` record
+   has none, so profiles show as A, B and C. Adding one changes the saved Settings
+   layout (new version, key and migration); deferred (2026-10-15).
 
 ## 15. Implementation status (v1.0.1)
 

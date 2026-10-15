@@ -117,7 +117,7 @@ substitutions.
 
 ```
 README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
-docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md
+docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md; plans/ (release plans)
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
