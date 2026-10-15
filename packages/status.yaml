@@ -124,6 +124,30 @@ text_sensor:
     entity_category: diagnostic
     update_interval: never
 
+  # Today's feeds in time order, each fed / skipped / due / next / later / held, for example
+  # "08:30 x1 fed; 17:30 x1 next". Worked out by the same code that runs the schedule.
+  - platform: template
+    id: pf_todays_feeds
+    name: "Today's Feeds"
+    icon: mdi:calendar-today
+    update_interval: never
+
+  # What a one-portion feed would get right now, without feeding: "ready", or the reason it would be
+  # refused ("too soon", "daily cap reached", ...), in the same words as Last Result.
+  - platform: template
+    id: pf_feed_guard
+    name: "Feed Guard"
+    icon: mdi:shield-check-outline
+    update_interval: never
+
+  # The device's own local time and UTC offset, for example "Thu 2026-10-15 17:30 -05:00".
+  - platform: template
+    id: pf_device_time
+    name: "Device Time"
+    icon: mdi:clock-digital
+    entity_category: diagnostic
+    update_interval: never
+
 # Binary sensors only publish when their value changes already.
 binary_sensor:
   - platform: template
@@ -168,3 +192,6 @@ interval:
           publish_text(id(pf_faults), f->faults_text());
           publish_text(id(pf_time_source), f->time_source_text());
           publish_text(id(pf_firmware), "${fw_version}");
+          publish_text(id(pf_todays_feeds), f->todays_feeds_text());
+          publish_text(id(pf_feed_guard), f->feed_guard_text());
+          publish_text(id(pf_device_time), f->device_time_text());

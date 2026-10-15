@@ -379,6 +379,24 @@ class FeederCore {
   std::string oneshots_text();
   /// 0 ok, 1 time not valid, 2 tray empty, 3 position unknown, 4 moving, 5 calibrating, 6 hold or reload pause
   uint8_t led_code();
+
+  // ---- read-only data for the web app (DESIGN.md section 7) ----
+  /// Every profile in one compact line, so a client can show the whole schedule without stepping the editor:
+  /// "1|A|B|C" with each profile "every_n,fast,ev1,ev2,ev3,ev4" (fast: weekday mask, 2 hex digits) and each event
+  /// "<enabled 0|1><anchor c|r|s><offset>/<portions>/<days>" (offset in minutes as stored; days: 2 hex digits,
+  /// bit 0 = Sunday). The leading 1 is the format version.
+  std::string schedule_data_text() const;
+  /// The device's local time with its UTC offset, "Thu 2026-10-15 17:30 -05:00"; "clock not set" without a clock.
+  std::string device_time_text();
+  /// Today's feeds (active profile and one-shots) in time order, "08:30 x1 fed; 17:30 x1 next; 20:00 x1 later
+  /// one-shot", each one fed, skipped (missed or refused), due (in its minute now), next, later, or held (inside a
+  /// hold or the reload pause, so it will be skipped). With none: "none", "none (fast day)", "none (not a feeding
+  /// day)" or "none (scheduler off)". "clock not set" without a clock.
+  std::string todays_feeds_text();
+  /// What the guard would answer to a one-portion feed from ESPHome right now, without feeding: OK or the refusal.
+  Result feed_guard_preview();
+  /// feed_guard_preview() as text: "ready", or the refusal as Last Result words it ("too soon", ...).
+  std::string feed_guard_text();
   static const char *result_name(Result r);
   Result last_result() const { return this->last_result_; }
 

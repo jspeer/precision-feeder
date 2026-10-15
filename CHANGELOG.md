@@ -6,6 +6,25 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 1.1.0: local first (in progress)
+
+The built-in web app, so the feeder is fully usable from a browser with no Home
+Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-local-first.md)).
+
+- New read-only entities, worked out by the same code that runs the feeder:
+  - `Today's Feeds`: today's feeds in time order, each fed, skipped, due, next,
+    later or held.
+  - `Feed Guard`: what a one-portion feed would get right now ("ready" or the
+    reason it would be refused), without feeding.
+  - `Device Time` (diagnostic): the feeder's local time and UTC offset.
+  - `Schedule Data` (diagnostic, disabled by default in Home Assistant): all
+    three profiles in one compact line for the web app (format in DESIGN.md
+    section 7).
+- New optional package `network_info.yaml` (in both examples): Wi-Fi network,
+  IP addresses and signal strength, from ESPHome's own sensors.
+- `tools/mock_device.py`: a fake feeder that speaks the web server's HTTP, for
+  building the web app without hardware.
+
 ## Examples: clone into the config folder (2026-10-15, no firmware change)
 
 - The examples now expect the repository cloned into the ESPHome config folder

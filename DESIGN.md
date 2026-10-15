@@ -349,6 +349,28 @@ portions, latitude, longitude, reload pause, refill interval
 select, one offset number, servo min/max pulse (saved, tuned at run time),
 declare-position recovery.
 
+Read-only data for the web app (firmware 1.1.0), worked out by FeederCore so the app
+never repeats scheduler or guard logic. Each fits Home Assistant's 255-character state:
+- `Today's Feeds`: today's feeds of the active profile and one-shots, in time order:
+  `HH:MM xN <status>[ one-shot]` joined by `; `. Status is `fed`, `skipped` (missed or
+  refused; a scheduled feed counts as fed if the history has a feed from its source in
+  its minute), `due` (in its minute now), `next`, `later`, or `held` (inside a hold or
+  the reload pause, so it will be skipped). With none: `none`, `none (fast day)`,
+  `none (not a feeding day)` or `none (scheduler off)`; `clock not set` without a
+  clock. Cut short with `; ...` past 240 characters.
+- `Feed Guard`: the guard's answer to a one-portion feed from ESPHome right now,
+  without feeding: `ready`, or the refusal in Last Result's words.
+- `Device Time` (diagnostic): `Thu 2026-10-15 17:30 -05:00`, or `clock not set`.
+- `Schedule Data` (diagnostic, disabled by default in Home Assistant):
+  `1|<A>|<B>|<C>`. The leading `1` is the format version. Each profile is
+  `every_n,fast,ev1,ev2,ev3,ev4`, with `fast` the fast-day weekday mask as 2 hex
+  digits. Each event is `<0|1><c|r|s><offset>/<portions>/<days>`: enabled, anchor
+  (clock, sunrise, sunset), offset in minutes as stored (minutes after midnight, or
+  signed from the sun), portions, and the weekday mask as 2 hex digits (bit 0 =
+  Sunday). About 165 characters at most.
+- The optional `network_info` package adds ESPHome's `wifi_info` (network, up to four
+  addresses) and `wifi_signal` sensors.
+
 ## 8. BLE GATT (secondary control plane)
 
 **The protocol is specified in [docs/PROTOCOL.md](docs/PROTOCOL.md), which is
@@ -464,7 +486,7 @@ precision-feeder/
                                     precision_feeder_ble.* is the thin ESPHome adapter
   packages/            core, status, controls, schedule_editor, calibration,
                        status_led, web_server, button, time_homeassistant,
-                       diagnostics, ble_gatt
+                       diagnostics, network_info, ble_gatt
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
   tests/               host-side C++ tests (core, logic, protocol)
   tools/               Python reference client: precision_feeder_ble.py (entry point) and

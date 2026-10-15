@@ -403,5 +403,91 @@ void FeederCore::project_() {
   this->oversubscribed_ = within_refill > remaining;
 }
 
+std::string FeederCore::todays_feeds_text() {
+  if (!this->time_valid())
+    return "clock not set";
+  const int64_t now = this->hal_epoch();
+  const int32_t today = this->today_();
+  const int64_t day_start = this->wall_to_epoch_(today, 0);
+  const int64_t day_end = this->wall_to_epoch_(today + 1, 0);
+  const int64_t blocked_until = this->blocked_until_(now);
+
+  // Whether a feed from `source` was recorded in the minute an item was due (the history keeps the last 8 feeds).
+  auto fed_at = [this](int64_t due, Source source) {
+    for (uint8_t i = 0; i < HISTORY_SIZE; i++) {
+      const HistoryEntry h = this->history_(i);
+      if (h.portions != 0 && h.source == static_cast<uint8_t>(source) && static_cast<int64_t>(h.epoch) >= due &&
+          static_cast<int64_t>(h.epoch) < due + EVENT_WINDOW_S)
+        return true;
+    }
+    return false;
+  };
+  // An item not yet run: due in its minute now, held (a hold or the reload pause will skip it), or later.
+  auto pending_status = [&](int64_t due) -> const char * {
+    if (now >= due + EVENT_WINDOW_S)
+      return "skipped";
+    if (due < blocked_until)
+      return "held";
+    return now >= due ? "due" : "later";
+  };
+
+  struct Item {
+    int64_t epoch;
+    uint8_t portions;
+    bool oneshot;
+    const char *status;
+  };
+  std::vector<Item> items;
+  // Yesterday's and tomorrow's anchor days too: "sunset + 3 h" can land after midnight, "sunrise - 10 h" before it.
+  this->for_each_occurrence_(today - 1, today + 1, [&](const Occurrence &o) {
+    if (o.epoch < day_start || o.epoch >= day_end)
+      return;
+    const char *status = o.fed ? (fed_at(o.epoch, Source::SCHEDULE) ? "fed" : "skipped") : pending_status(o.epoch);
+    items.push_back({o.epoch, o.portions, false, status});
+  });
+  for (const OneShot &os : this->cfg.oneshots) {
+    const int64_t at = static_cast<int64_t>(os.epoch);
+    if (os.epoch == 0 || at < day_start || at >= day_end)
+      continue;
+    const char *status = os.done ? (fed_at(at, Source::ONE_SHOT) ? "fed" : "skipped") : pending_status(at);
+    items.push_back({at, os.portions, true, status});
+  }
+  std::stable_sort(items.begin(), items.end(), [](const Item &a, const Item &b) { return a.epoch < b.epoch; });
+  for (Item &it : items) {
+    if (std::strcmp(it.status, "later") == 0) {
+      it.status = "next";  // the first one that will run
+      break;
+    }
+  }
+
+  if (items.empty()) {
+    if (!this->cfg.scheduler_enabled)
+      return "none (scheduler off)";
+    const Profile &p = this->cfg.profiles[this->cfg.active_profile];
+    const DayCtx d = this->make_day_(today);
+    if (p.fast_days & (1 << d.wday))
+      return "none (fast day)";
+    if (!this->day_active_(p, d))
+      return "none (not a feeding day)";
+    return "none";
+  }
+  // Home Assistant keeps at most 255 characters of state; a busy day with many one-shots is cut short.
+  constexpr size_t MAX_LEN = 240;
+  std::string out;
+  for (const Item &it : items) {
+    std::string entry = this->format_local_(it.epoch, false) + " x" + std::to_string(it.portions) + " " + it.status;
+    if (it.oneshot)
+      entry += " one-shot";
+    if (!out.empty() && out.size() + 2 + entry.size() > MAX_LEN) {
+      out += "; ...";
+      break;
+    }
+    if (!out.empty())
+      out += "; ";
+    out += entry;
+  }
+  return out;
+}
+
 }  // namespace precision_feeder
 }  // namespace esphome

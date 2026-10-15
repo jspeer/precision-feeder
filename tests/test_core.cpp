@@ -850,6 +850,94 @@ static void test_daylight_saving() {
           "and follows the clock change (about 17:45 EDT, then about 16:45 EST)");
 }
 
+static void test_web_app_data() {
+  current = "web app data (1.1.0)";
+  // Schedule Data: every profile and event, compact.
+  Flash flash;
+  auto f = boot(flash, T0);  // Wed 2026-10-14 07:55, UTC-5
+  CHECK(f->schedule_data_text() ==
+            "1|1,00,0c480/1/7f,0c720/1/7f,0c1080/1/7f,0c1200/1/7f"
+            "|1,00,0c480/1/7f,0c720/1/7f,0c1080/1/7f,0c1200/1/7f"
+            "|1,00,0c480/1/7f,0c720/1/7f,0c1080/1/7f,0c1200/1/7f",
+        "defaults");
+  f->cfg.profiles[1].every_n = 14;
+  f->cfg.profiles[1].fast_days = 0x41;
+  enable_event(*f, 1, 2, Anchor::SUNSET, -720, 6, 0x3E);
+  const std::string data = f->schedule_data_text();
+  CHECK(data.find("|14,41,0c480/1/7f,0c720/1/7f,1s-720/6/3e,0c1200/1/7f|") != std::string::npos, "every field");
+  CHECK(data.size() < 255, "fits Home Assistant's state");
+  enable_event(*f, 1, 2, Anchor::CLOCK, 18 * 60);  // back as it was, for the rest of the test
+  f->cfg.profiles[1].ev[2].enabled = 0;
+
+  // Device Time.
+  CHECK(f->device_time_text() == "Wed 2026-10-14 07:55 -05:00", "local time and offset");
+
+  // Today's Feeds.
+  CHECK(f->todays_feeds_text() == "none", "no events");
+  enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60);
+  enable_event(*f, 0, 1, Anchor::CLOCK, 20 * 60, 2);
+  enable_event(*f, 0, 2, Anchor::CLOCK, 9 * 60, 1, 0x01);  // Sundays only: not today
+  CHECK(f->todays_feeds_text() == "08:00 x1 next; 20:00 x2 later", "next and later");
+  f->advance(5 * 60 * 1000LL + 20000);  // 08:00:20, fed at 08:00
+  CHECK(f->todays_feeds_text() == "08:00 x1 fed; 20:00 x2 next", "fed");
+  CHECK(f->add_oneshot("2026-10-14 12:00", 1), "one-shot today");
+  CHECK(f->add_oneshot("2026-10-15 12:00", 1), "one-shot tomorrow (not listed)");
+  CHECK(f->todays_feeds_text() == "08:00 x1 fed; 12:00 x1 next one-shot; 20:00 x2 later", "one-shot listed");
+  CHECK(f->set_hold_minutes(6 * 60) == Result::OK, "hold until 14:00");
+  CHECK(f->todays_feeds_text() == "08:00 x1 fed; 12:00 x1 held one-shot; 20:00 x2 next", "held");
+  f->cancel_hold();
+  f->cfg.scheduler_enabled = 0;
+  f->cfg_changed();
+  CHECK(f->todays_feeds_text() == "12:00 x1 next one-shot", "one-shots run with the scheduler off");
+  f->clear_oneshots();
+  CHECK(f->todays_feeds_text() == "none (scheduler off)", "scheduler off");
+  f->cfg.scheduler_enabled = 1;
+  f->cfg.profiles[0].fast_days = 0x08;  // Wednesday
+  f->cfg_changed();
+  CHECK(f->todays_feeds_text() == "none (fast day)", "fast day");
+  f->cfg.profiles[0].fast_days = 0;
+  f->cfg.profiles[0].every_n = 2;
+  f->cfg.profiles[0].anchor_day = static_cast<uint32_t>(days_from_civil(2026, 10, 13));
+  f->cfg_changed();
+  CHECK(f->todays_feeds_text() == "none (not a feeding day)", "off day of the cycle");
+
+  // Missed (the device was off) and refused (the daily cap) both show as skipped.
+  Flash flash2;
+  auto g = boot(flash2, T0);
+  enable_event(*g, 0, 0, Anchor::CLOCK, 8 * 60);
+  enable_event(*g, 0, 1, Anchor::CLOCK, 8 * 60 + 5);
+  g->advance(2000);
+  Flash flash3 = flash2;
+  auto h = boot(flash3, local_epoch(2026, 10, 14, 8, 2));  // off through 08:00
+  h->cfg.daily_cap = 1;
+  h->set_portions_24h(1);  // the cap is already used
+  CHECK(h->portions_24h() == 1, "cap used");
+  h->advance(4 * 60 * 1000LL);  // through 08:05, refused by the cap
+  CHECK(h->todays_feeds_text() == "08:00 x1 skipped; 08:05 x1 skipped", "missed and refused");
+  h->set_clock_valid(false);
+  CHECK(h->todays_feeds_text() == "clock not set" && h->device_time_text() == "clock not set", "no clock");
+
+  // Feed Guard: what a one-portion feed would get, without feeding.
+  Flash flash4;
+  auto k = boot(flash4, T0);
+  CHECK(k->feed_guard_text() == "ready", "ready");
+  CHECK(k->request_feed(1, Source::ESPHOME) == Result::OK, "feed");
+  CHECK(k->feed_guard_text() == "busy", "busy while moving");
+  k->advance(5000);
+  CHECK(k->feed_guard_text() == "too soon", "minimum gap");
+  const size_t records = k->records.size();
+  const uint8_t position = k->position();
+  CHECK(k->feed_guard_preview() == Result::TOO_SOON, "as a result");
+  CHECK(k->records.size() == records && k->position() == position && k->last_result() == Result::OK,
+        "the preview reports, records and moves nothing");
+  k->set_calibration_mode(true);
+  CHECK(k->feed_guard_text() == "calibrating", "calibrating");
+  k->set_calibration_mode(false);
+  k->advance(61000);
+  k->cfg.daily_cap = 1;
+  CHECK(k->feed_guard_text() == "daily cap reached", "daily cap");
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -876,6 +964,7 @@ int main() {
   test_bug_batch_b();
   test_projection_matches_firing();
   test_daylight_saving();
+  test_web_app_data();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

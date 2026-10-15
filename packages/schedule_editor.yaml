@@ -24,6 +24,16 @@ text_sensor:
     # warning when its busiest day needs more portions than the Daily Portion Cap.
     update_interval: never
 
+  # All three profiles in one compact line, for the built-in web app (format: DESIGN.md section 7).
+  # Machine-readable, so it starts disabled in Home Assistant; the web app always receives it.
+  - platform: template
+    id: pf_schedule_data
+    name: "Schedule Data"
+    icon: mdi:code-braces
+    entity_category: diagnostic
+    disabled_by_default: true
+    update_interval: never
+
 select:
   - platform: template
     id: pf_edit_profile
@@ -200,6 +210,7 @@ interval:
           using namespace precision_feeder;
           static const char *const ANCHORS[3] = {"clock", "sunrise", "sunset"};
           publish_text(id(pf_edited_profile), id(feeder).edited_profile_summary());
+          publish_text(id(pf_schedule_data), id(feeder).schedule_data_text());
           publish_option(id(pf_event_anchor), ANCHORS[id(feeder).edit_event().anchor % 3]);
           publish_option(id(pf_edit_profile), std::string(1, (char) ('A' + id(feeder).editor_profile)));
           publish_option(id(pf_edit_event), std::string(1, (char) ('1' + id(feeder).editor_event)));

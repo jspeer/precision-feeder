@@ -63,6 +63,8 @@ class Entity:
         d: dict = {"id": self.id}
         if full:
             d.update(domain=self.domain, name=self.name, icon=self.icon, entity_category=self.category)
+            if self.detail.get("disabled"):
+                d["is_disabled_by_default"] = True
         if self.domain == "button":
             return d
         if self.domain in ("sensor", "number"):
@@ -150,6 +152,9 @@ class Feeder:
         a("binary_sensor", "Clock Valid", True, category=DIAGNOSTIC)
         a("binary_sensor", "Needs Food", False, icon="mdi:fish-off")
         a("binary_sensor", "Schedule Over Capacity", False, icon="mdi:alert-outline")
+        a("text_sensor", "Today's Feeds", "", icon="mdi:calendar-today")
+        a("text_sensor", "Feed Guard", "", icon="mdi:shield-check-outline")
+        a("text_sensor", "Device Time", "", icon="mdi:clock-digital", category=DIAGNOSTIC)
         # controls.yaml
         for name in ["Feed One Portion", "Feed Selected Portions", "Tray Reload", "Stop", "Hold Scheduled Feeding",
                      "Cancel Hold"]:
@@ -172,6 +177,7 @@ class Feeder:
           step=0.0001)
         # schedule_editor.yaml
         a("text_sensor", "Edited Profile", "", icon="mdi:calendar-edit")
+        a("text_sensor", "Schedule Data", "", icon="mdi:code-braces", category=DIAGNOSTIC, disabled=True)
         a("select", "Edit Profile", "A", icon="mdi:pencil", options=["A", "B", "C"])
         a("select", "Edit Event", "1", icon="mdi:pencil", options=["1", "2", "3", "4"])
         a("select", "Event Anchor", "clock", icon="mdi:weather-sunset", options=["clock", "sunrise", "sunset"])
@@ -201,6 +207,13 @@ class Feeder:
             a("sensor", "Largest Free Heap Block", 65536, uom="B")
             a("sensor", "Heap Fragmentation", 9, uom="%")
             a("sensor", "Loop Time", 12, uom="ms")
+        if not args.no_network:  # network_info.yaml (ESPHome's wifi_info and wifi_signal)
+            a("text_sensor", "Wi-Fi Network", "example-network", category=DIAGNOSTIC)
+            a("text_sensor", "IP Address", "192.168.1.40", category=DIAGNOSTIC)
+            a("text_sensor", "IP Address 2", "fe80::1234:56ff:fe78:9abc", category=DIAGNOSTIC)
+            a("text_sensor", "IP Address 3", "fd00::1234:56ff:fe78:9abc", category=DIAGNOSTIC)
+            a("text_sensor", "IP Address 4", "", category=DIAGNOSTIC)
+            a("sensor", "Wi-Fi Signal", -58, uom="dBm")
         self.refresh(publish=False)
 
     # ---- helpers ----
@@ -313,6 +326,14 @@ class Feeder:
         s("text_sensor", "Faults", "; ".join(faults) or "none")
         s("binary_sensor", "Needs Food", self.position >= 6)
         s("number", "Portions Counted (24 h)", self.fed_24h())
+        guard = self.guard(1)
+        s("text_sensor", "Feed Guard", "ready" if guard == "ok" else guard)
+        off = time.localtime().tm_gmtoff // 60
+        s("text_sensor", "Device Time", f"{self.fmt(time.time())} {'-' if off < 0 else '+'}{abs(off) // 60:02d}:{abs(off) % 60:02d}")
+        s("text_sensor", "Today's Feeds", self.todays_feeds())
+        s("text_sensor", "Schedule Data", "1" + "".join(
+            f"|{p['every_n']},{p['fast']:02x}" + "".join(
+                f",{e[0]}{'crs'[e[1]]}{e[2]}/{e[3]}/{e[4]:02x}" for e in p["ev"]) for p in self.profiles))
         # the schedule editor follows Edit Profile / Edit Event
         p = self.profiles[self.edit_profile]
         ev = p["ev"][self.edit_event]
@@ -342,20 +363,44 @@ class Feeder:
 
     # ---- actions ----
 
-    def feed(self, portions: int):
+    def guard(self, portions: int) -> str:
+        if portions > self.get("number", "Max Portions Per Command"):
+            return "too many portions for one command"
         if self.calibrating:
-            result = "calibrating"
-        elif self.unknown:
-            result = "position unknown"
-        elif self.position >= 6:
-            result = "tray empty"
-        elif portions > self.get("number", "Max Portions Per Command"):
-            result = "too many portions for one command"
-        elif time.monotonic() - self.last_feed_mono < self.get("number", "Minimum Gap Between Feeds"):
-            result = "too soon"
-        elif self.fed_24h() + portions > self.get("number", "Daily Portion Cap"):
-            result = "daily cap reached"
-        else:
+            return "calibrating"
+        if self.unknown:
+            return "position unknown"
+        if self.position >= 6:
+            return "tray empty"
+        if time.monotonic() - self.last_feed_mono < self.get("number", "Minimum Gap Between Feeds"):
+            return "too soon"
+        if self.fed_24h() + portions > self.get("number", "Daily Portion Cap"):
+            return "daily cap reached"
+        return "ok"
+
+    def todays_feeds(self) -> str:
+        """A rough Today's Feeds: clock events of the active profile only (sun events at 06:00 / 18:00)."""
+        p = self.profiles["ABC".index(self.get("select", "Active Profile"))]
+        wday = (time.localtime().tm_wday + 1) % 7
+        if not self.get("switch", "Scheduler"):
+            return "none (scheduler off)"
+        if p["fast"] & (1 << wday):
+            return "none (fast day)"
+        now = time.localtime()
+        minute = now.tm_hour * 60 + now.tm_min
+        items = sorted((e[2] + (0, 360, 1080)[e[1]], e[3]) for e in p["ev"] if e[0] and e[4] & (1 << wday))
+        out, nxt = [], True
+        for at, n in items:
+            fed = any(src == "schedule" for _, _, src in self.history)
+            status = ("fed" if fed else "skipped") if at < minute else "due" if at == minute else "later"
+            if status == "later" and nxt:
+                status, nxt = "next", False
+            out.append(f"{at // 60:02d}:{at % 60:02d} x{n} {status}")
+        return "; ".join(out) or "none"
+
+    def feed(self, portions: int):
+        result = self.guard(portions)
+        if result == "ok":
             portions = min(portions, self.remaining())
             self.position += portions
             self.last_feed_mono = time.monotonic()
@@ -590,6 +635,7 @@ def main():
     ap.add_argument("--auth", metavar="USER:PASS", help="require HTTP basic authentication")
     ap.add_argument("--no-calibration", action="store_true", help="as a build without the calibration package")
     ap.add_argument("--no-diagnostics", action="store_true", help="as a build without the diagnostics package")
+    ap.add_argument("--no-network", action="store_true", help="as a build without the network_info package")
     ap.add_argument("--unknown", action="store_true", help="start with the tray position unknown")
     ap.add_argument("--ping", type=float, default=10.0, help="seconds between keep-alive pings (default 10)")
     args = ap.parse_args()

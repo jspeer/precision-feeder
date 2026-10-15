@@ -690,6 +690,16 @@ Result FeederCore::check_guard_(uint8_t &portions, Source source) {
   return Result::OK;
 }
 
+Result FeederCore::feed_guard_preview() {
+  uint8_t portions = 1;
+  return this->check_guard_(portions, Source::ESPHOME);  // only reads: nothing is fed, recorded or reported
+}
+
+std::string FeederCore::feed_guard_text() {
+  const Result r = this->feed_guard_preview();
+  return r == Result::OK ? "ready" : result_name(r);
+}
+
 void FeederCore::report_(Source source, uint8_t portions, Result result) {
   this->last_result_ = result;
   if (result != Result::OK)

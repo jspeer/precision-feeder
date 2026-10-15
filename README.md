@@ -141,6 +141,7 @@ you switch a feature on or off by adding or removing one line.
 | `time_homeassistant` | Home Assistant as a second clock source | **on in both examples**: keeps the clock right when the internet is down but Home Assistant is up (harmless without Home Assistant). It also uses Home Assistant's timezone unless you pin yours (see the package's comment) |
 | `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](docs/PROTOCOL.md)) | only if a PLC, app or script will talk to it over BLE. Costs about 320 KB of flash and 30 KB of RAM |
 | `diagnostics` | free memory and loop time sensors | only for troubleshooting or development |
+| `network_info` | the Wi-Fi network, IP addresses and signal strength | **on in both examples**; leave it out to save a little flash |
 
 **Two ready-made configurations** are in [`examples/`](examples/):
 

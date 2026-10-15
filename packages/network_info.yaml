@@ -1,0 +1,27 @@
+# Precision Feeder: network details (optional), shown in the web app and Home Assistant.
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# ESPHome's own Wi-Fi sensors: the network the feeder joined, its addresses and the signal strength.
+# Leave this package out to save a little flash; the web app then simply does not show them.
+
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      name: "Wi-Fi Network"
+    # The first address, and up to three more (IPv6 adds link-local and global addresses).
+    ip_address:
+      name: "IP Address"
+      address_1:
+        name: "IP Address 2"
+      address_2:
+        name: "IP Address 3"
+      address_3:
+        name: "IP Address 4"
+
+sensor:
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s

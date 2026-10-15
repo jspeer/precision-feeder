@@ -446,6 +446,34 @@ std::string FeederCore::profile_summary_(uint8_t profile) {
   return out;
 }
 
+std::string FeederCore::schedule_data_text() const {
+  static const char ANCHORS[3] = {'c', 'r', 's'};
+  std::string out = "1";
+  char buf[24];
+  for (const Profile &p : this->cfg.profiles) {
+    std::snprintf(buf, sizeof(buf), "|%u,%02x", static_cast<unsigned>(p.every_n), static_cast<unsigned>(p.fast_days & 0x7F));
+    out += buf;
+    for (const Event &e : p.ev) {
+      std::snprintf(buf, sizeof(buf), ",%u%c%d/%u/%02x", e.enabled ? 1u : 0u, ANCHORS[e.anchor % 3],
+                    static_cast<int>(e.offset_min), static_cast<unsigned>(e.portions),
+                    static_cast<unsigned>(e.days & 0x7F));
+      out += buf;
+    }
+  }
+  return out;
+}
+
+std::string FeederCore::device_time_text() {
+  if (!this->time_valid())
+    return "clock not set";
+  const int64_t now = this->hal_epoch();
+  const int offset_min = static_cast<int>(this->local_offset_s_(now) / 60);
+  const int a = std::min(std::abs(offset_min), 24 * 60 - 1);  // real offsets are within +-14 h
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), " %c%02d:%02d", offset_min < 0 ? '-' : '+', a / 60, a % 60);
+  return this->format_local_(now) + buf;
+}
+
 uint8_t FeederCore::led_code() {
   switch (this->tray_state()) {
     case TrayState::CALIBRATING:
