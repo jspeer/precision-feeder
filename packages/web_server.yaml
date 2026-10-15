@@ -1,18 +1,28 @@
-# Precision Feeder: built-in web dashboard (the original firmware's web UI).
+# Precision Feeder: the built-in web app, at http://<name>.local (for example http://precision-feeder.local).
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 #
-# Browse to http://<name>.local (for example http://precision-feeder.local).
-# Everything on the device is reachable there, so protect it on a shared network:
-# uncomment `auth` and add web_username / web_password to your secrets.yaml.
-# Note: this is HTTP basic authentication over plain HTTP, so it keeps casual
-# visitors out but is not encrypted; do not reuse a password you care about.
+# The whole feeder from a browser, on a computer or a phone, with no Home Assistant and no internet:
+# dashboard, schedule, settings, calibration, Bluetooth and diagnostics. The app is stored in the firmware
+# (web/dist/, built from web/src/ by tools/build_web.py), so nothing is loaded from the internet. It shows only
+# what your build includes: leave a package out and its page or section disappears.
+#
+# Everything on the device is reachable there, so protect it on a shared network: uncomment `auth` and add
+# web_username / web_password to your secrets.yaml. Note: this is HTTP authentication over plain HTTP, so it
+# keeps casual visitors out but is not encrypted; do not reuse a password you care about.
 
 web_server:
   port: 80
   version: 3
+  # The app replaces ESPHome's own dashboard script, which would otherwise be loaded from the internet.
+  # These paths are relative to this file.
+  local: false
+  js_url: ""
+  css_url: ""
+  js_include: ../web/dist/app.js
+  css_include: ../web/dist/app.css
   # No firmware upload from the browser: updates go through the encrypted ESPHome OTA
   # (see `ota:` in core.yaml). The web server's /update page would accept an image in plaintext.
   ota: false

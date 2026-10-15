@@ -1,0 +1,96 @@
+// Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
+// addresses entities as "<domain>/<name>". tests/test_consistency.py checks that each one exists in packages/,
+// so renaming an entity fails the checks instead of breaking the app. Use E.x everywhere else, never a literal.
+//
+// An entity can be missing (its package left out of the build); the app checks store.has() before relying on one.
+const E = {
+  // packages/status.yaml
+  trayPosition: 'sensor/Tray Position',
+  portionsRemaining: 'sensor/Portions Remaining',
+  fedToday: 'sensor/Portions Fed Today',
+  runway: 'sensor/Runway',
+  clockAge: 'sensor/Minutes Since Clock Sync',
+  trayState: 'text_sensor/Tray State',
+  nextFeed: 'text_sensor/Next Feed',
+  hold: 'text_sensor/Hold',
+  lastFeed: 'text_sensor/Last Feed',
+  lastResult: 'text_sensor/Last Result',
+  recentFeeds: 'text_sensor/Recent Feeds',
+  activeSchedule: 'text_sensor/Active Schedule',
+  oneshots: 'text_sensor/One-shot Feeds',
+  emptyOn: 'text_sensor/Tray Empty On',
+  faults: 'text_sensor/Faults',
+  timeSource: 'text_sensor/Time Source',
+  firmware: 'text_sensor/Firmware Version',
+  todaysFeeds: "text_sensor/Today's Feeds",
+  feedGuard: 'text_sensor/Feed Guard',
+  deviceTime: 'text_sensor/Device Time',
+  clockValid: 'binary_sensor/Clock Valid',
+  needsFood: 'binary_sensor/Needs Food',
+  overCapacity: 'binary_sensor/Schedule Over Capacity',
+
+  // packages/controls.yaml
+  feedOne: 'button/Feed One Portion',
+  feedSelected: 'button/Feed Selected Portions',
+  trayReload: 'button/Tray Reload',
+  stop: 'button/Stop',
+  holdFeeding: 'button/Hold Scheduled Feeding',
+  cancelHold: 'button/Cancel Hold',
+  scheduler: 'switch/Scheduler',
+  activeProfile: 'select/Active Profile',
+  manualPortions: 'number/Manual Portions',
+  holdDuration: 'number/Hold Duration',
+  minGap: 'number/Minimum Gap Between Feeds',
+  portionGap: 'number/Gap Between Portions',
+  dailyCap: 'number/Daily Portion Cap',
+  portions24h: 'number/Portions Counted (24 h)',
+  maxPerCommand: 'number/Max Portions Per Command',
+  reloadPause: 'number/Reload Pause',
+  refillInterval: 'number/Refill Interval',
+  latitude: 'number/Latitude',
+  longitude: 'number/Longitude',
+
+  // packages/schedule_editor.yaml
+  editedProfile: 'text_sensor/Edited Profile',
+  scheduleData: 'text_sensor/Schedule Data',
+  editProfile: 'select/Edit Profile',
+  editEvent: 'select/Edit Event',
+  eventAnchor: 'select/Event Anchor',
+  eventEnabled: 'switch/Event Enabled',
+  eventTime: 'text/Event Time',
+  eventDays: 'text/Event Days',
+  fastDays: 'text/Profile Fast Days',
+  addOneshot: 'text/Add One-shot Feed',
+  eventPortions: 'number/Event Portions',
+  everyNDays: 'number/Profile Every N Days',
+  oneshotPortions: 'number/One-shot Portions',
+  restartCycle: 'button/Restart Cycle Today',
+  clearOneshots: 'button/Clear One-shot Feeds',
+
+  // packages/calibration.yaml
+  calibrationMode: 'switch/Calibration Mode',
+  calibrationPosition: 'select/Calibration Position',
+  calibrationOffset: 'number/Calibration Offset',
+  servoMinPulse: 'number/Servo Min Pulse',
+  servoMaxPulse: 'number/Servo Max Pulse',
+  declaredPosition: 'number/Declared Tray Position',
+  declarePosition: 'button/Declare Tray Position',
+
+  // packages/diagnostics.yaml (ESPHome's debug sensors)
+  freeHeap: 'sensor/Free Heap',
+  largestBlock: 'sensor/Largest Free Heap Block',
+  fragmentation: 'sensor/Heap Fragmentation',
+  loopTime: 'sensor/Loop Time',
+
+  // packages/network_info.yaml (ESPHome's wifi_info and wifi_signal)
+  wifiNetwork: 'text_sensor/Wi-Fi Network',
+  ipAddress1: 'text_sensor/IP Address',
+  ipAddress2: 'text_sensor/IP Address 2',
+  ipAddress3: 'text_sensor/IP Address 3',
+  ipAddress4: 'text_sensor/IP Address 4',
+  wifiSignal: 'sensor/Wi-Fi Signal',
+
+  // packages/ble_gatt.yaml
+  bleInfo: 'text_sensor/BLE Info',
+  bleSession: 'text_sensor/BLE Session',
+};

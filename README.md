@@ -135,7 +135,7 @@ you switch a feature on or off by adding or removing one line.
 | `controls` | buttons and settings: feed, tray reload, hold, active profile, guard settings, location | **always** |
 | `schedule_editor` | editing profiles and events, one-shot feeds | **always** (unless something else, like a PLC over BLE, owns the schedule) |
 | `calibration` | calibration mode, servo pulse range, per-slot offsets, recovery after a power cut | **always** |
-| `web_server` | a dashboard at `http://precision-feeder.local` | recommended; no password by default (see [the dashboard password](#the-web-dashboard-password)); leave it out to save memory |
+| `web_server` | the built-in web app at `http://precision-feeder.local`: the whole feeder from a browser or phone, with no Home Assistant and no internet | recommended; no password by default (see [the dashboard password](#the-web-dashboard-password)); leave it out to save memory |
 | `status_led` | colour-coded state on the board's LED | recommended if your board has the LED |
 | `button` | a physical button: short press feeds (or reloads when empty), long press toggles calibration | only if you fitted one |
 | `time_homeassistant` | Home Assistant as a second clock source | **on in both examples**: keeps the clock right when the internet is down but Home Assistant is up (harmless without Home Assistant). It also uses Home Assistant's timezone unless you pin yours (see the package's comment) |

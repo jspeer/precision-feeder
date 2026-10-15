@@ -104,6 +104,11 @@ substitutions.
 - BLE protocol behaviour belongs in `BleEngine` (`engine.*`), which must stay free of
   ESPHome includes; the radio is reached only through `BleTransport`. New protocol
   behaviour gets a test in `tests/test_ble_engine.cpp`.
+- The web app (`web/src/`) uses the firmware's entities as its API, by name, all listed in
+  `web/src/entities.js`; `tests/test_consistency.py` checks them against `packages/`. Renaming an entity
+  means changing that table in the same change. The app never repeats guard or scheduler logic: it
+  shows what the device reports and requests changes. After editing `web/src/`, run
+  `python3 tools/build_web.py` and commit `web/dist/` too (check.sh fails if it is stale).
 - Do not flash or upload to a device without the owner's explicit say-so.
 - Do not invent ESPHome options or BLE behaviour from memory; check the docs.
 
@@ -125,7 +130,10 @@ components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock;
               engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)
 packages/     reusable YAML packages
 examples/     basic.yaml, ble.yaml
-tests/        host-side C++ tests (test_core, test_logic, test_protocol, test_ble_engine; fake_feeder.h)
+web/          the web app: src/ (plain JavaScript and CSS, no dependencies) and dist/ (built by
+              tools/build_web.py, committed; packages/web_server.yaml embeds it)
+tests/        host-side C++ tests (test_core, test_logic, test_protocol, test_ble_engine; fake_feeder.h),
+              test_consistency.py, and test_web.mjs (the web app's parsers, run with Node)
 tools/        precision_feeder_ble.py (entry point) and precision_feeder_client/ (protocol: pure, no
               dependencies; client: bleak; selftest; cli), with tests; check.sh runs every check;
               mock_device.py imitates the device's web server for building the web app

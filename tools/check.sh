@@ -31,6 +31,15 @@ echo "== Python tests (client, and limits consistency)"
 (cd tools && python3 -m unittest -q test_precision_feeder_ble)
 python3 -m unittest -q tests/test_consistency.py
 
+echo "== Web app (web/dist built from web/src, parser tests)"
+python3 tools/build_web.py --check
+if command -v node >/dev/null; then
+  node --check web/dist/app.js
+  node --test tests/test_web.mjs >/dev/null
+else
+  echo "Node not found: skipping the web app's syntax check and parser tests"
+fi
+
 ESPHOME=""
 if [ -x .venv/bin/esphome ]; then ESPHOME=.venv/bin/esphome; elif command -v esphome >/dev/null; then ESPHOME=esphome; fi
 if [ -z "$ESPHOME" ]; then

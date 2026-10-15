@@ -58,7 +58,7 @@ Non-goals (v1)
 | Late-feed timeout | Not carried over: late feeds are skipped by design (section 5.5) |
 | Tray calibration (per-slot offsets) | Calibration mode, 7 signed offsets |
 | Feed time log (last 6) | Last-feeds text sensor and BLE event log |
-| Web UI and dashboard | Optional ESPHome `web_server` (build flag), plus HA |
+| Web UI and dashboard | Built-in web app (`web_server` package, firmware 1.1.0): served from the firmware, no internet needed; plus HA |
 | WiFi setup portal | ESPHome WiFi, fallback AP and `captive_portal` |
 | Hostname, mDNS, timezone, NTP server | ESPHome native, plus YAML options |
 | Password and lockout | ESPHome `web_server` auth, API encryption, OTA password |
@@ -511,7 +511,10 @@ precision-feeder/
                        status_led, web_server, button, time_homeassistant,
                        diagnostics, network_info, ble_gatt
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
-  tests/               host-side C++ tests (core, logic, protocol)
+  web/                 the web app: src/ (plain JavaScript and CSS, no dependencies), dist/ (built by
+                       tools/build_web.py, committed, embedded by packages/web_server.yaml)
+  tests/               host-side C++ tests (core, logic, protocol, BLE engine); test_consistency.py;
+                       test_web.mjs (the web app's parsers, under Node)
   tools/               Python reference client: precision_feeder_ble.py (entry point) and
                        precision_feeder_client/ (protocol, client, selftest, cli); check.sh;
                        mock_device.py (a fake device for building the web app)

@@ -24,6 +24,15 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
   IP addresses and signal strength, from ESPHome's own sensors.
 - `tools/mock_device.py`: a fake feeder that speaks the web server's HTTP, for
   building the web app without hardware.
+- The web app's foundation replaces ESPHome's stock dashboard (`packages/web_server.yaml`), which loaded its
+  script from the internet:
+  - Plain JavaScript and CSS in `web/src/`, built into `web/dist/` by `tools/build_web.py` and embedded in
+    the firmware (about 18 KB gzipped).
+  - Pages and sections appear only for the entities a build contains.
+  - Light and dark follow the browser; phones get a bottom tab bar.
+  - A warning banner for the most important problem, with what to do.
+  - A Diagnostics page: system, network, memory, live log, and every entity with a control.
+  - The Dashboard, Schedule, Configuration, Maintenance and Bluetooth pages follow.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,

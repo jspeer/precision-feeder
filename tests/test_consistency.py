@@ -84,6 +84,21 @@ class Consistency(unittest.TestCase):
         self.assertEqual(ranges, [(c["PULSE_MIN_LO"], c["PULSE_MIN_HI"]), (c["PULSE_MAX_LO"], c["PULSE_MAX_HI"])])
         self.assertIn(f"if span < {c['PULSE_SPAN_MIN']}:", schema)
 
+    def test_web_app_entities(self):
+        """web/src/entities.js names every entity the web app uses; each must exist in packages/, and no other
+        file of the app may name an entity directly (so the table is the whole contract)."""
+        domains = "sensor|binary_sensor|text_sensor|button|switch|select|number|text"
+        table = (ROOT / "web/src/entities.js").read_text()
+        names = [m[1] for m in re.findall(rf"""(['"])(?:{domains})/(.+?)\1""", table)]
+        self.assertGreater(len(names), 60)
+        for name in names:
+            self.assertIn(name, self.e, f"web/src/entities.js uses {name!r}, which no package defines")
+        for path in (ROOT / "web/src").rglob("*.js"):
+            if path.name == "entities.js":
+                continue
+            literal = re.search(rf"""['"`](?:{domains})/[A-Z]""", path.read_text())
+            self.assertIsNone(literal, f"{path.relative_to(ROOT)} names an entity directly; use E.<name> from entities.js")
+
     def test_mock_device_entities(self):
         """tools/mock_device.py imitates the device: every entity it serves must exist under that name."""
         spec = importlib.util.spec_from_file_location("mock_device", ROOT / "tools/mock_device.py")
