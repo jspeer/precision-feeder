@@ -6,6 +6,14 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## Unreleased
+
+- Python client split into the `precision_feeder_client` package: `protocol`
+  (pure Python, standard library only, for reuse in other clients such as a PLC
+  bridge), `client` (bleak), `selftest` and `cli`. `tools/precision_feeder_ble.py`
+  stays the entry point and `import precision_feeder_ble` still works. A
+  duplicate `PROTOCOL_VERSION` definition is gone.
+
 ## 0.5.2: refactors, tests and CI (2026-10-14)
 
 - Settings limits have one home: `feeder_core.h`, enforced by FeederCore's

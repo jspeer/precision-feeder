@@ -464,7 +464,8 @@ precision-feeder/
                        diagnostics, ble_gatt
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
   tests/               host-side C++ tests (core, logic, protocol)
-  tools/               Python reference client (with selftest) and its tests
+  tools/               Python reference client: precision_feeder_ble.py (entry point) and
+                       precision_feeder_client/ (protocol, client, selftest, cli); check.sh
 ```
 
 ## 13. Decisions log

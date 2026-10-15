@@ -356,7 +356,8 @@ components/precision_feeder_ble/  the BLE protocol (only compiled when the BLE p
 packages/                         the feature packages described above
 examples/                         basic.yaml, ble.yaml, secrets.example.yaml
 tests/                            host-side C++ tests for the logic and the protocol
-tools/                            Python BLE reference client and its tests
+tools/                            Python BLE reference client (precision_feeder_client/; its protocol
+                                  module is pure Python for reuse), tests, and check.sh
 docs/                             the guides above
 ```
 
