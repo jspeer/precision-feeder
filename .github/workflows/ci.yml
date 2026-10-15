@@ -1,0 +1,26 @@
+# Runs tools/check.sh: the host tests (C++ and Python) and an ESPHome config validation of both examples.
+# A full compile runs on manual dispatch only (it downloads a 1-2 GB toolchain).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      compile:
+        description: Also compile the examples
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome (the version this project is built with)
+        run: pip install esphome==2026.9.1
+      - name: Checks
+        run: tools/check.sh ${{ inputs.compile && '--compile' || '' }}

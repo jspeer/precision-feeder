@@ -876,6 +876,113 @@ static void test_projection_matches_firing() {
   CHECK(predictions_checked > 50, "enough scheduled feeds were checked");
 }
 
+// ---- daylight saving -----------------------------------------------------------------------------------
+// A second fake with US Eastern rules (EST -5, EDT -4; second Sunday of March 02:00 -> 03:00, first Sunday of
+// November 02:00 -> 01:00), converting local times the way mktime does: a time in the skipped hour reads as standard
+// time (so 02:30 becomes 03:30 EDT), and a repeated hour resolves to its first (daylight-time) occurrence.
+
+static int64_t eastern_utc(int y, int mo, int d, int h, int mi, int off_h) {
+  return static_cast<int64_t>(days_from_civil(y, mo, d)) * 86400 + h * 3600 + mi * 60 - off_h * 3600;
+}
+static int nth_sunday(int y, int mo, int n) {
+  for (int d = 1, c = 0; d <= 31; d++)
+    if (weekday_from_days(days_from_civil(y, mo, d)) == 0 && ++c == n)
+      return d;
+  return 0;
+}
+static int eastern_offset_h(int64_t utc) {
+  int y;
+  unsigned m, d;
+  civil_from_days(static_cast<int32_t>(utc / 86400), y, m, d);
+  const int64_t start = eastern_utc(y, 3, nth_sunday(y, 3, 2), 2, 0, -5);
+  const int64_t end = eastern_utc(y, 11, nth_sunday(y, 11, 1), 2, 0, -4);
+  return (utc >= start && utc < end) ? -4 : -5;
+}
+
+class DstFeeder : public FeederCore {
+ public:
+  explicit DstFeeder(int64_t epoch) : ms_(epoch * 1000) {
+    this->set_feed_listener([this](const FeedRecord &r) {
+      if (r.source == static_cast<uint8_t>(Source::SCHEDULE) && r.result == 0)
+        this->fed_local.push_back(this->local_hhmm(r.epoch));
+    });
+    this->core_start(nullptr, nullptr, nullptr);
+    this->cfg.min_gap_s = 10;
+  }
+  void advance_s(int64_t s) {
+    for (int64_t t = 0; t < s; t++) {
+      up_ += 1000;
+      ms_ += 1000;
+      this->core_loop();
+    }
+  }
+  int local_hhmm(int64_t e) {
+    const LocalTime l = this->hal_local(e);
+    return l.hour * 100 + l.minute;
+  }
+  std::vector<int> fed_local;
+
+ protected:
+  uint32_t hal_millis() override { return static_cast<uint32_t>(up_); }
+  int64_t hal_uptime_ms() override { return up_; }
+  bool hal_time_valid() override { return true; }
+  int64_t hal_epoch() override { return ms_ / 1000; }
+  void hal_set_epoch(int64_t e) override { ms_ = e * 1000; }
+  LocalTime hal_local(int64_t e) override {
+    const int64_t l = e + eastern_offset_h(e) * 3600;
+    int y;
+    unsigned m, d;
+    civil_from_days(static_cast<int32_t>(l / 86400), y, m, d);
+    const int64_t r = ((l % 86400) + 86400) % 86400;
+    return LocalTime{y, static_cast<int>(m), static_cast<int>(d), static_cast<int>(r / 3600),
+                     static_cast<int>(r % 3600 / 60), static_cast<int>(r % 60)};
+  }
+  int64_t hal_local_to_epoch(int y, int mo, int d, int h, int mi) override {
+    for (int off : {-4, -5}) {
+      const int64_t u = eastern_utc(y, mo, d, h, mi, off);
+      if (eastern_offset_h(u) == off)
+        return u;
+    }
+    return eastern_utc(y, mo, d, h, mi, -5);  // in the skipped hour: read as standard time
+  }
+  void hal_servo_write(float) override {}
+  void hal_servo_release() override {}
+  void hal_save_settings(const Settings &, bool) override {}
+  void hal_save_calibration(const Calibration &, bool) override {}
+  void hal_save_state(const State &, bool) override {}
+
+  int64_t up_{0};
+  int64_t ms_;
+};
+
+/// Feeds an event at `minutes` past midnight from noon the day before `y-mo-d` for three days; returns local times.
+static std::vector<int> dst_run(int y, int mo, int d, int16_t minutes, Anchor anchor = Anchor::CLOCK) {
+  const int64_t start = eastern_utc(y, mo, d - 1, 12, 0, eastern_offset_h(eastern_utc(y, mo, d - 1, 12, 0, -5)));
+  DstFeeder f(start);
+  f.cfg.latitude = 40.7f;
+  f.cfg.longitude = -74.0f;
+  f.cfg.profiles[0].ev[0] = Event{1, static_cast<uint8_t>(anchor), minutes, 1, 0x7F};
+  f.cfg_changed();
+  f.advance_s(3 * 86400);
+  return f.fed_local;
+}
+
+static void test_daylight_saving() {
+  current = "daylight saving";
+  using V = std::vector<int>;
+  CHECK(dst_run(2027, 3, 14, 2 * 60 + 30) == (V{330, 230, 230}), "spring forward: 02:30 does not exist, feeds at 03:30, once");
+  CHECK(dst_run(2027, 3, 14, 8 * 60) == (V{800, 800, 800}), "spring forward: 08:00 stays 08:00");
+  CHECK(dst_run(2026, 11, 1, 1 * 60 + 30) == (V{130, 130, 130}), "fall back: 01:30 happens twice, feeds once");
+  CHECK(dst_run(2026, 11, 1, 8 * 60) == (V{800, 800, 800}), "fall back: 08:00 stays 08:00");
+  CHECK(dst_run(2026, 11, 1, 23 * 60 + 30) == (V{2330, 2330, 2330}), "fall back: 23:30 stays 23:30");
+  // Sunset moves by about an hour on the clock across the change; it must still feed once a day.
+  const V sunset = dst_run(2026, 11, 1, 0, Anchor::SUNSET);
+  CHECK(sunset.size() == 3, "sunset event feeds once a day across the change");
+  if (sunset.size() == 3)
+    CHECK(sunset[0] >= 1730 && sunset[0] <= 1800 && sunset[1] >= 1630 && sunset[1] <= 1700,
+          "and follows the clock change (about 17:45 EDT, then about 16:45 EST)");
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -901,6 +1008,7 @@ int main() {
   test_settings_migration();
   test_bug_batch_b();
   test_projection_matches_firing();
+  test_daylight_saving();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

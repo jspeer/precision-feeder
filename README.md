@@ -347,7 +347,7 @@ over-fed tank:
 | [DESIGN.md](DESIGN.md) | the design and the decisions behind it |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in each firmware version |
 | [docs/BENCH.md](docs/BENCH.md) | what has been tested on real hardware |
-| [AGENTS.md](AGENTS.md) | rules for contributors (human or AI) |
+| [AGENTS.md](AGENTS.md) | rules for contributors (human or AI); run `tools/check.sh` before sending changes |
 
 ```
 components/precision_feeder/      the logic (tray, guard, scheduler, sun maths), plain C++ and

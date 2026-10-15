@@ -84,8 +84,9 @@ substitutions.
   what was and was not tested.
 - Things listed as unverified in DESIGN.md must be checked against current
   ESPHome docs and, where relevant, real hardware before being relied on.
-- Run the host tests after touching the feeder logic, the protocol or the Python
-  client. With any C++17 compiler, from `tests/`:
+- Run `tools/check.sh` after any change: it builds and runs every host test (C++ with
+  -Werror, and Python) and validates both examples with ESPHome; CI runs the same script.
+  The individual commands, if you need one: With any C++17 compiler, from `tests/`:
   `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`; and

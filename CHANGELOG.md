@@ -8,6 +8,12 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 ## Unreleased
 
+- Tests and CI: a daylight-saving test (a US Eastern fake clock: the skipped and
+  repeated hours, daily times, and a sunset event across the change);
+  `tools/check.sh` runs every host test (C++ now with -Werror) and validates the
+  examples with ESPHome; `.github/workflows/ci.yml` runs it on every push (a full
+  compile on manual dispatch).
+
 - Refactor (no behaviour change): the scheduler and the projection get their
   events from one function, `for_each_occurrence_`, so what fires and what Next
   Feed / runway / Needs Food predict cannot drift apart again (the cause of two
