@@ -942,3 +942,13 @@ answer replayed), and refusals for a stale sequence number, a tampered byte, a
 write signed for another characteristic, and a proof for an earlier
 connection's nonce. 22/22. `sc_bond` did not get in the way of the client.
 
+### Home Assistant time on hardware (2026-10-14, firmware 0.4.0)
+
+`time_homeassistant` package enabled, timezone pinned (`!extend ha_time` with
+`timezone`). After a hard power cycle (clock lost), the log showed "Clock set by
+Home Assistant" first, which made the clock valid, and "Clock set by NTP" 4.4 s
+later, so the source then reads NTP (last sync wins, as designed). Home
+Assistant alone is therefore enough to set the clock when the internet is down.
+In normal running both re-sync every 15 minutes within seconds of each other, so
+"Time Source" almost always shows NTP.
+
