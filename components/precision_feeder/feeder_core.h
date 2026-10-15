@@ -415,6 +415,19 @@ class FeederCore {
   int64_t local_offset_s_(int64_t epoch);
   bool sun_cached_(const DayCtx &d, double &rise, double &set);
   void on_time_valid_();
+  /// One occurrence of a recurring event: event `event` of the active profile, for anchor day `day_no`.
+  struct Occurrence {
+    int32_t day_no;
+    uint8_t event;
+    int64_t epoch;     // when it is due
+    uint8_t portions;
+    bool fed;          // it already fed (or was finally refused) for this day: it will not run again
+  };
+  /// Calls fn(const Occurrence &) for every occurrence of the active profile's events whose anchor day is in
+  /// [first_day, last_day] and that would run: scheduler on, a feeding day (cadence, fast days), the event enabled
+  /// on that weekday, and its time resolvable. The one place that decides what the schedule contains; firing and
+  /// the projection (Next Feed, runway, Needs Food) both use it, so they cannot disagree.
+  template<typename Fn> void for_each_occurrence_(int32_t first_day, int32_t last_day, Fn &&fn);
   void project_();
   /// Scheduled feeds before this epoch are skipped (hold or reload pause); 0 = nothing blocks them.
   int64_t blocked_until_(int64_t now);

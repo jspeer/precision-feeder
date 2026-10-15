@@ -206,66 +206,74 @@ void FeederCore::update_solar_fault_() {
 
 static bool deferrable(Result r) { return r == Result::BUSY || r == Result::TOO_SOON; }
 
+template<typename Fn> void FeederCore::for_each_occurrence_(int32_t first_day, int32_t last_day, Fn &&fn) {
+  if (!this->cfg.scheduler_enabled)
+    return;  // one-shot feeds are separate and run regardless
+  const uint8_t ap = this->cfg.active_profile;
+  const Profile &p = this->cfg.profiles[ap];
+  for (int32_t day = first_day; day <= last_day; day++) {
+    const DayCtx d = this->make_day_(day);
+    if (!this->day_active_(p, d))
+      continue;
+    for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
+      const Event &ev = p.ev[e];
+      if (!ev.enabled || !(ev.days & (1 << d.wday)))
+        continue;
+      int minutes;
+      if (!this->resolve_minutes_(ev, d, minutes))
+        continue;  // a sun event with no location: skipped, and reported in Faults
+      const int64_t epoch = this->wall_to_epoch_(d.day_no, minutes);
+      if (epoch < 0)
+        continue;
+      // Each event feeds at most once per (anchor) day, also when it is moved later after it fed.
+      const bool fed = this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no);
+      fn(Occurrence{d.day_no, e, epoch, ev.portions, fed});
+    }
+  }
+}
+
 void FeederCore::fire_due_() {
   const int64_t now = this->hal_epoch();
   const int32_t today = this->today_();
   const bool held = this->hold_active() || this->reload_pause_active();
   bool state_dirty = false;
 
-  // Recurring events: only while the scheduler is enabled.
-  if (this->cfg.scheduler_enabled) {
-    const uint8_t ap = this->cfg.active_profile;
-    Profile &p = this->cfg.profiles[ap];
-    // Yesterday is included because an event such as "sunset + 3 h" can land after midnight, and tomorrow because
-    // one such as "sunrise - 10 h" lands the evening before its day.
-    for (int back = 1; back >= -1; back--) {
-      const DayCtx d = this->make_day_(today - back);
-      if (!this->day_active_(p, d))
-        continue;
-      for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
-        const Event &ev = p.ev[e];
-        if (!ev.enabled || !(ev.days & (1 << d.wday)))
-          continue;
-        if (this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no))
-          continue;
-        int minutes;
-        if (!this->resolve_minutes_(ev, d, minutes))
-          continue;
-        const int64_t fire = this->wall_to_epoch_(d.day_no, minutes);
-        if (fire < 0 || now < fire)
-          continue;
-        uint8_t &pending = this->pending_[ap][e];
-        const bool pending_here = pending != NO_PENDING && this->pending_day_[ap][e] == d.day_no;
-        if (now >= fire + EVENT_WINDOW_S) {
-          // Window closed. If it was refused while open, report that once; otherwise it was simply missed.
-          if (pending_here) {
-            this->report_(Source::SCHEDULE, ev.portions, static_cast<Result>(pending));
-            this->state_.fired[ap][e] = static_cast<uint32_t>(d.day_no);
-            pending = NO_PENDING;
-            state_dirty = true;
-          }
-          continue;
-        }
-        if (held) {
-          pending = static_cast<uint8_t>(Result::HOLD);
-          this->pending_day_[ap][e] = d.day_no;
-          continue;
-        }
-        uint8_t portions = ev.portions;
-        const Result check = this->check_guard_(portions, Source::SCHEDULE);
-        if (deferrable(check)) {
-          // Try again next tick while the window is open, without reporting a refusal yet.
-          pending = static_cast<uint8_t>(check);
-          this->pending_day_[ap][e] = d.day_no;
-          continue;
-        }
-        this->request_feed(ev.portions, Source::SCHEDULE);  // reports the outcome, accepted or refused
-        this->state_.fired[ap][e] = static_cast<uint32_t>(d.day_no);
+  // Recurring events. Yesterday is included because an event such as "sunset + 3 h" lands after midnight, and
+  // tomorrow because one such as "sunrise - 10 h" lands the evening before its day.
+  const uint8_t ap = this->cfg.active_profile;
+  this->for_each_occurrence_(today - 1, today + 1, [&](const Occurrence &o) {
+    if (o.fed || now < o.epoch)
+      return;
+    uint8_t &pending = this->pending_[ap][o.event];
+    const bool pending_here = pending != NO_PENDING && this->pending_day_[ap][o.event] == o.day_no;
+    if (now >= o.epoch + EVENT_WINDOW_S) {
+      // Window closed. If it was refused while open, report that once; otherwise it was simply missed.
+      if (pending_here) {
+        this->report_(Source::SCHEDULE, o.portions, static_cast<Result>(pending));
+        this->state_.fired[ap][o.event] = static_cast<uint32_t>(o.day_no);
         pending = NO_PENDING;
         state_dirty = true;
       }
+      return;
     }
-  }
+    if (held) {
+      pending = static_cast<uint8_t>(Result::HOLD);
+      this->pending_day_[ap][o.event] = o.day_no;
+      return;
+    }
+    uint8_t portions = o.portions;
+    const Result check = this->check_guard_(portions, Source::SCHEDULE);
+    if (deferrable(check)) {
+      // Try again next tick while the window is open, without reporting a refusal yet.
+      pending = static_cast<uint8_t>(check);
+      this->pending_day_[ap][o.event] = o.day_no;
+      return;
+    }
+    this->request_feed(o.portions, Source::SCHEDULE);  // reports the outcome, accepted or refused
+    this->state_.fired[ap][o.event] = static_cast<uint32_t>(o.day_no);
+    pending = NO_PENDING;
+    state_dirty = true;
+  });
 
   // One-shot (calendar-style) feeds: independent of the scheduler switch.
   bool cfg_dirty = false;
@@ -349,33 +357,13 @@ void FeederCore::project_() {
   };
   std::vector<Item> items;
   items.reserve(64);
-  if (this->cfg.scheduler_enabled) {
-    const uint8_t ap = this->cfg.active_profile;
-    const Profile &p = this->cfg.profiles[ap];
-    for (int off = -1; off <= HORIZON_DAYS; off++) {
-      const DayCtx d = this->make_day_(today + off);
-      if (!this->day_active_(p, d))
-        continue;
-      for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
-        const Event &ev = p.ev[e];
-        if (!ev.enabled || !(ev.days & (1 << d.wday)))
-          continue;
-        // Each event feeds at most once per (anchor) day. One that already fed today and was then moved later
-        // in the day does not feed again until tomorrow, so it is not "next" either.
-        if (this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no))
-          continue;
-        int minutes;
-        if (!this->resolve_minutes_(ev, d, minutes))
-          continue;
-        const int64_t fire = this->wall_to_epoch_(d.day_no, minutes);
-        if (fire <= now)
-          continue;
-        if (fire < blocked_until)
-          continue;
-        items.push_back({fire, ev.portions});
-      }
-    }
-  }
+  // The same occurrences the scheduler fires (for_each_occurrence_), minus those already fed, past, or inside a
+  // hold or the reload pause: exactly the ones that will run, if nothing else changes.
+  this->for_each_occurrence_(today - 1, today + HORIZON_DAYS, [&](const Occurrence &o) {
+    if (o.fed || o.epoch <= now || o.epoch < blocked_until)
+      return;
+    items.push_back({o.epoch, o.portions});
+  });
   for (const OneShot &os : this->cfg.oneshots) {
     if (os.epoch == 0 || os.done || static_cast<int64_t>(os.epoch) <= now)
       continue;

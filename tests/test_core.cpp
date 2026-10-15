@@ -809,6 +809,73 @@ static void test_bug_batch_b() {
   }
 }
 
+// R1 guard: the projection (Next Feed) and the scheduler must agree. For random schedules, every scheduled feed
+// must have been predicted (same minute), and every prediction must end in a feed or a reported refusal.
+static void test_projection_matches_firing() {
+  current = "projection matches firing";
+  uint32_t seed = 12345;
+  auto rnd = [&](uint32_t n) {
+    seed = seed * 1103515245u + 12345u;
+    return (seed >> 8) % n;
+  };
+  int predictions_checked = 0;
+  for (int run = 0; run < 25; run++) {
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->cfg.latitude = 40.0f + static_cast<float>(rnd(20));
+    f->cfg.longitude = -80.0f;
+    f->cfg.daily_cap = 6;
+    f->cfg.min_gap_s = 10;
+    f->cfg.reload_pause_min = 0;
+    Profile &p = f->cfg.profiles[0];
+    p.every_n = static_cast<uint8_t>(1 + rnd(2));
+    p.fast_days = rnd(3) == 0 ? static_cast<uint8_t>(1 << rnd(7)) : 0;
+    for (uint8_t e = 0; e < EVENTS_PER_PROFILE; e++) {
+      Event &ev = p.ev[e];
+      ev.enabled = rnd(4) != 0;
+      ev.anchor = static_cast<uint8_t>(rnd(3));
+      // Spread events out (different hours) so two never compete for the same minute.
+      ev.offset_min = ev.anchor == 0 ? static_cast<int16_t>(e * 300 + 60 + rnd(200))
+                                     : static_cast<int16_t>(static_cast<int>(rnd(240)) - 120 + (e - 2) * 60);
+      ev.portions = 1;
+      ev.days = rnd(4) == 0 ? static_cast<uint8_t>(0x7F & ~(1 << rnd(7))) : 0x7F;
+    }
+    f->cfg_changed();
+    f->advance(2000);
+    int64_t predicted = 0;
+    size_t seen = f->records.size();
+    for (int s = 0; s < 3 * 86400; s++) {
+      if (f->remaining() < 2) {
+        f->tray_reload();
+        f->advance(2000, 1000);
+        s += 2;
+      }
+      const int64_t next = f->next_event_epoch();
+      if (next != 0)
+        predicted = next;
+      f->advance(1000, 1000);
+      for (; seen < f->records.size(); seen++) {
+        const FeedRecord &r = f->records[seen];
+        if (r.source != static_cast<uint8_t>(Source::SCHEDULE))
+          continue;
+        predictions_checked++;
+        CHECK(predicted != 0 && r.epoch >= predicted && r.epoch < predicted + 60,
+              "a scheduled feed (or refusal) happened in the predicted minute");
+      }
+      if (predicted != 0 && f->now() > predicted + 120) {
+        // The predicted minute has passed: something must have been reported for it.
+        bool reported = false;
+        for (const FeedRecord &r : f->records)
+          if (r.source == static_cast<uint8_t>(Source::SCHEDULE) && r.epoch >= predicted && r.epoch < predicted + 60)
+            reported = true;
+        CHECK(reported, "a predicted feed did not silently vanish");
+        predicted = 0;
+      }
+    }
+  }
+  CHECK(predictions_checked > 50, "enough scheduled feeds were checked");
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -833,6 +900,7 @@ int main() {
   test_review_fixes();
   test_settings_migration();
   test_bug_batch_b();
+  test_projection_matches_firing();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;
