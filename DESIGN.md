@@ -422,6 +422,9 @@ the clock source and age, and fault flags.
 ## 9. Operational behaviour
 
 - ESP-IDF framework; WiFi fallback AP; OTA password; API encryption.
+- Dual stack (firmware 1.1.0): IPv6 next to IPv4 (`enable_ipv6`, default on). ESPHome 2026.9.1's Wi-Fi only
+  counts as connected with an IPv4 address, so an IPv6-only network needs a static IPv4 address
+  (`manual_ip`); decided 2026-10-15 (section 14, item 7).
 - No reboot on API or WiFi loss. No scheduled reboot.
 - Versioning `major.minor.revision`, exposed as a text sensor and in the Info
   characteristic.

@@ -95,6 +95,12 @@ const app = {
 
   /** Show the page the address asks for, or the first one there is once the build is known. */
   route() {
+    // Pages build themselves from the entities the device reports, so nothing is shown until the first burst of
+    // them has settled (a page mounted earlier would miss the parts of the build that had not arrived yet).
+    if (!this.current && !this.settled()) {
+      this.showLoading();
+      return;
+    }
     const [want, ...rest] = location.hash.replace(/^#/, '').split('/');
     const tabs = this.visibleTabs();
     let tab = tabs.find(t => t.id === want);

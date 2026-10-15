@@ -28,6 +28,8 @@ framework, WiFi, API, web server and status LED all enabled.
 | v1.0.1, BLE build (`ble.yaml`) | 1,309,291 B (71.4%) | 145,903 B (42.7%) |
 | v1.1.0 in progress (M7), no BLE (`basic.yaml`) | 1,025,135 B (55.9%) | 115,703 B (33.9%) |
 | v1.1.0 in progress (M7), BLE build (`ble.yaml`) | 1,358,551 B (74.0%) | 146,775 B (42.9%) |
+| v1.1.0 in progress (M8, IPv6 on), no BLE | 1,053,323 B (57.4%) | 117,503 B (34.4%) |
+| v1.1.0 in progress (M8, IPv6 on), BLE build | 1,386,983 B (75.6%) | 148,583 B (43.5%) |
 
 - **BLE costs about 318 KB of flash and about 31 KB of static RAM.**
 - **Flash is not a problem.** With BLE the app is 72% of its OTA slot, leaving

@@ -290,6 +290,18 @@ function parseOneshots(text) {
   return out;
 }
 
+/** What kind of address a wifi_info address is: "IPv4", "IPv6 link-local" (fe80::/10, this network only),
+ *  "IPv6 private" (fc00::/7, unique local), "IPv6"; '' for an empty or unset one. */
+function addressKind(addr) {
+  const a = String(addr || '').trim().toLowerCase();
+  if (!a || a === '0.0.0.0' || a === '::') return '';
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(a)) return 'IPv4';
+  if (!a.includes(':')) return '';
+  if (/^fe[89ab]/.test(a)) return 'IPv6 link-local';
+  if (/^f[cd]/.test(a)) return 'IPv6 private';
+  return 'IPv6';
+}
+
 // ---- store.js ----
 // The connection to the device and everything it has told us. One EventSource on /events: ESPHome's web server
 // sends a "ping" with the device's title and uptime, then every entity of the build with full detail (name,
@@ -2121,8 +2133,19 @@ PAGES.diagnostics = {
     if (net) {
       const n = (label, fn) => this.updaters.push(boundRow(net, label, fn));
       n('Wi-Fi network', () => store.text(E.wifiNetwork));
-      n('Addresses', () => [E.ipAddress1, E.ipAddress2, E.ipAddress3, E.ipAddress4]
-        .map(id => store.text(id)).filter(a => a && a !== '0.0.0.0').join(', '));
+      // One row per address the feeder has (IPv4 and, with IPv6 on, link-local and global ones).
+      for (const id of [E.ipAddress1, E.ipAddress2, E.ipAddress3, E.ipAddress4]) {
+        if (!store.has(id)) continue;
+        const r = row('', '');
+        r.row.classList.add('address-row');
+        net.appendChild(r.row);
+        this.updaters.push(() => {
+          const a = store.text(id), kind = addressKind(a);
+          r.row.hidden = !kind;
+          setText(r.row.firstChild, kind);
+          setText(r.value, a);
+        });
+      }
       if (store.has(E.wifiSignal)) {
         n('Signal', () => {
           const s = store.num(E.wifiSignal);
@@ -2399,6 +2422,12 @@ const app = {
 
   /** Show the page the address asks for, or the first one there is once the build is known. */
   route() {
+    // Pages build themselves from the entities the device reports, so nothing is shown until the first burst of
+    // them has settled (a page mounted earlier would miss the parts of the build that had not arrived yet).
+    if (!this.current && !this.settled()) {
+      this.showLoading();
+      return;
+    }
     const [want, ...rest] = location.hash.replace(/^#/, '').split('/');
     const tabs = this.visibleTabs();
     let tab = tabs.find(t => t.id === want);

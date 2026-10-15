@@ -27,6 +27,12 @@ substitutions:
   # Daylight saving and sunrise/sunset times depend on this being right.
   timezone: America/New_York
 
+  # --- Network ------------------------------------------------------------
+  # IPv6 alongside IPv4 (dual stack): the web app, Home Assistant and mDNS answer on both. "false" for
+  # IPv4 only. ESPHome's Wi-Fi needs an IPv4 address to count as connected, so on a network with no
+  # DHCPv4 give the feeder a static IPv4 address (wifi: manual_ip:); see the README.
+  enable_ipv6: "true"
+
   # --- Servo and tray (see components/precision_feeder/__init__.py) -------
   sweep_degrees: "175"         # angle the 7 slots span; 25 degrees per position
   min_pulse: 544us             # pulse width for 0 degrees (as the original firmware)
@@ -61,6 +67,11 @@ api:
 ota:
   - platform: esphome
     encryption: {}
+
+network:
+  enable_ipv6: ${enable_ipv6}
+  # Count Wi-Fi as connected without waiting for an IPv6 address, so IPv4-only networks are unaffected.
+  min_ipv6_addr_count: 0
 
 wifi:
   ssid: !secret wifi_ssid

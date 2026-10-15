@@ -63,6 +63,12 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
       fetched again only when a connection or write happens.
     Read-only; nothing secret is shown, because the device never reports it.
   - Maintenance also appears in builds without the calibration package (tray reload and the 24 h count).
+- IPv6 alongside IPv4 (`enable_ipv6` substitution in core.yaml, on by default): the web app, Home Assistant
+  and mDNS answer on both, and Diagnostics lists each address with its kind (IPv4, IPv6, link-local,
+  private). Wi-Fi still counts as connected on IPv4 alone, so IPv4-only networks are unaffected. IPv6-only
+  networks need a static IPv4 address (an ESPHome limit; see the README).
+- The web app waits for the device's entities to settle before showing a page, so a link straight to a page
+  (for example `#diagnostics`) no longer misses the parts of the build that arrive last.
 - BLE diagnostics (no protocol change, still protocol 2):
   - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
     Home Assistant): the connection, the last two bytes of the client's address,

@@ -273,7 +273,8 @@ calibration mode; dim cyan hold or reload pause.
 | `servo_pin` | `GPIO1` | servo signal |
 | `button_pin` | `GPIO2` | push button (button package) |
 | `status_led_pin` | `GPIO21` | onboard RGB LED (status_led package) |
-| `ntp_server_1` to `_3` | public pool | point at a local NTP server if there is no internet |
+| `ntp_server_1` to `_3` | public pool | point at a local NTP server if there is no internet. Of the defaults, `2.pool.ntp.org` also answers over IPv6 |
+| `enable_ipv6` | `"true"` | IPv6 alongside IPv4: the web app, Home Assistant and mDNS answer on both. `"false"` for IPv4 only |
 | `min_pulse` / `max_pulse` | `544us` / `2400us` | starting servo pulse range. Only used until you calibrate; then the saved values win. An MG90S is closer to 500 / 2500. |
 | `servo_invert` | `"false"` | `"true"` if the servo is mounted the other way round |
 | `sweep_degrees` | `"175"` | angle the 7 slots span (25° each). Leave it for the Rev2 print. |
@@ -347,6 +348,11 @@ over-fed tank:
   Writes need the shared `ble_key`; answers are not signed, so a client should
   pair (encrypted link) if it must trust what it reads. Leave the BLE package out
   if you do not need it. Details: [PROTOCOL.md](docs/PROTOCOL.md), Authentication.
+- **IPv6-only networks need a static IPv4 address.** The feeder runs dual stack (IPv4
+  and IPv6) and works on IPv4-only networks, but ESPHome's Wi-Fi only counts as
+  connected once it has an IPv4 address. On a network with no DHCPv4, set one with
+  `wifi: manual_ip:` in your YAML; for the clock, use an NTP server reachable over
+  IPv6 (`2.pool.ntp.org`, or your own).
 - **Sunrise and sunset events** need Latitude and Longitude set. On days with
   no sunrise or sunset (far north or south) they count from 06:00 and 18:00
   instead, and Faults says so.

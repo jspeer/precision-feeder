@@ -116,6 +116,7 @@ a { color: var(--accent); }
 .row-label { color: var(--muted); }
 .row-value { text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 13px; }
+.address-row .row-value { font-family: var(--mono); font-size: 13px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
 
 /* ---- pills, buttons, inputs ---- */

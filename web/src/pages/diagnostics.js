@@ -38,8 +38,19 @@ PAGES.diagnostics = {
     if (net) {
       const n = (label, fn) => this.updaters.push(boundRow(net, label, fn));
       n('Wi-Fi network', () => store.text(E.wifiNetwork));
-      n('Addresses', () => [E.ipAddress1, E.ipAddress2, E.ipAddress3, E.ipAddress4]
-        .map(id => store.text(id)).filter(a => a && a !== '0.0.0.0').join(', '));
+      // One row per address the feeder has (IPv4 and, with IPv6 on, link-local and global ones).
+      for (const id of [E.ipAddress1, E.ipAddress2, E.ipAddress3, E.ipAddress4]) {
+        if (!store.has(id)) continue;
+        const r = row('', '');
+        r.row.classList.add('address-row');
+        net.appendChild(r.row);
+        this.updaters.push(() => {
+          const a = store.text(id), kind = addressKind(a);
+          r.row.hidden = !kind;
+          setText(r.row.firstChild, kind);
+          setText(r.value, a);
+        });
+      }
       if (store.has(E.wifiSignal)) {
         n('Signal', () => {
           const s = store.num(E.wifiSignal);

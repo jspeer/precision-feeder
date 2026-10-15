@@ -13,7 +13,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8');
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
-  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots };`, ctx);
+  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots, addressKind };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -142,4 +142,15 @@ test('One-shot Feeds', () => {
   assert.equal(o[1].portions, 2);
   assert.equal(o[1].when.time, '07:30');
   assert.deepEqual(plain(P.parseOneshots('none')), []);
+});
+
+test('address kinds', () => {
+  assert.equal(P.addressKind('172.16.50.162'), 'IPv4');
+  assert.equal(P.addressKind('fe80::1234:56ff:fe78:9abc'), 'IPv6 link-local');
+  assert.equal(P.addressKind('FE80::1'), 'IPv6 link-local');
+  assert.equal(P.addressKind('fd00::1'), 'IPv6 private');
+  assert.equal(P.addressKind('2001:db8::1'), 'IPv6');
+  assert.equal(P.addressKind(''), '');
+  assert.equal(P.addressKind('0.0.0.0'), '');
+  assert.equal(P.addressKind('::'), '');
 });

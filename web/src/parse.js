@@ -184,3 +184,15 @@ function parseOneshots(text) {
   }
   return out;
 }
+
+/** What kind of address a wifi_info address is: "IPv4", "IPv6 link-local" (fe80::/10, this network only),
+ *  "IPv6 private" (fc00::/7, unique local), "IPv6"; '' for an empty or unset one. */
+function addressKind(addr) {
+  const a = String(addr || '').trim().toLowerCase();
+  if (!a || a === '0.0.0.0' || a === '::') return '';
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(a)) return 'IPv4';
+  if (!a.includes(':')) return '';
+  if (/^fe[89ab]/.test(a)) return 'IPv6 link-local';
+  if (/^f[cd]/.test(a)) return 'IPv6 private';
+  return 'IPv6';
+}
