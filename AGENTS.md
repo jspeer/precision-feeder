@@ -97,6 +97,9 @@ substitutions.
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
   `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.
+- BLE protocol behaviour belongs in `BleEngine` (`engine.*`), which must stay free of
+  ESPHome includes; the radio is reached only through `BleTransport`. New protocol
+  behaviour gets a test in `tests/test_ble_engine.cpp`.
 - Do not flash or upload to a device without the owner's explicit say-so.
 - Do not invent ESPHome options or BLE behaviour from memory; check the docs.
 
@@ -114,11 +117,11 @@ docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
-              and precision_feeder_ble/ (optional BLE protocol; protocol.h and crypto.h are pure and
-              host-tested)
+              and precision_feeder_ble/ (optional BLE protocol: protocol.h, crypto.h and BleEngine in
+              engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)
 packages/     reusable YAML packages
 examples/     basic.yaml, ble.yaml
-tests/        host-side C++ tests (test_core.cpp, test_logic.cpp, test_protocol.cpp)
+tests/        host-side C++ tests (test_core, test_logic, test_protocol, test_ble_engine; fake_feeder.h)
 tools/        Python reference client for the BLE protocol, and its tests
 ```
 

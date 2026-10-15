@@ -22,6 +22,10 @@ echo "== C++ host tests"
 "$OUT/test_logic" | tail -1
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder_ble tests/test_protocol.cpp -o "$OUT/test_protocol"
 "$OUT/test_protocol"
+"$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder -Icomponents/precision_feeder_ble -Itests \
+  tests/test_ble_engine.cpp components/precision_feeder_ble/engine.cpp components/precision_feeder/feeder_*.cpp \
+  -o "$OUT/test_ble_engine"
+"$OUT/test_ble_engine"
 
 echo "== Python client tests"
 (cd tools && python3 -m unittest -q test_precision_feeder_ble)

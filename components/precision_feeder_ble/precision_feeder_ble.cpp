@@ -1,11 +1,11 @@
+// Precision Feeder BLE control plane: the ESPHome adapter (see precision_feeder_ble.h; the protocol is engine.cpp).
+//
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "precision_feeder_ble.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <vector>
 
 #include <esp_random.h>
 
@@ -17,61 +17,27 @@ namespace precision_feeder {
 
 static const char *const TAG = "precision_feeder_ble";
 
-// The protocol's layout constants must agree with the feeder component.
-static_assert(proto::POSITIONS == NUM_POSITIONS, "protocol and feeder disagree on the number of positions");
-static_assert(proto::PROFILES == NUM_PROFILES, "protocol and feeder disagree on the number of profiles");
-static_assert(proto::EVENTS_PER_PROFILE == EVENTS_PER_PROFILE, "protocol and feeder disagree on events per profile");
-
-static constexpr uint32_t STATUS_PERIOD_MS = 500;
-
-static std::vector<uint8_t> to_vector(const uint8_t *data, size_t n) { return std::vector<uint8_t>(data, data + n); }
-
-// ---------------------------------------------------------------------------------------------
-// Setup
-// ---------------------------------------------------------------------------------------------
-
 void PrecisionFeederBle::setup() {
-  // Info: protocol version, capability bits, positions, profiles, events per profile.
-  uint16_t caps = proto::CAP_SOLAR | proto::CAP_PROFILE_EDIT | proto::CAP_CALIBRATION | proto::CAP_HOLD_FOREVER |
-                  proto::CAP_SERVO_PULSE | proto::CAP_AUTH;
-  if (this->time_policy_ != proto::TimePolicy::OFF)
-    caps |= proto::CAP_TIME_PUSH;
-  uint8_t info[6];
-  info[0] = proto::PROTOCOL_VERSION;
-  proto::put_u16(info + 1, caps);
-  info[3] = proto::POSITIONS;
-  info[4] = proto::PROFILES;
-  info[5] = proto::EVENTS_PER_PROFILE;
-  this->info_->set_value(to_vector(info, sizeof(info)));
+  this->engine_ = new BleEngine(*this->feeder_, *this);  // lives as long as the device runs
+  this->engine_->set_key(this->key_.data());
+  this->key_.fill(0);  // the engine keeps its own copy
+  this->engine_->set_time_policy(this->time_policy_);
+  this->engine_->set_network_time_stale_ms(this->network_stale_ms_);
+  this->engine_->start();
 
-  this->command_->on_write([this](std::span<const uint8_t> data, uint16_t) { this->on_command_(data); });
-  this->profile_->on_write([this](std::span<const uint8_t> data, uint16_t) {
-    this->on_record_write_(proto::CHANNEL_PROFILE, proto::OP_PROFILE_WRITE, data);
-  });
-  this->config_->on_write([this](std::span<const uint8_t> data, uint16_t) {
-    this->on_record_write_(proto::CHANNEL_CONFIG, proto::OP_CONFIG_WRITE, data);
-  });
-  this->calibration_->on_write([this](std::span<const uint8_t> data, uint16_t) {
-    this->on_record_write_(proto::CHANNEL_CALIBRATION, proto::OP_CALIBRATION_WRITE, data);
-  });
-
-  // Nothing but Info and Auth is readable until a client has authenticated.
-  this->clear_reads_();
-  this->new_nonce_();
-
-  // Each connection gets a new challenge and starts unauthenticated; nothing survives a disconnect.
-  this->server_->on_connect([this](uint16_t) {
-    this->replay_.clear();
-    this->clear_reads_();
-    this->new_nonce_();
-  });
-  this->server_->on_disconnect([this](uint16_t) {
-    this->session_.end();
-    this->replay_.clear();
-    this->clear_reads_();
-  });
-  this->feeder_->set_feed_listener([this](const FeedRecord &record) { this->publish_event_(record); });
+  for (uint8_t channel : {proto::CHANNEL_COMMAND, proto::CHANNEL_PROFILE, proto::CHANNEL_CONFIG,
+                          proto::CHANNEL_CALIBRATION}) {
+    // `data` points into the characteristic's own stored value; the engine copies it before answering.
+    this->chars_[channel]->on_write([this, channel](std::span<const uint8_t> data, uint16_t) {
+      this->engine_->on_write(channel, data.data(), data.size());
+    });
+  }
+  this->server_->on_connect([this](uint16_t) { this->engine_->on_connect(); });
+  this->server_->on_disconnect([this](uint16_t) { this->engine_->on_disconnect(); });
+  this->feeder_->set_feed_listener([this](const FeedRecord &record) { this->engine_->on_feed(record); });
 }
+
+void PrecisionFeederBle::loop() { this->engine_->loop(millis()); }
 
 void PrecisionFeederBle::dump_config() {
   const char *policy = "fallback_only";
@@ -86,624 +52,34 @@ void PrecisionFeederBle::dump_config() {
                 (unsigned) (this->network_stale_ms_ / 3600000u));
 }
 
-void PrecisionFeederBle::loop() {
-  if (!this->authorized_())
+void PrecisionFeederBle::set_value(uint8_t channel, const uint8_t *data, size_t n, bool notify) {
+  Characteristic *c = channel < sizeof(this->chars_) / sizeof(this->chars_[0]) ? this->chars_[channel] : nullptr;
+  if (c == nullptr)
     return;
-  const uint32_t now = millis();
-  if (!this->force_status_ && now - this->last_status_ms_ < STATUS_PERIOD_MS)
-    return;
-  this->last_status_ms_ = now;
-  this->publish_status_(this->force_status_);
-  this->force_status_ = false;
+  c->set_value(std::vector<uint8_t>(data, data + n));
+  if (notify)
+    c->notify();
 }
 
-// ---------------------------------------------------------------------------------------------
-// Command characteristic
-// ---------------------------------------------------------------------------------------------
-
-void PrecisionFeederBle::send_response_(const uint8_t response[proto::RESPONSE_SIZE]) {
-  this->response_->set_value(to_vector(response, proto::RESPONSE_SIZE));  // also readable if the notify is missed
-  this->response_->notify();
+void PrecisionFeederBle::random(uint8_t *out, size_t n) {
+  esp_fill_random(out, n);  // hardware RNG; the radio is on, so it is a true random source
 }
 
-void PrecisionFeederBle::respond_write_(uint8_t opcode, uint8_t result, uint8_t detail) {
-  const uint8_t response[proto::RESPONSE_SIZE] = {this->record_seq_, opcode, result, detail};
-  if (this->record_write_len_ > 0)
-    this->replay_.store(this->record_channel_, this->record_write_, this->record_write_len_, response,
-                        static_cast<uint64_t>(this->feeder_->uptime()));
-  this->send_response_(response);
-}
-
-// ---------------------------------------------------------------------------------------------
-// Authentication
-// ---------------------------------------------------------------------------------------------
-
-void PrecisionFeederBle::new_nonce_() {
-  uint8_t nonce[crypto::NONCE_SIZE];
-  esp_fill_random(nonce, sizeof(nonce));  // hardware RNG; the radio is on, so it is a true random source
-  this->session_.start(nonce);
-  this->auth_->set_value(to_vector(nonce, sizeof(nonce)));
-}
-
-void PrecisionFeederBle::clear_reads_() {
-  this->status_->set_value(std::vector<uint8_t>(proto::STATUS_SIZE, 0));
-  this->profile_->set_value(std::vector<uint8_t>(proto::PROFILE_EVENT_SIZE, 0));
-  this->config_->set_value(std::vector<uint8_t>(proto::CONFIG_SET_SIZE, 0));
-  this->calibration_->set_value(std::vector<uint8_t>(proto::CALIBRATION_SET_SIZE, 0));
-  this->response_->set_value(std::vector<uint8_t>(proto::RESPONSE_SIZE, 0));
-  std::memset(this->last_status_, 0, sizeof(this->last_status_));
-}
-
-void PrecisionFeederBle::handle_auth_(uint8_t seq, const uint8_t *proof, size_t n, uint64_t now) {
-  uint8_t detail = 0;
-  const bool was_authenticated = this->session_.authenticated();
-  const uint8_t result = this->session_.authenticate(seq, proof, n, now, detail);
-  if (result == proto::RES_OK) {
-    // The retry cache is NOT cleared here: connect and disconnect already start every session with an empty one,
-    // and clearing it on a repeated AUTH would let a retried write execute a second time.
-    if (!was_authenticated) {
-      ESP_LOGI(TAG, "BLE client authenticated");
-      this->force_status_ = true;  // send fresh status straight away
-    }
-  } else {
-    ESP_LOGW(TAG, "BLE authentication refused (detail %u)", detail);
-    if (detail == proto::AUTH_DETAIL_BAD_PROOF)
-      this->new_nonce_();  // a guess is never tried against the same challenge twice
-  }
-  const uint8_t response[proto::RESPONSE_SIZE] = {seq, proto::OP_AUTH, result, detail};
-  this->send_response_(response);
-}
-
-void PrecisionFeederBle::on_command_(std::span<const uint8_t> data) {
-  if (data.empty())
-    return;
-  // Copy first: answering can notify and set values, and `data` points into ESPHome's buffer.
-  uint8_t command[proto::ReplayCache::MAX_COMMAND];
-  const size_t n = std::min(data.size(), proto::ReplayCache::MAX_COMMAND);
-  std::memcpy(command, data.data(), n);
-  const uint8_t seq = command[0];
-  if (n < 2) {
-    const uint8_t response[proto::RESPONSE_SIZE] = {seq, 0, proto::RES_INVALID_ARG, 0};
-    this->send_response_(response);
-    return;
-  }
-  const uint8_t opcode = command[1];
-  const uint64_t now = static_cast<uint64_t>(this->feeder_->uptime());
-  if (opcode == proto::OP_AUTH) {
-    this->handle_auth_(seq, command + 2, n - 2, now);
-    return;
-  }
-
-  uint8_t response[proto::RESPONSE_SIZE];
-  if (this->replay_.find(proto::CHANNEL_COMMAND, command, n, now, response)) {
-    // A retry of a command we already answered: repeat the answer, do not act again.
-    ESP_LOGI(TAG, "Command seq %u repeated, replaying the earlier answer", seq);
-    this->send_response_(response);
-    return;
-  }
-
-  uint8_t detail = 0;
-  uint8_t result = this->session_.check(proto::CHANNEL_COMMAND, command, n, detail);
-  if (result != proto::RES_OK) {
-    ESP_LOGW(TAG, "Command 0x%02X seq %u refused: not authorized (detail %u)", opcode, seq, detail);
-    const uint8_t refused[proto::RESPONSE_SIZE] = {seq, opcode, result, detail};
-    this->send_response_(refused);
-    return;
-  }
-  this->session_.accept(seq);
-
-  if (n < 2 + crypto::TAG_SIZE) {
-    // Signed, but no room for an opcode: what looked like the opcode is the tag's first byte.
-    result = proto::RES_INVALID_ARG;
-    detail = 0;
-  } else {
-    result = this->execute_(opcode, command + 2, n - 2 - crypto::TAG_SIZE, detail);
-  }
-  response[0] = seq;
-  response[1] = opcode;
-  response[2] = result;
-  response[3] = detail;
-  this->replay_.store(proto::CHANNEL_COMMAND, command, n, response, now);
-  ESP_LOGI(TAG, "Command 0x%02X seq %u -> %s", opcode, seq, PrecisionFeeder::result_name(static_cast<Result>(result)));
-  this->send_response_(response);
-}
-
-uint8_t PrecisionFeederBle::execute_(uint8_t opcode, const uint8_t *args, size_t n, uint8_t &detail) {
-  using namespace proto;
-  PrecisionFeeder &f = *this->feeder_;
-  auto res = [](Result r) { return static_cast<uint8_t>(r); };
-
-  switch (opcode) {
-    case OP_FEED: {
-      if (n != 1)
-        return RES_INVALID_ARG;
-      uint8_t accepted = 0;
-      const Result r = f.request_feed(args[0], Source::BLE, &accepted);
-      detail = r == Result::OK ? accepted : f.remaining();
-      return res(r);
-    }
-    case OP_TRAY_RELOAD:
-      if (n != 0)
-        return RES_INVALID_ARG;
-      if (f.calibration_mode())
-        return res(Result::CALIBRATING);
-      f.tray_reload();
-      detail = f.remaining();
-      return RES_OK;
-
-    case OP_SET_PROFILE:
-      if (n != 1 || args[0] >= PROFILES)
-        return RES_INVALID_ARG;
-      f.cfg.active_profile = args[0];
-      f.cfg_changed();
-      detail = args[0];
-      return RES_OK;
-
-    case OP_HOLD: {
-      if (n != 4)
-        return RES_INVALID_ARG;
-      const uint32_t minutes = get_u32(args);
-      if (minutes == 0) {
-        f.cancel_hold();
-        return RES_OK;
-      }
-      if (minutes == 0xFFFFFFFFu) {
-        f.set_hold_indefinite();
-        return RES_OK;
-      }
-      return res(f.set_hold_minutes(minutes));
-    }
-    case OP_STOP:
-      if (n != 0)
-        return RES_INVALID_ARG;
-      f.stop();
-      return RES_OK;
-
-    case OP_SET_TIME: {
-      if (n != 6)
-        return RES_INVALID_ARG;
-      const uint32_t epoch = get_u32(args);
-      // args[4..5] is the sender's UTC offset in minutes. The device's timezone is fixed at build time
-      // (DESIGN.md section 6), so it is accepted for forward compatibility and not used.
-      const uint8_t decision = decide_ble_time(this->time_policy_, epoch, f.network_time_age_ms(), this->network_stale_ms_);
-      if (decision != RES_OK) {
-        ESP_LOGI(TAG, "Clock from BLE not applied: %s", PrecisionFeeder::result_name(static_cast<Result>(decision)));
-        return decision;
-      }
-      f.set_system_time(epoch);
-      return RES_OK;
-    }
-    case OP_SET_LOCATION: {
-      if (n != 8)
-        return RES_INVALID_ARG;
-      const int32_t lat = get_i32(args);
-      const int32_t lon = get_i32(args + 4);
-      if (!config_value_ok(CFG_LATITUDE_E5, lat) || !config_value_ok(CFG_LONGITUDE_E5, lon))
-        return RES_INVALID_ARG;
-      f.cfg.latitude = static_cast<float>(lat) / 100000.0f;
-      f.cfg.longitude = static_cast<float>(lon) / 100000.0f;
-      f.cfg_changed();
-      return RES_OK;
-    }
-    case OP_CALIBRATE:
-      if (n != 1 || args[0] > 1)
-        return RES_INVALID_ARG;
-      f.set_calibration_mode(args[0] == 1);
-      return RES_OK;
-
-    case OP_JOG: {
-      if (n != 3)
-        return RES_INVALID_ARG;
-      const int16_t delta = get_i16(args + 1);
-      if (delta < -2 * CAL_MAX || delta > 2 * CAL_MAX)
-        return RES_INVALID_ARG;
-      return res(f.jog_calibration(args[0], delta));
-    }
-    case OP_SAVE_CALIBRATION:
-      if (n != 0)
-        return RES_INVALID_ARG;
-      f.save_calibration();
-      return RES_OK;
-
-    case OP_SET_POSITION:
-      if (n != 1 || args[0] > MAX_PORTIONS)
-        return RES_INVALID_ARG;
-      if (f.calibration_mode())
-        return res(Result::CALIBRATING);
-      f.declare_position(args[0]);
-      detail = f.remaining();
-      return RES_OK;
-
-    case OP_SET_TIMEZONE:  // reserved: the timezone is set at build time
+void PrecisionFeederBle::log(LogLevel level, const char *message) {
+  switch (level) {
+    case LogLevel::kError:
+      ESP_LOGE(TAG, "%s", message);
+      break;
+    case LogLevel::kWarn:
+      ESP_LOGW(TAG, "%s", message);
+      break;
+    case LogLevel::kInfo:
+      ESP_LOGI(TAG, "%s", message);
+      break;
     default:
-      return RES_UNSUPPORTED;
-  }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Profile characteristic
-//
-// Note for the record writes below (profile, config, calibration): ESPHome passes the written bytes as a span into
-// the characteristic's own stored value, and the handlers replace that value (set_value) so that a following read
-// returns the record the client asked for. on_record_write_ therefore copies the write before anything else; the
-// handlers get a span into that copy.
-// ---------------------------------------------------------------------------------------------
-
-void PrecisionFeederBle::set_profile_read_(uint8_t profile, uint8_t event) {
-  const Profile &p = this->feeder_->cfg.profiles[profile];
-  if (event == proto::QUERY_HEADER) {
-    proto::ProfileHeaderRec r;
-    r.profile = profile;
-    r.every_n = p.every_n;
-    r.fast_mask = p.fast_days;
-    r.anchor_day = static_cast<uint16_t>(p.anchor_day);
-    uint8_t out[proto::PROFILE_HEADER_SIZE];
-    proto::encode_profile_header(r, out);
-    this->profile_->set_value(to_vector(out, sizeof(out)));
-  } else {
-    const Event &e = p.ev[event];
-    proto::ProfileEventRec r;
-    r.profile = profile;
-    r.event = event;
-    r.enabled = e.enabled;
-    r.anchor = e.anchor;
-    r.offset_min = e.offset_min;
-    r.portions = e.portions;
-    r.days = e.days;
-    uint8_t out[proto::PROFILE_EVENT_SIZE];
-    proto::encode_profile_event(r, out);
-    this->profile_->set_value(to_vector(out, sizeof(out)));
-  }
-}
-
-void PrecisionFeederBle::on_record_write_(uint8_t channel, uint8_t opcode, std::span<const uint8_t> data) {
-  if (data.empty())
-    return;
-  // Copy first (see the note above): the handlers replace the characteristic's value, which `data` points into.
-  uint8_t write[proto::ReplayCache::MAX_COMMAND];
-  const size_t n = std::min(data.size(), proto::ReplayCache::MAX_COMMAND);
-  std::memcpy(write, data.data(), n);
-  const uint8_t seq = write[0];
-  const uint64_t now = static_cast<uint64_t>(this->feeder_->uptime());
-
-  uint8_t response[proto::RESPONSE_SIZE];
-  if (this->replay_.find(channel, write, n, now, response)) {
-    this->send_response_(response);  // a retry: same answer, not applied again
-    return;
-  }
-  uint8_t detail = 0;
-  const uint8_t result = this->session_.check(channel, write, n, detail);
-  if (result != proto::RES_OK) {
-    ESP_LOGW(TAG, "Write to 0x%02X seq %u refused: not authorized (detail %u)", channel, seq, detail);
-    const uint8_t refused[proto::RESPONSE_SIZE] = {seq, opcode, result, detail};
-    this->send_response_(refused);
-    return;
-  }
-  this->session_.accept(seq);
-
-  // The record sits between the sequence number and the tag. respond_write_ answers with this seq and stores the
-  // answer for retries.
-  this->record_seq_ = seq;
-  this->record_channel_ = channel;
-  std::memcpy(this->record_write_, write, n);
-  this->record_write_len_ = n;
-  const std::span<const uint8_t> record(write + 1, n - 1 - crypto::TAG_SIZE);
-  if (record.empty()) {
-    this->respond_write_(opcode, proto::RES_INVALID_ARG, 0);
-  } else if (channel == proto::CHANNEL_PROFILE) {
-    this->handle_profile_(record);
-  } else if (channel == proto::CHANNEL_CONFIG) {
-    this->handle_config_(record);
-  } else {
-    this->handle_calibration_(record);
-  }
-  this->record_seq_ = 0;
-  this->record_write_len_ = 0;
-}
-
-void PrecisionFeederBle::handle_profile_(std::span<const uint8_t> d) {
-  using namespace proto;
-  if (d.empty())
-    return;
-  PrecisionFeeder &f = *this->feeder_;
-  const uint8_t profile_hint = d.size() > 1 ? d[1] : 0;
-
-  switch (d[0]) {
-    case PROFILE_TAG_HEADER: {
-      ProfileHeaderRec r;
-      if (!decode_profile_header(d.data(), d.size(), r) || !valid_profile_header(r)) {
-        this->respond_write_(OP_PROFILE_WRITE, RES_INVALID_ARG, profile_hint);
-        return;
-      }
-      Profile &p = f.cfg.profiles[r.profile];
-      p.every_n = r.every_n;
-      p.fast_days = r.fast_mask;
-      p.anchor_day = r.anchor_day;
-      if (r.anchor_day == 0)
-        f.restart_cadence_today(r.profile);  // 0 means "start the cycle today"
-      f.cfg_changed();
-      this->set_profile_read_(r.profile, QUERY_HEADER);
-      this->respond_write_(OP_PROFILE_WRITE, RES_OK, r.profile);
-      return;
-    }
-    case PROFILE_TAG_EVENT: {
-      ProfileEventRec r;
-      if (!decode_profile_event(d.data(), d.size(), r) || !valid_profile_event(r)) {
-        this->respond_write_(OP_PROFILE_WRITE, RES_INVALID_ARG, profile_hint);
-        return;
-      }
-      Event &e = f.cfg.profiles[r.profile].ev[r.event];
-      e.enabled = r.enabled;
-      e.anchor = r.anchor;
-      e.offset_min = r.offset_min;
-      e.portions = r.portions;
-      e.days = r.days;
-      f.cfg_changed();
-      this->set_profile_read_(r.profile, r.event);
-      this->respond_write_(OP_PROFILE_WRITE, RES_OK, r.profile);
-      return;
-    }
-    case PROFILE_TAG_QUERY: {
-      if (d.size() != PROFILE_QUERY_SIZE || d[1] >= PROFILES || (d[2] != QUERY_HEADER && d[2] >= proto::EVENTS_PER_PROFILE)) {
-        this->respond_write_(OP_PROFILE_WRITE, RES_INVALID_ARG, profile_hint);
-        return;
-      }
-      // Copy first: set_value() replaces the characteristic's stored bytes, which `d` points into.
-      const uint8_t profile = d[1];
-      const uint8_t event = d[2];
-      this->set_profile_read_(profile, event);
-      this->respond_write_(OP_PROFILE_WRITE, RES_OK, profile);
-      return;
-    }
-    default:
-      this->respond_write_(OP_PROFILE_WRITE, RES_INVALID_ARG, profile_hint);
-      return;
-  }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Config characteristic
-// ---------------------------------------------------------------------------------------------
-
-bool PrecisionFeederBle::get_config_(uint8_t key, int32_t &value) const {
-  using namespace proto;
-  const Settings &c = this->feeder_->cfg;
-  switch (key) {
-    case CFG_MIN_GAP_S:
-      value = c.min_gap_s;
-      return true;
-    case CFG_PORTION_GAP_S:
-      value = c.portion_gap_s;
-      return true;
-    case CFG_RELOAD_PAUSE_MIN:
-      value = c.reload_pause_min;
-      return true;
-    case CFG_REFILL_INTERVAL_DAYS:
-      value = c.refill_interval_days;
-      return true;
-    case CFG_DAILY_CAP:
-      value = c.daily_cap;
-      return true;
-    case CFG_MAX_PORTIONS_CMD:
-      value = c.max_portions_cmd;
-      return true;
-    case CFG_SCHEDULER_ENABLED:
-      value = c.scheduler_enabled;
-      return true;
-    case CFG_LATITUDE_E5:
-      value = static_cast<int32_t>(std::lround(c.latitude * 100000.0f));
-      return true;
-    case CFG_LONGITUDE_E5:
-      value = static_cast<int32_t>(std::lround(c.longitude * 100000.0f));
-      return true;
-    case CFG_MIN_PULSE_US:
-      value = this->feeder_->min_pulse_us();
-      return true;
-    case CFG_MAX_PULSE_US:
-      value = this->feeder_->max_pulse_us();
-      return true;
-    default:
-      return false;
-  }
-}
-
-void PrecisionFeederBle::set_config_read_(uint8_t key) {
-  int32_t value = 0;
-  if (!this->get_config_(key, value))
-    return;
-  uint8_t out[proto::CONFIG_SET_SIZE];
-  out[0] = key;
-  proto::put_i32(out + 1, value);
-  this->config_->set_value(to_vector(out, sizeof(out)));
-}
-
-void PrecisionFeederBle::handle_config_(std::span<const uint8_t> d) {
-  using namespace proto;
-  if (d.empty())
-    return;
-  PrecisionFeeder &f = *this->feeder_;
-
-  if (d.size() == QUERY_SIZE && (d[0] & QUERY_FLAG)) {
-    const uint8_t key = d[0] & ~QUERY_FLAG;
-    if (!config_key_known(key)) {
-      this->respond_write_(OP_CONFIG_WRITE, RES_INVALID_ARG, key);
-      return;
-    }
-    this->set_config_read_(key);
-    this->respond_write_(OP_CONFIG_WRITE, RES_OK, key);
-    return;
-  }
-
-  const uint8_t key = d[0];
-  if (d.size() != CONFIG_SET_SIZE || !config_key_known(key)) {
-    this->respond_write_(OP_CONFIG_WRITE, RES_INVALID_ARG, key);
-    return;
-  }
-  const int32_t v = get_i32(d.data() + 1);
-  if (!config_value_ok(key, v)) {
-    this->respond_write_(OP_CONFIG_WRITE, RES_INVALID_ARG, key);
-    return;
-  }
-  Settings &c = f.cfg;
-  switch (key) {
-    case CFG_MIN_GAP_S:
-      c.min_gap_s = static_cast<uint16_t>(v);
+      ESP_LOGD(TAG, "%s", message);
       break;
-    case CFG_PORTION_GAP_S:
-      c.portion_gap_s = static_cast<uint16_t>(v);
-      break;
-    case CFG_RELOAD_PAUSE_MIN:
-      c.reload_pause_min = static_cast<uint16_t>(v);
-      break;
-    case CFG_REFILL_INTERVAL_DAYS:
-      c.refill_interval_days = static_cast<uint16_t>(v);
-      break;
-    case CFG_DAILY_CAP:
-      c.daily_cap = static_cast<uint8_t>(v);
-      break;
-    case CFG_MAX_PORTIONS_CMD:
-      c.max_portions_cmd = static_cast<uint8_t>(v);
-      break;
-    case CFG_SCHEDULER_ENABLED:
-      c.scheduler_enabled = static_cast<uint8_t>(v);
-      break;
-    case CFG_LATITUDE_E5:
-      c.latitude = static_cast<float>(v) / 100000.0f;
-      break;
-    case CFG_LONGITUDE_E5:
-      c.longitude = static_cast<float>(v) / 100000.0f;
-      break;
-    case CFG_MIN_PULSE_US:
-    case CFG_MAX_PULSE_US: {
-      // The pair must stay at least 500 us apart; the core checks it and moves the servo in calibration mode.
-      const uint16_t lo = key == CFG_MIN_PULSE_US ? static_cast<uint16_t>(v) : f.min_pulse_us();
-      const uint16_t hi = key == CFG_MAX_PULSE_US ? static_cast<uint16_t>(v) : f.max_pulse_us();
-      if (f.set_pulse_range(lo, hi) != Result::OK) {
-        this->respond_write_(OP_CONFIG_WRITE, RES_INVALID_ARG, key);
-        return;
-      }
-      break;
-    }
   }
-  f.cfg_changed();
-  this->set_config_read_(key);
-  this->respond_write_(OP_CONFIG_WRITE, RES_OK, key);
-}
-
-// ---------------------------------------------------------------------------------------------
-// Calibration characteristic
-// ---------------------------------------------------------------------------------------------
-
-void PrecisionFeederBle::set_calibration_read_(uint8_t index) {
-  if (index >= proto::POSITIONS)
-    return;
-  uint8_t out[proto::CALIBRATION_SET_SIZE];
-  out[0] = index;
-  proto::put_i16(out + 1, this->feeder_->calib.offsets[index]);
-  this->calibration_->set_value(to_vector(out, sizeof(out)));
-}
-
-void PrecisionFeederBle::handle_calibration_(std::span<const uint8_t> d) {
-  using namespace proto;
-  if (d.empty())
-    return;
-
-  if (d.size() == QUERY_SIZE && (d[0] & QUERY_FLAG)) {
-    const uint8_t index = d[0] & ~QUERY_FLAG;
-    if (index >= POSITIONS) {
-      this->respond_write_(OP_CALIBRATION_WRITE, RES_INVALID_ARG, index);
-      return;
-    }
-    this->set_calibration_read_(index);
-    this->respond_write_(OP_CALIBRATION_WRITE, RES_OK, index);
-    return;
-  }
-
-  if (d.size() != CALIBRATION_SET_SIZE) {
-    this->respond_write_(OP_CALIBRATION_WRITE, RES_INVALID_ARG, d[0]);
-    return;
-  }
-  const uint8_t index = d[0];
-  const int16_t tenths = get_i16(d.data() + 1);
-  if (!calibration_ok(index, tenths)) {
-    this->respond_write_(OP_CALIBRATION_WRITE, RES_INVALID_ARG, index);
-    return;
-  }
-  this->feeder_->set_calibration_offset_at(index, tenths);
-  this->set_calibration_read_(index);
-  this->respond_write_(OP_CALIBRATION_WRITE, RES_OK, index);
-}
-
-// ---------------------------------------------------------------------------------------------
-// Status and event log
-// ---------------------------------------------------------------------------------------------
-
-proto::StatusSnapshot PrecisionFeederBle::snapshot_() {
-  using namespace proto;
-  PrecisionFeeder &f = *this->feeder_;
-  StatusSnapshot s;
-  s.tray_position = f.position();
-  s.remaining = f.remaining();
-  s.tray_state = static_cast<uint8_t>(f.tray_state());
-  s.active_profile = f.cfg.active_profile;
-
-  uint16_t flags = 0;
-  if (f.time_valid())
-    flags |= FLAG_TIME_VALID;
-  if (f.hold_active())
-    flags |= FLAG_HOLD;
-  if (f.calibration_mode())
-    flags |= FLAG_CALIBRATING;
-  if (f.tray_state() == TrayState::MOVING)
-    flags |= FLAG_MOVING;
-  if (f.cfg.scheduler_enabled)
-    flags |= FLAG_SCHEDULER_ENABLED;
-  if (f.reload_pause_active())
-    flags |= FLAG_RELOAD_PAUSE;
-  if (f.solar_fault())
-    flags |= FLAG_SOLAR_FAULT;
-  if (f.schedule_oversubscribed())
-    flags |= FLAG_OVERSUBSCRIBED;
-  if (f.time_stale())
-    flags |= FLAG_TIME_STALE;
-  if (f.position_unknown())
-    flags |= FLAG_POSITION_UNKNOWN;
-  if (f.remaining() == 0)
-    flags |= FLAG_TRAY_EMPTY;
-  if (f.schedule_over_cap())
-    flags |= FLAG_OVER_CAP;
-  if (f.needs_food())
-    flags |= FLAG_NEEDS_FOOD;
-  s.flags = flags;
-
-  s.last_feed_epoch = f.last_feed_epoch();
-  s.last_feed_source = f.last_feed_source();
-  s.feeds_today = static_cast<uint8_t>(std::min<uint16_t>(f.feeds_today(), 255));
-  s.next_event_epoch = f.next_event_epoch();
-  s.runway_days = f.runway_days();
-  s.time_source = static_cast<uint8_t>(f.time_source());
-  s.time_age_min = f.time_age_min();
-  return s;
-}
-
-void PrecisionFeederBle::publish_status_(bool force) {
-  uint8_t buf[proto::STATUS_SIZE];
-  proto::encode_status(this->snapshot_(), buf);
-  if (!force && std::memcmp(buf, this->last_status_, sizeof(buf)) == 0)
-    return;
-  std::memcpy(this->last_status_, buf, sizeof(buf));
-  this->status_->set_value(to_vector(buf, sizeof(buf)));
-  this->status_->notify();
-}
-
-void PrecisionFeederBle::publish_event_(const FeedRecord &record) {
-  if (!this->authorized_())
-    return;
-  uint8_t buf[proto::EVENT_LOG_SIZE];
-  proto::encode_event_log(record.epoch, record.source, record.portions, record.result, buf);
-  this->event_log_->set_value(to_vector(buf, sizeof(buf)));
-  this->event_log_->notify();
-  this->force_status_ = true;  // the tray moved on or a refusal changed "last result": send fresh status
 }
 
 }  // namespace precision_feeder

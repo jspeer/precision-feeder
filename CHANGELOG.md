@@ -8,6 +8,16 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 ## Unreleased
 
+- Refactor (no protocol change): the BLE protocol moved into `BleEngine`
+  (`engine.h/.cpp`), plain C++ on top of FeederCore that talks to the radio only
+  through a small `BleTransport` interface. `PrecisionFeederBle` is now a thin
+  adapter (characteristics, hardware RNG, log, connect events). Record handlers
+  return their answer instead of passing it through member variables. New host
+  test `tests/test_ble_engine.cpp` drives the whole protocol against the
+  simulated feeder (AUTH, retries, replay after a repeated AUTH, signing rules,
+  every command, records, SET_TIME policy, disconnect); with today's two BLE
+  bugs put back, it fails. The fake feeder is shared in `tests/fake_feeder.h`.
+
 - Tests and CI: a daylight-saving test (a US Eastern fake clock: the skipped and
   repeated hours, daily times, and a sunset event across the change);
   `tools/check.sh` runs every host test (C++ now with -Werror) and validates the

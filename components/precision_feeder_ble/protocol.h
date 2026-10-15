@@ -31,11 +31,16 @@ constexpr uint16_t CAP_HOLD_FOREVER = 1u << 4;   // HOLD accepts "until cancelle
 constexpr uint16_t CAP_SERVO_PULSE = 1u << 5;    // Config keys 10 and 11 (servo pulse range) exist
 constexpr uint16_t CAP_AUTH = 1u << 6;           // writes must be authenticated (protocol 2)
 
-// Channels: the low byte of each writable characteristic's UUID, mixed into the write tags.
+// Channels: the low byte of each characteristic's UUID. The writable ones are mixed into the write tags.
+constexpr uint8_t CHANNEL_INFO = 0x02;
 constexpr uint8_t CHANNEL_COMMAND = 0x03;
+constexpr uint8_t CHANNEL_RESPONSE = 0x04;
+constexpr uint8_t CHANNEL_STATUS = 0x05;
 constexpr uint8_t CHANNEL_PROFILE = 0x06;
 constexpr uint8_t CHANNEL_CONFIG = 0x07;
 constexpr uint8_t CHANNEL_CALIBRATION = 0x08;
+constexpr uint8_t CHANNEL_EVENT_LOG = 0x09;
+constexpr uint8_t CHANNEL_AUTH = 0x0A;
 
 // Layout constants (must match the feeder component; checked in precision_feeder_ble.cpp).
 constexpr uint8_t POSITIONS = 7;

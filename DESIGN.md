@@ -357,9 +357,10 @@ protocol differs from the first draft.
 
 Implemented with ESPHome's `esp32_ble_server` on ESP-IDF (Bluedroid). The GATT
 table (UUIDs, properties) is YAML in `packages/ble_gatt.yaml`; the meaning of the
-characteristics is C++ in `components/precision_feeder_ble/`, with the byte
-layouts and validation in a pure header (`protocol.h`) that is unit-tested on a
-host. BLE is a build option: HA-only builds leave the package out and pay nothing.
+characteristics is C++ in `components/precision_feeder_ble/`: byte layouts and
+validation in `protocol.h`, the cryptography in `crypto.h`, and every handler in
+`BleEngine` (`engine.*`), all plain C++ tested on a host against the simulated
+feeder; `precision_feeder_ble.*` only connects the engine to ESPHome. BLE is a build option: HA-only builds leave the package out and pay nothing.
 `bluetooth_proxy` must not be enabled on this device. All records fit the default
 20-byte payload, so no MTU negotiation is needed. UUID base:
 `02dd1dd9-ba75-4bbc-bdea-306d2101xxxx` (generated 2026-10-13; this project's own).
@@ -455,8 +456,9 @@ precision-feeder/
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
                                     feeder_internal.h, calendar.h, solar.h; precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
-  components/precision_feeder_ble/  optional BLE protocol: protocol.h and crypto.h (pure,
-                                    host-tested) and the GATT handlers
+  components/precision_feeder_ble/  optional BLE protocol: protocol.h, crypto.h and the
+                                    BleEngine (engine.*: every handler), all host-tested;
+                                    precision_feeder_ble.* is the thin ESPHome adapter
   packages/            core, status, controls, schedule_editor, calibration,
                        status_led, web_server, button, time_homeassistant,
                        diagnostics, ble_gatt

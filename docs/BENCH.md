@@ -238,3 +238,10 @@ In normal running both re-sync every 15 minutes within seconds of each other, so
 - Client input errors: `profile A event ... sunshine` answers "unknown day
   'sunshine'" without touching the feeder.
 
+## BLE engine refactor on hardware (2026-10-14)
+
+After moving the protocol into `BleEngine` (no protocol change), flashed over
+WiFi: `selftest` 14/14; the repeated-AUTH replay test refused the old write as
+stale; the full Config / Calibration / Profile read-out matched the earlier one
+exactly.
+
