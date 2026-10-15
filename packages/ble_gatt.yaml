@@ -112,6 +112,7 @@ esp32_ble_server:
 
 # The protocol: what the characteristics above mean.
 precision_feeder_ble:
+  id: feeder_ble
   feeder: feeder
   server: gatt_server
   info: gatt_info
@@ -127,3 +128,34 @@ precision_feeder_ble:
   key: !secret ble_key
   time_policy: ${ble_time_policy}
   network_time_stale_after: ${ble_network_time_stale_after}
+
+# Diagnostics for the web app's Bluetooth page (and Home Assistant, where they start disabled). Nothing here is
+# secret: no key, nonce or tag, and only the last two bytes of the client's address. The activity log itself is
+# served by the web server at /feeder/ble (only when the web_server package is included).
+text_sensor:
+  # Static facts: service UUID, protocol version, authentication, time policy.
+  - platform: template
+    id: pf_ble_info
+    name: "BLE Info"
+    icon: mdi:bluetooth-settings
+    entity_category: diagnostic
+    disabled_by_default: true
+    update_interval: never
+  # The connection and counters since boot, "connected=1;auth=1;peer=4A:21;mtu=23;since=12;last=40;..."
+  # (times in seconds since boot; format in DESIGN.md section 7).
+  - platform: template
+    id: pf_ble_session
+    name: "BLE Session"
+    icon: mdi:bluetooth-connect
+    entity_category: diagnostic
+    disabled_by_default: true
+    update_interval: never
+
+# Publish them only when they change (see packages/status.yaml).
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          publish_text(id(pf_ble_info), "service=02dd1dd9-ba75-4bbc-bdea-306d21010001;" + id(feeder_ble).info_text());
+          publish_text(id(pf_ble_session), id(feeder_ble).session_text());

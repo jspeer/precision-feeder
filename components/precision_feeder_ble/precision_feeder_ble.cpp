@@ -11,11 +11,36 @@
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#ifdef USE_WEBSERVER
+#include "esphome/components/web_server_base/web_server_base.h"
+#endif
 
 namespace esphome {
 namespace precision_feeder {
 
 static const char *const TAG = "precision_feeder_ble";
+
+#ifdef USE_WEBSERVER
+/// GET /feeder/ble: the BLE activity log as JSON, for the web app. Added with add_handler(), so web auth applies
+/// when it is configured. Runs on the web server's task, so it only reads the copy the main loop prepared.
+class BleActivityHandler : public AsyncWebHandler {
+ public:
+  explicit BleActivityHandler(PrecisionFeederBle *parent) : parent_(parent) {}
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    if (request->method() != HTTP_GET)
+      return false;
+    char url[AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->url_to(url) == "/feeder/ble";
+  }
+  void handleRequest(AsyncWebServerRequest *request) override {
+    const std::string body = this->parent_->activity_json_copy();
+    request->send(200, "application/json", body.c_str());
+  }
+
+ protected:
+  PrecisionFeederBle *parent_;
+};
+#endif
 
 void PrecisionFeederBle::setup() {
   this->engine_ = new BleEngine(*this->feeder_, *this);  // lives as long as the device runs
@@ -32,12 +57,46 @@ void PrecisionFeederBle::setup() {
       this->engine_->on_write(channel, data.data(), data.size());
     });
   }
+  // Count reads (the engine only sees writes); the size is what the client received.
+  for (uint8_t channel : {proto::CHANNEL_INFO, proto::CHANNEL_RESPONSE, proto::CHANNEL_STATUS, proto::CHANNEL_PROFILE,
+                          proto::CHANNEL_CONFIG, proto::CHANNEL_CALIBRATION, proto::CHANNEL_AUTH}) {
+    Characteristic *c = this->chars_[channel];
+    this->chars_[channel]->on_read([this, channel, c](uint16_t) { this->engine_->on_read(channel, c->get_value().size()); });
+  }
+#ifdef USE_WEBSERVER
+  if (web_server_base::global_web_server_base != nullptr)
+    web_server_base::global_web_server_base->add_handler(new BleActivityHandler(this));  // lives as long as the device
+#endif
   this->server_->on_connect([this](uint16_t) { this->engine_->on_connect(); });
   this->server_->on_disconnect([this](uint16_t) { this->engine_->on_disconnect(); });
   this->feeder_->set_feed_listener([this](const FeedRecord &record) { this->engine_->on_feed(record); });
 }
 
-void PrecisionFeederBle::loop() { this->engine_->loop(millis()); }
+void PrecisionFeederBle::loop() {
+  this->engine_->loop(millis());
+  if (this->engine_->activity_last_id() != this->activity_json_id_) {
+    std::string json = this->engine_->activity_json();
+    LockGuard guard(this->activity_lock_);
+    this->activity_json_ = std::move(json);
+    this->activity_json_id_ = this->engine_->activity_last_id();
+  }
+}
+
+std::string PrecisionFeederBle::activity_json_copy() {
+  LockGuard guard(this->activity_lock_);
+  return this->activity_json_;
+}
+
+void PrecisionFeederBle::gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t /*gatts_if*/,
+                                             esp_ble_gatts_cb_param_t *param) {
+  if (this->engine_ == nullptr)
+    return;
+  if (event == ESP_GATTS_CONNECT_EVT) {
+    this->engine_->set_peer(param->connect.remote_bda);
+  } else if (event == ESP_GATTS_MTU_EVT) {
+    this->engine_->set_mtu(param->mtu.mtu);
+  }
+}
 
 void PrecisionFeederBle::dump_config() {
   const char *policy = "fallback_only";

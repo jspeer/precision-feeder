@@ -370,6 +370,29 @@ never repeats scheduler or guard logic. Each fits Home Assistant's 255-character
   Sunday). About 165 characters at most.
 - The optional `network_info` package adds ESPHome's `wifi_info` (network, up to four
   addresses) and `wifi_signal` sensors.
+- With the BLE package, two diagnostic text sensors (disabled by default in Home
+  Assistant) and one web endpoint. They never contain the key, a nonce or a tag:
+  - `BLE Info`: `service=<uuid>;protocol=2;auth=hmac-sha256;time=<policy>;stale_h=<h>`.
+  - `BLE Session`: `connected;auth;peer;mtu;since;last;conns;wr;wrb;rd;rdb;nt;ntb;authok;
+    authfail;refused;invalid`, as `key=value` pairs joined by `;`:
+    - connected and authenticated (0 or 1);
+    - the last two bytes of the client's address;
+    - the MTU;
+    - the uptime in seconds of the connection and of the last read or write
+      (`-1` = never);
+    - counters since boot: connections, writes and bytes written, reads and bytes
+      read, notifications and bytes notified, AUTH accepted and refused, writes
+      refused as not authorized, and writes answered INVALID_ARG or UNSUPPORTED.
+  - `GET /feeder/ble` (web server, behind its auth when that is set): the last 32
+    connections and writes, oldest first, as `{"entries":[{"id":1,"t":12,
+    "kind":"connect"},{"id":2,"t":12,"kind":"command","name":"FEED","seq":5,
+    "result":"ok","detail":1},...]}`.
+    - `kind`: connect, disconnect, auth, command, record or replay (a retry
+      answered from the cache).
+    - `t`: uptime in seconds.
+    - `result`: the result's name, as in Last Result.
+    - `id` increases by one per entry.
+    - Reads and Status notifications are only counted.
 
 ## 8. BLE GATT (secondary control plane)
 

@@ -89,7 +89,7 @@ class Consistency(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("mock_device", ROOT / "tools/mock_device.py")
         mock = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mock)
-        args = argparse.Namespace(unknown=False, no_calibration=False, no_diagnostics=False, no_network=False)
+        args = argparse.Namespace(unknown=False, no_calibration=False, no_diagnostics=False, no_network=False, no_ble=False)
         served = [e.name for e in mock.Feeder(args).entities.values()]
         self.assertGreater(len(served), 50)
         for name in served:

@@ -63,6 +63,11 @@ void BleEngine::on_connect() {
   this->replay_.clear();
   this->clear_reads_();
   this->new_nonce_();  // each connection gets a new challenge and starts unauthenticated
+  this->stats_.connections++;
+  this->connected_ms_ = this->now_();
+  this->mtu_ = DEFAULT_MTU;
+  this->add_activity_(ActivityKind::CONNECT);
+  this->log_(LogLevel::kInfo, "BLE client connected");
 }
 
 void BleEngine::on_disconnect() {
@@ -70,6 +75,9 @@ void BleEngine::on_disconnect() {
   this->session_.end();
   this->replay_.clear();
   this->clear_reads_();
+  this->have_peer_ = false;
+  this->add_activity_(ActivityKind::DISCONNECT);
+  this->log_(LogLevel::kInfo, "BLE client disconnected");
 }
 
 void BleEngine::new_nonce_() {
@@ -92,7 +100,7 @@ void BleEngine::clear_reads_() {
 void BleEngine::respond_(uint8_t seq, uint8_t opcode, uint8_t result, uint8_t detail) {
   const uint8_t response[proto::RESPONSE_SIZE] = {seq, opcode, result, detail};
   // Also left readable, in case the notification is missed.
-  this->transport_.set_value(proto::CHANNEL_RESPONSE, response, sizeof(response), true);
+  this->notify_(proto::CHANNEL_RESPONSE, response, sizeof(response));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -102,6 +110,9 @@ void BleEngine::respond_(uint8_t seq, uint8_t opcode, uint8_t result, uint8_t de
 void BleEngine::on_write(uint8_t channel, const uint8_t *data, size_t n) {
   if (n == 0)
     return;
+  this->stats_.writes++;
+  this->stats_.write_bytes += static_cast<uint32_t>(n);
+  this->last_activity_ms_ = this->now_();
   // Copy first: answering sets characteristic values, and on the device `data` points into one of them.
   uint8_t write[proto::ReplayCache::MAX_COMMAND];
   n = std::min(n, proto::ReplayCache::MAX_COMMAND);
@@ -119,21 +130,26 @@ void BleEngine::handle_auth_(uint8_t seq, const uint8_t *proof, size_t n) {
   if (result == proto::RES_OK) {
     // The retry cache is NOT cleared here: connect and disconnect already start every session with an empty one,
     // and clearing it on a repeated AUTH would let a retried write execute a second time.
+    this->stats_.auth_ok++;
     if (!was_authenticated) {
       this->log_(LogLevel::kInfo, "BLE client authenticated");
       this->force_status_ = true;  // send fresh status straight away
     }
   } else {
+    this->stats_.auth_failures++;
     this->log_(LogLevel::kWarn, "BLE authentication refused (detail %u)", detail);
     if (detail == proto::AUTH_DETAIL_BAD_PROOF)
       this->new_nonce_();  // a guess is never tried against the same challenge twice
   }
+  this->add_activity_(ActivityKind::AUTH, proto::OP_AUTH, seq, result, detail);
   this->respond_(seq, proto::OP_AUTH, result, detail);
 }
 
 void BleEngine::on_command_(const uint8_t *command, size_t n) {
   const uint8_t seq = command[0];
   if (n < 2) {
+    this->count_answer_(proto::RES_INVALID_ARG);
+    this->add_activity_(ActivityKind::COMMAND, 0, seq, proto::RES_INVALID_ARG, 0);
     this->respond_(seq, 0, proto::RES_INVALID_ARG, 0);
     return;
   }
@@ -147,13 +163,17 @@ void BleEngine::on_command_(const uint8_t *command, size_t n) {
   if (this->replay_.find(proto::CHANNEL_COMMAND, command, n, now, response)) {
     // A retry of a command already answered: repeat the answer, do not act again.
     this->log_(LogLevel::kInfo, "Command seq %u repeated, replaying the earlier answer", seq);
+    this->add_activity_(ActivityKind::REPLAY, response[1], response[0], response[2], response[3]);
     this->respond_(response[0], response[1], response[2], response[3]);
     return;
   }
   uint8_t detail = 0;
   const uint8_t check = this->session_.check(proto::CHANNEL_COMMAND, command, n, detail);
   if (check != proto::RES_OK) {
-    this->log_(LogLevel::kWarn, "Command 0x%02X seq %u refused: not authorized (detail %u)", opcode, seq, detail);
+    this->log_(LogLevel::kWarn, "Command %s seq %u refused: not authorized (detail %u)", opcode_name(opcode).c_str(),
+               seq, detail);
+    this->stats_.refused++;
+    this->add_activity_(ActivityKind::COMMAND, opcode, seq, check, detail);
     this->respond_(seq, opcode, check, detail);
     return;
   }
@@ -164,7 +184,9 @@ void BleEngine::on_command_(const uint8_t *command, size_t n) {
     a = this->execute_(opcode, command + 2, n - 2 - crypto::TAG_SIZE);
   const uint8_t answer[proto::RESPONSE_SIZE] = {seq, opcode, a.result, a.detail};
   this->replay_.store(proto::CHANNEL_COMMAND, command, n, answer, now);
-  this->log_(LogLevel::kInfo, "Command 0x%02X seq %u -> %s", opcode, seq, result_text(a.result));
+  this->log_(LogLevel::kInfo, "Command %s seq %u -> %s", opcode_name(opcode).c_str(), seq, result_text(a.result));
+  this->count_answer_(a.result);
+  this->add_activity_(ActivityKind::COMMAND, opcode, seq, a.result, a.detail);
   this->respond_(seq, opcode, a.result, a.detail);
 }
 
@@ -277,13 +299,17 @@ void BleEngine::on_record_(uint8_t channel, const uint8_t *write, size_t n) {
   const uint64_t now = this->now_();
   uint8_t response[proto::RESPONSE_SIZE];
   if (this->replay_.find(channel, write, n, now, response)) {
+    this->add_activity_(ActivityKind::REPLAY, response[1], response[0], response[2], response[3]);
     this->respond_(response[0], response[1], response[2], response[3]);  // a retry: same answer, not applied again
     return;
   }
   uint8_t detail = 0;
   const uint8_t check = this->session_.check(channel, write, n, detail);
   if (check != proto::RES_OK) {
-    this->log_(LogLevel::kWarn, "Write to 0x%02X seq %u refused: not authorized (detail %u)", channel, seq, detail);
+    this->log_(LogLevel::kWarn, "%s seq %u refused: not authorized (detail %u)", opcode_name(opcode).c_str(), seq,
+               detail);
+    this->stats_.refused++;
+    this->add_activity_(ActivityKind::RECORD, opcode, seq, check, detail);
     this->respond_(seq, opcode, check, detail);
     return;
   }
@@ -303,6 +329,8 @@ void BleEngine::on_record_(uint8_t channel, const uint8_t *write, size_t n) {
   }
   const uint8_t answer[proto::RESPONSE_SIZE] = {seq, opcode, a.result, a.detail};
   this->replay_.store(channel, write, n, answer, now);
+  this->count_answer_(a.result);
+  this->add_activity_(ActivityKind::RECORD, opcode, seq, a.result, a.detail);
   this->respond_(seq, opcode, a.result, a.detail);
 }
 
@@ -597,7 +625,7 @@ void BleEngine::publish_status_(bool force) {
   if (!force && std::memcmp(buf, this->last_status_, sizeof(buf)) == 0)
     return;
   std::memcpy(this->last_status_, buf, sizeof(buf));
-  this->transport_.set_value(proto::CHANNEL_STATUS, buf, sizeof(buf), true);
+  this->notify_(proto::CHANNEL_STATUS, buf, sizeof(buf));
 }
 
 void BleEngine::on_feed(const FeedRecord &record) {
@@ -605,8 +633,152 @@ void BleEngine::on_feed(const FeedRecord &record) {
     return;
   uint8_t buf[proto::EVENT_LOG_SIZE];
   proto::encode_event_log(record.epoch, record.source, record.portions, record.result, buf);
-  this->transport_.set_value(proto::CHANNEL_EVENT_LOG, buf, sizeof(buf), true);
+  this->notify_(proto::CHANNEL_EVENT_LOG, buf, sizeof(buf));
   this->force_status_ = true;  // the tray moved on or a refusal changed "last result": send fresh status
+}
+
+// ---------------------------------------------------------------------------------------------
+// Diagnostics: counters, the session and the activity log (read-only for the protocol)
+// ---------------------------------------------------------------------------------------------
+
+void BleEngine::notify_(uint8_t channel, const uint8_t *data, size_t n) {
+  this->transport_.set_value(channel, data, n, true);
+  this->stats_.notifications++;
+  this->stats_.notify_bytes += static_cast<uint32_t>(n);
+}
+
+void BleEngine::count_answer_(uint8_t result) {
+  if (result == proto::RES_INVALID_ARG || result == proto::RES_UNSUPPORTED)
+    this->stats_.invalid++;
+}
+
+void BleEngine::set_peer(const uint8_t address[6]) {
+  std::memcpy(this->peer_, address, sizeof(this->peer_));
+  this->have_peer_ = true;
+}
+
+void BleEngine::on_read(uint8_t /*channel*/, size_t size) {
+  this->stats_.reads++;
+  this->stats_.read_bytes += static_cast<uint32_t>(size);
+  this->last_activity_ms_ = this->now_();
+}
+
+void BleEngine::add_activity_(ActivityKind kind, uint8_t code, uint8_t seq, uint8_t result, uint8_t detail) {
+  BleActivity &a = this->activity_[this->activity_head_];
+  a.id = this->next_activity_id_++;
+  a.uptime_s = static_cast<uint32_t>(this->now_() / 1000);
+  a.kind = kind;
+  a.code = code;
+  a.seq = seq;
+  a.result = result;
+  a.detail = detail;
+  this->activity_head_ = static_cast<uint8_t>((this->activity_head_ + 1) % ACTIVITY_SIZE);
+  if (this->activity_count_ < ACTIVITY_SIZE)
+    this->activity_count_++;
+}
+
+const BleActivity &BleEngine::activity(uint8_t i) const {
+  const uint8_t oldest = static_cast<uint8_t>((this->activity_head_ + ACTIVITY_SIZE - this->activity_count_) % ACTIVITY_SIZE);
+  return this->activity_[(oldest + i) % ACTIVITY_SIZE];
+}
+
+std::string BleEngine::opcode_name(uint8_t opcode) {
+  using namespace proto;
+  switch (opcode) {
+    case OP_FEED:
+      return "FEED";
+    case OP_TRAY_RELOAD:
+      return "TRAY_RELOAD";
+    case OP_SET_PROFILE:
+      return "SET_PROFILE";
+    case OP_HOLD:
+      return "HOLD";
+    case OP_STOP:
+      return "STOP";
+    case OP_SET_TIME:
+      return "SET_TIME";
+    case OP_SET_LOCATION:
+      return "SET_LOCATION";
+    case OP_CALIBRATE:
+      return "CALIBRATE";
+    case OP_JOG:
+      return "JOG";
+    case OP_SAVE_CALIBRATION:
+      return "SAVE_CALIBRATION";
+    case OP_SET_POSITION:
+      return "SET_POSITION";
+    case OP_SET_TIMEZONE:
+      return "SET_TIMEZONE";
+    case OP_AUTH:
+      return "AUTH";
+    case OP_PROFILE_WRITE:
+      return "PROFILE_WRITE";
+    case OP_CONFIG_WRITE:
+      return "CONFIG_WRITE";
+    case OP_CALIBRATION_WRITE:
+      return "CALIBRATION_WRITE";
+    default: {
+      char buf[8];
+      std::snprintf(buf, sizeof(buf), "0x%02X", opcode);
+      return buf;
+    }
+  }
+}
+
+std::string BleEngine::info_text() const {
+  const char *policy = "fallback_only";
+  if (this->time_policy_ == proto::TimePolicy::ALWAYS)
+    policy = "always";
+  else if (this->time_policy_ == proto::TimePolicy::OFF)
+    policy = "off";
+  char buf[96];
+  std::snprintf(buf, sizeof(buf), "protocol=%u;auth=hmac-sha256;time=%s;stale_h=%u",
+                static_cast<unsigned>(proto::PROTOCOL_VERSION), policy,
+                static_cast<unsigned>(this->network_stale_ms_ / 3600000u));
+  return buf;
+}
+
+std::string BleEngine::session_text() const {
+  char peer[8] = "";
+  if (this->have_peer_)
+    std::snprintf(peer, sizeof(peer), "%02X:%02X", this->peer_[4], this->peer_[5]);
+  auto seconds = [](int64_t ms) { return ms < 0 ? -1L : static_cast<long>(ms / 1000); };
+  const BleStats &s = this->stats_;
+  char buf[240];
+  std::snprintf(buf, sizeof(buf),
+                "connected=%d;auth=%d;peer=%s;mtu=%u;since=%ld;last=%ld;conns=%lu;wr=%lu;wrb=%lu;rd=%lu;rdb=%lu;"
+                "nt=%lu;ntb=%lu;authok=%lu;authfail=%lu;refused=%lu;invalid=%lu",
+                this->connected_ ? 1 : 0, this->authorized() ? 1 : 0, peer, static_cast<unsigned>(this->mtu_),
+                seconds(this->connected_ms_), seconds(this->last_activity_ms_), static_cast<unsigned long>(s.connections),
+                static_cast<unsigned long>(s.writes), static_cast<unsigned long>(s.write_bytes),
+                static_cast<unsigned long>(s.reads), static_cast<unsigned long>(s.read_bytes),
+                static_cast<unsigned long>(s.notifications), static_cast<unsigned long>(s.notify_bytes),
+                static_cast<unsigned long>(s.auth_ok), static_cast<unsigned long>(s.auth_failures),
+                static_cast<unsigned long>(s.refused), static_cast<unsigned long>(s.invalid));
+  return buf;
+}
+
+std::string BleEngine::activity_json() const {
+  static const char *const KINDS[] = {"connect", "disconnect", "auth", "command", "record", "replay"};
+  std::string out = "{\"entries\":[";
+  char buf[200];
+  for (uint8_t i = 0; i < this->activity_count_; i++) {
+    const BleActivity &a = this->activity(i);
+    const uint8_t kind = static_cast<uint8_t>(a.kind);
+    if (kind <= static_cast<uint8_t>(ActivityKind::DISCONNECT)) {
+      std::snprintf(buf, sizeof(buf), "%s{\"id\":%lu,\"t\":%lu,\"kind\":\"%s\"}", i ? "," : "",
+                    static_cast<unsigned long>(a.id), static_cast<unsigned long>(a.uptime_s), KINDS[kind]);
+    } else {
+      std::snprintf(buf, sizeof(buf),
+                    "%s{\"id\":%lu,\"t\":%lu,\"kind\":\"%s\",\"name\":\"%s\",\"seq\":%u,\"result\":\"%s\",\"detail\":%u}",
+                    i ? "," : "", static_cast<unsigned long>(a.id), static_cast<unsigned long>(a.uptime_s),
+                    kind < sizeof(KINDS) / sizeof(KINDS[0]) ? KINDS[kind] : "?", opcode_name(a.code).c_str(),
+                    static_cast<unsigned>(a.seq), result_text(a.result), static_cast<unsigned>(a.detail));
+    }
+    out += buf;
+  }
+  out += "]}";
+  return out;
 }
 
 }  // namespace precision_feeder

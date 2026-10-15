@@ -11,7 +11,7 @@ reviewed by a human, but it may still contain mistakes.
 import base64
 
 import esphome.codegen as cg
-from esphome.components import esp32_ble_server, precision_feeder
+from esphome.components import esp32_ble, esp32_ble_server, precision_feeder
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
@@ -67,6 +67,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(PrecisionFeederBle),
         cv.GenerateID(CONF_FEEDER): cv.use_id(precision_feeder.PrecisionFeeder),
+        cv.GenerateID(esp32_ble.CONF_BLE_ID): cv.use_id(esp32_ble.ESP32BLE),
         cv.Required(CONF_SERVER): cv.use_id(esp32_ble_server.BLEServer),
         # The GATT characteristics, declared by id in the esp32_ble_server config.
         **{
@@ -109,3 +110,6 @@ async def to_code(config):
     cg.add(var.set_key(cg.RawExpression("std::array<uint8_t, 32>{" + ", ".join(str(b) for b in key) + "}")))
     cg.add(var.set_time_policy(config[CONF_TIME_POLICY]))
     cg.add(var.set_network_time_stale_ms(config[CONF_NTP_STALE].total_milliseconds))
+
+    # Connection details for diagnostics (peer address, MTU), from the GATT server's events.
+    esp32_ble.register_gatts_event_handler(await cg.get_variable(config[esp32_ble.CONF_BLE_ID]), var)

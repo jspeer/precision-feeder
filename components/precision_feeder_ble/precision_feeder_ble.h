@@ -11,8 +11,12 @@
 #pragma once
 
 #include <array>
+#include <string>
+
+#include <esp_gatts_api.h>
 
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/esp32_ble_server/ble_characteristic.h"
 #include "esphome/components/esp32_ble_server/ble_server.h"
 #include "esphome/components/precision_feeder/precision_feeder.h"
@@ -52,6 +56,16 @@ class PrecisionFeederBle : public Component, public BleTransport {
   void random(uint8_t *out, size_t n) override;
   void log(LogLevel level, const char *message) override;
 
+  // ---- diagnostics ----
+  /// GATT server events (registered with esp32_ble, delivered on the main loop): the peer address and the MTU.
+  void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+  /// For the "BLE Info" and "BLE Session" text sensors (packages/ble_gatt.yaml).
+  std::string info_text() const { return this->engine_ != nullptr ? this->engine_->info_text() : ""; }
+  std::string session_text() const { return this->engine_ != nullptr ? this->engine_->session_text() : ""; }
+  /// The activity log as JSON (GET /feeder/ble on the web server). Safe to call from the web server's task: it
+  /// returns a copy made on the main loop.
+  std::string activity_json_copy();
+
  protected:
   PrecisionFeeder *feeder_{nullptr};
   esp32_ble_server::BLEServer *server_{nullptr};
@@ -60,6 +74,11 @@ class PrecisionFeederBle : public Component, public BleTransport {
   proto::TimePolicy time_policy_{proto::TimePolicy::FALLBACK_ONLY};
   uint32_t network_stale_ms_{24u * 3600u * 1000u};
   BleEngine *engine_{nullptr};  // created in setup(), once the feeder is known
+
+  // The activity JSON, rebuilt on the main loop when the log changes and read by the web server's task.
+  Mutex activity_lock_;
+  std::string activity_json_{"{\"entries\":[]}"};
+  uint32_t activity_json_id_{0};
 };
 
 }  // namespace precision_feeder

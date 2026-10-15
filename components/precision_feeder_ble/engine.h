@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #if __has_include("esphome/components/precision_feeder/feeder_core.h")
 #include "esphome/components/precision_feeder/feeder_core.h"
@@ -37,9 +38,41 @@ class BleTransport {
   virtual void log(LogLevel /*level*/, const char * /*message*/) {}
 };
 
+/// Counters since boot, for diagnostics (the web app's Bluetooth page). Not part of the protocol.
+struct BleStats {
+  uint32_t connections{0};
+  uint32_t writes{0};         // writes received: commands, AUTH and records
+  uint32_t write_bytes{0};
+  uint32_t reads{0};          // reads of any characteristic, as the transport reports them
+  uint32_t read_bytes{0};
+  uint32_t notifications{0};  // Response, Status and Event log notifications sent
+  uint32_t notify_bytes{0};
+  uint32_t auth_ok{0};
+  uint32_t auth_failures{0};
+  uint32_t refused{0};  // writes refused as not authorized: no AUTH yet, bad tag, stale sequence number, too short
+  uint32_t invalid{0};  // writes answered INVALID_ARG or UNSUPPORTED
+};
+
+/// What an activity entry records.
+enum class ActivityKind : uint8_t { CONNECT = 0, DISCONNECT = 1, AUTH = 2, COMMAND = 3, RECORD = 4, REPLAY = 5 };
+
+/// One entry of the activity log: connections and every write with its answer. Reads and Status notifications are
+/// only counted (BleStats), so a client that polls cannot push everything else out of the log.
+struct BleActivity {
+  uint32_t id;        // 1, 2, 3, ... (0 = unused slot)
+  uint32_t uptime_s;  // when, in seconds since boot
+  ActivityKind kind;
+  uint8_t code;  // COMMAND, RECORD, REPLAY: the opcode (records: OP_PROFILE_WRITE and so on)
+  uint8_t seq;
+  uint8_t result;
+  uint8_t detail;
+};
+
 class BleEngine {
  public:
   static constexpr uint32_t STATUS_PERIOD_MS = 500;
+  static constexpr uint8_t ACTIVITY_SIZE = 32;
+  static constexpr uint16_t DEFAULT_MTU = 23;
 
   BleEngine(FeederCore &feeder, BleTransport &transport) : feeder_(feeder), transport_(transport) {}
 
@@ -66,7 +99,35 @@ class BleEngine {
   bool authorized() const { return this->connected_ && this->session_.authenticated(); }
   uint16_t capabilities() const;
 
+  // ---- diagnostics (read-only for the protocol) ----
+  /// The connected client's Bluetooth address, as the stack reports it (6 bytes, most significant first).
+  void set_peer(const uint8_t address[6]);
+  /// The ATT MTU agreed with the client (23 until the client negotiates).
+  void set_mtu(uint16_t mtu) { this->mtu_ = mtu; }
+  /// A client read `size` bytes of a characteristic.
+  void on_read(uint8_t channel, size_t size);
+  const BleStats &stats() const { return this->stats_; }
+  /// Activity entry `i`, oldest first (i < activity_count()).
+  const BleActivity &activity(uint8_t i) const;
+  uint8_t activity_count() const { return this->activity_count_; }
+  /// Id of the newest activity entry (0 if none); changes whenever an entry is added.
+  uint32_t activity_last_id() const { return this->next_activity_id_ - 1; }
+  /// Static facts for diagnostics: "protocol=2;auth=hmac-sha256;time=fallback_only;stale_h=24".
+  std::string info_text() const;
+  /// The session and the counters in one line, "connected=1;auth=1;peer=4A:21;mtu=23;since=12;last=40;conns=1;..."
+  /// (times in seconds since boot; only the last two bytes of the address). Under 255 characters.
+  std::string session_text() const;
+  /// The activity log as JSON, oldest first: {"entries":[{"id":1,"t":12,"kind":"command","name":"FEED","seq":5,
+  /// "result":"ok","detail":0},...]}.
+  std::string activity_json() const;
+  /// The protocol's name for an opcode ("FEED", ...), or "0x" and its hex value.
+  static std::string opcode_name(uint8_t opcode);
+
  protected:
+  void notify_(uint8_t channel, const uint8_t *data, size_t n);
+  void add_activity_(ActivityKind kind, uint8_t code = 0, uint8_t seq = 0, uint8_t result = 0, uint8_t detail = 0);
+  void count_answer_(uint8_t result);
+
   struct Answer {
     uint8_t result;
     uint8_t detail;
@@ -106,6 +167,17 @@ class BleEngine {
   uint8_t last_status_[proto::STATUS_SIZE]{};
   uint32_t last_status_ms_{0};
   bool force_status_{true};
+
+  BleStats stats_{};
+  BleActivity activity_[ACTIVITY_SIZE]{};
+  uint8_t activity_head_{0};  // where the next entry goes
+  uint8_t activity_count_{0};
+  uint32_t next_activity_id_{1};
+  uint8_t peer_[6]{};
+  bool have_peer_{false};
+  uint16_t mtu_{DEFAULT_MTU};
+  int64_t connected_ms_{-1};      // uptime of the current (or last) connection; -1 = never
+  int64_t last_activity_ms_{-1};  // uptime of the last write or read; -1 = never
 };
 
 }  // namespace precision_feeder

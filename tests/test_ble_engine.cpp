@@ -355,6 +355,76 @@ static void test_disconnect() {
         "the old session key is useless on a new connection");
 }
 
+static bool has(const std::string &text, const char *part) { return text.find(part) != std::string::npos; }
+
+static void test_diagnostics() {
+  current = "diagnostics (1.1.0)";
+  Rig r;  // connected, not authenticated
+  const uint8_t peer[6] = {0x11, 0x22, 0x33, 0x44, 0x4A, 0x21};
+  r.engine->set_peer(peer);
+  r.engine->set_mtu(185);
+  std::string s = r.engine->session_text();
+  CHECK(has(s, "connected=1;auth=0;peer=4A:21;mtu=185;since=1;"), "connected, masked peer, MTU, since");
+  CHECK(!has(s, "11:22") && !has(s, "33:44"), "only the last two address bytes");
+  CHECK(r.engine->info_text() == "protocol=2;auth=hmac-sha256;time=fallback_only;stale_h=24", "info");
+
+  // A refused write, a bad AUTH, a good AUTH, a feed, an invalid command, a retry, a record and a read.
+  r.client->write(proto::CHANNEL_COMMAND, {9, proto::OP_FEED, 1});  // unsigned: refused
+  r.client->key[0] ^= 1;
+  r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());  // wrong key
+  r.client->key[0] ^= 1;
+  r.advance(1100);
+  r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  const Bytes feed = r.client->command_bytes(proto::OP_FEED, {1});
+  r.client->write(proto::CHANNEL_COMMAND, feed);
+  r.client->write(proto::CHANNEL_COMMAND, feed);  // an exact retry
+  r.client->command(proto::OP_SET_PROFILE, {9});   // invalid profile
+  r.client->command(0x7E);                         // unknown opcode
+  r.client->record(proto::CHANNEL_CONFIG, {proto::CFG_DAILY_CAP | proto::QUERY_FLAG});
+  r.engine->on_read(proto::CHANNEL_STATUS, 20);
+  const BleStats &st = r.engine->stats();
+  CHECK(st.connections == 1, "connections");
+  CHECK(st.writes == 8, "every write counted");
+  CHECK(st.reads == 1 && st.read_bytes == 20, "reads");
+  CHECK(st.auth_ok == 1 && st.auth_failures == 1, "AUTH results");
+  CHECK(st.refused == 1, "not authorized");
+  CHECK(st.invalid == 2, "invalid argument and unsupported");
+  CHECK(st.notifications >= 8 && st.notify_bytes >= 32, "notifications counted (Response at least)");
+
+  // The activity log: connection, then every write with its answer; reads are only counted.
+  CHECK(r.engine->activity_count() == 9, "nine entries");
+  CHECK(r.engine->activity(0).kind == ActivityKind::CONNECT, "connect first");
+  CHECK(r.engine->activity(1).kind == ActivityKind::COMMAND && r.engine->activity(1).result == proto::RES_NOT_AUTHORIZED,
+        "refused command");
+  CHECK(r.engine->activity(3).kind == ActivityKind::AUTH && r.engine->activity(3).result == proto::RES_OK, "AUTH ok");
+  CHECK(r.engine->activity(5).kind == ActivityKind::REPLAY && r.engine->activity(5).code == proto::OP_FEED, "retry");
+  CHECK(r.engine->activity(8).kind == ActivityKind::RECORD && r.engine->activity(8).code == proto::OP_CONFIG_WRITE,
+        "record");
+  CHECK(r.engine->activity_last_id() == 9, "ids count from 1");
+  const std::string json = r.engine->activity_json();
+  CHECK(json.rfind("{\"entries\":[{\"id\":1,\"t\":1,\"kind\":\"connect\"}", 0) == 0, "JSON starts with the connection");
+  CHECK(has(json, "\"kind\":\"command\",\"name\":\"FEED\",\"seq\":3,\"result\":\"ok\",\"detail\":1}"), "the feed");
+  CHECK(has(json, "\"name\":\"0x7E\"") && has(json, "\"result\":\"unsupported\""), "unknown opcode by number");
+  CHECK(has(json, "\"result\":\"not authorized\",\"detail\":0}"), "refusal named");
+  CHECK(json.substr(json.size() - 2) == "]}", "JSON closes");
+  s = r.engine->session_text();
+  CHECK(has(s, "auth=1;") && has(s, "conns=1;wr=8;") && has(s, "authok=1;authfail=1;refused=1;invalid=2"), "counters");
+  CHECK(s.size() < 255, "fits Home Assistant's state");
+
+  // The ring keeps the newest entries; a disconnect forgets the peer and resets the MTU on the next connection.
+  for (int i = 0; i < 40; i++)
+    r.client->command(proto::OP_STOP);
+  CHECK(r.engine->activity_count() == BleEngine::ACTIVITY_SIZE, "ring full");
+  CHECK(r.engine->activity(0).id == r.engine->activity_last_id() - BleEngine::ACTIVITY_SIZE + 1, "oldest dropped");
+  r.engine->on_disconnect();
+  CHECK(r.engine->activity(BleEngine::ACTIVITY_SIZE - 1).kind == ActivityKind::DISCONNECT, "disconnect logged");
+  CHECK(has(r.engine->session_text(), "connected=0;auth=0;peer=;mtu=185;"), "disconnected");
+  r.engine->on_connect();
+  CHECK(has(r.engine->session_text(), "connected=1;auth=0;peer=;mtu=23;") && r.engine->stats().connections == 2,
+        "new connection");
+  CHECK(BleEngine::opcode_name(proto::OP_CALIBRATION_WRITE) == "CALIBRATION_WRITE", "record opcode names");
+}
+
 int main() {
   test_before_auth();
   test_auth_flow();
@@ -365,6 +435,7 @@ int main() {
   test_records();
   test_ranges();
   test_disconnect();
+  test_diagnostics();
   if (failures == 0)
     std::printf("All BLE engine tests passed\n");
   return failures == 0 ? 0 : 1;

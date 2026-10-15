@@ -10,7 +10,7 @@ transport, not a second implementation of the feeder: the guard here is delibera
 wrong is the device's word that counts.
 
     python3 tools/mock_device.py                     http://localhost:8080 (and [::1]:8080)
-    python3 tools/mock_device.py --port 8000 --no-calibration --no-diagnostics
+    python3 tools/mock_device.py --port 8000 --no-ble --no-calibration --no-diagnostics
     python3 tools/mock_device.py --auth user:pass    HTTP basic authentication, as web_server's auth: block
     python3 tools/mock_device.py --unknown           start with the tray position unknown
 
@@ -207,6 +207,17 @@ class Feeder:
             a("sensor", "Largest Free Heap Block", 65536, uom="B")
             a("sensor", "Heap Fragmentation", 9, uom="%")
             a("sensor", "Loop Time", 12, uom="ms")
+        if not args.no_ble:  # ble_gatt.yaml: a simulated client that connected and fed once
+            a("text_sensor", "BLE Info", "service=02dd1dd9-ba75-4bbc-bdea-306d21010001;protocol=2;auth=hmac-sha256;"
+              "time=fallback_only;stale_h=24", icon="mdi:bluetooth-settings", category=DIAGNOSTIC, disabled=True)
+            a("text_sensor", "BLE Session", "", icon="mdi:bluetooth-connect", category=DIAGNOSTIC, disabled=True)
+            self.ble_activity = [
+                {"id": 1, "t": 5, "kind": "connect"},
+                {"id": 2, "t": 5, "kind": "auth", "name": "AUTH", "seq": 1, "result": "ok", "detail": 0},
+                {"id": 3, "t": 6, "kind": "command", "name": "SET_TIME", "seq": 2, "result": "clock from BLE ignored "
+                 "(network time is fresh)", "detail": 0},
+                {"id": 4, "t": 9, "kind": "record", "name": "CONFIG_WRITE", "seq": 3, "result": "ok", "detail": 5},
+            ]
         if not args.no_network:  # network_info.yaml (ESPHome's wifi_info and wifi_signal)
             a("text_sensor", "Wi-Fi Network", "example-network", category=DIAGNOSTIC)
             a("text_sensor", "IP Address", "192.168.1.40", category=DIAGNOSTIC)
@@ -331,6 +342,11 @@ class Feeder:
         off = time.localtime().tm_gmtoff // 60
         s("text_sensor", "Device Time", f"{self.fmt(time.time())} {'-' if off < 0 else '+'}{abs(off) // 60:02d}:{abs(off) % 60:02d}")
         s("text_sensor", "Today's Feeds", self.todays_feeds())
+        if "text_sensor/BLE Session" in self.entities:
+            up = self.uptime()
+            s("text_sensor", "BLE Session", f"connected=1;auth=1;peer=4A:21;mtu=185;since=5;last={max(9, up - up % 5)};"
+              f"conns=1;wr=4;wrb=76;rd={up // 5};rdb={up // 5 * 20};nt={up // 2};ntb={up // 2 * 20};authok=1;"
+              "authfail=0;refused=0;invalid=0")
         s("text_sensor", "Schedule Data", "1" + "".join(
             f"|{p['every_n']},{p['fast']:02x}" + "".join(
                 f",{e[0]}{'crs'[e[1]]}{e[2]}/{e[3]}/{e[4]:02x}" for e in p["ev"]) for p in self.profiles))
@@ -554,6 +570,10 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 return self._send(200, body, "text/javascript" if path.endswith("js") else "text/css")
             if path == "/events":
                 return self._events()
+            if path == "/feeder/ble" and hasattr(feeder, "ble_activity"):
+                with feeder.lock:
+                    body = json.dumps({"entries": feeder.ble_activity}).encode()
+                return self._send(200, body, "application/json")
             if len(parts) == 2:
                 with feeder.lock:
                     e = feeder.entities.get("/".join(parts))
@@ -636,6 +656,7 @@ def main():
     ap.add_argument("--no-calibration", action="store_true", help="as a build without the calibration package")
     ap.add_argument("--no-diagnostics", action="store_true", help="as a build without the diagnostics package")
     ap.add_argument("--no-network", action="store_true", help="as a build without the network_info package")
+    ap.add_argument("--no-ble", action="store_true", help="as a build without the ble_gatt package")
     ap.add_argument("--unknown", action="store_true", help="start with the tray position unknown")
     ap.add_argument("--ping", type=float, default=10.0, help="seconds between keep-alive pings (default 10)")
     args = ap.parse_args()

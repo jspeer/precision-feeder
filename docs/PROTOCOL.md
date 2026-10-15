@@ -319,6 +319,18 @@ one-shot feed that the device has to wait for (busy, too soon, on hold) is retri
 quietly during its one-minute window and reported once: when it is fed, or with
 the last refusal when the window closes.
 
+## Diagnostics on the device (firmware 1.1.0)
+
+Nothing on the air changes: no new characteristic, opcode or field, and the
+protocol stays at version 2. The device keeps local diagnostics about BLE for its
+web app and Home Assistant: counters since boot, the current session (connected,
+authenticated, the last two bytes of the client's address, the MTU), and an
+activity log of the last 32 connections and writes with their answers. Reads and
+Status notifications are only counted, so a client that polls does not fill the
+log. They never contain the key, a nonce or a tag. Formats: DESIGN.md section 7
+("BLE Info", "BLE Session" and `GET /feeder/ble`). The device log names opcodes
+("Command FEED seq 5 -> ok").
+
 ## Example bytes
 
 Unsigned bodies (as in protocol 1; add the seq and tag as described above):

@@ -24,6 +24,14 @@ Assistant and no internet ([docs/plans/1.1.0-local-first.md](docs/plans/1.1.0-lo
   IP addresses and signal strength, from ESPHome's own sensors.
 - `tools/mock_device.py`: a fake feeder that speaks the web server's HTTP, for
   building the web app without hardware.
+- BLE diagnostics (no protocol change, still protocol 2):
+  - New entities `BLE Info` and `BLE Session` (diagnostic, disabled by default in
+    Home Assistant): the connection, the last two bytes of the client's address,
+    the MTU, and counters since boot.
+  - The web server serves the last 32 BLE connections and writes at
+    `/feeder/ble`.
+  - The device log names opcodes ("Command FEED seq 5 -> ok") and logs
+    connections.
 
 ## Examples: clone into the config folder (2026-10-15, no firmware change)
 
