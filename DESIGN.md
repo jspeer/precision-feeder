@@ -737,6 +737,11 @@ section 10).
   make a protected change through a visitor's browser.
 - **Recovery:** hold BOOT (GPIO0, `boot_pin`) for 10 s while the feeder runs. It
   clears the password and nothing else (FeederCore::boot_button, host-tested).
+- **Stack:** the web server's task has about 4.3 KB of stack (ESP-IDF's 4 KB plus 256 bytes), and an authorised
+  write runs the web server's own handler and the entity's action on top of ours. So our routes and URL buffer live
+  in a non-inlined function that returns before the write is passed on (32 bytes left on the stack), and the upload's
+  flash writes run the same way. Measured on the bench: 472 bytes to spare after a protected write, 616 after an
+  upload (docs/BENCH.md, N8). A stack overflow there (2.0.0 N7 build) crashed the feeder on every protected write.
 - **Threads:** the handler runs on the web server's task. FeederCore's password
   state is touched only under a lock (also held around the main loop's
   core_loop()); saving to flash is deferred to the main loop.

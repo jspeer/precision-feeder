@@ -462,7 +462,19 @@ class SettingsGuard : public AsyncWebHandler {
     return action != std::string::npos && action > 0 && this->feeder_->is_protected(url.substr(1, action - 1));
   }
 
+  // The web server's task has a small stack (ESP-IDF's 4 KB plus 256 bytes in ESPHome 2026.9.1), and a protected write
+  // passed on below runs the web server's own handler and the entity's action on top of ours. So everything of ours
+  // (the URL buffer, the routes) lives in handle_own_(), whose frame is gone before the web server's handler starts.
+  // Inlined into one frame, they overflowed that stack on every protected write (found on the bench, 2.0.0 N8).
   void handleRequest(AsyncWebServerRequest *request) override {
+    if (!this->handle_own_(request))
+      this->feeder_->web_server()->handleRequest(request);
+  }
+
+ protected:
+  /// Answer one of our routes, or check a protected write. True if the request is answered (ours, or refused); false
+  /// if it is an authorised write for the web server's own handler.
+  __attribute__((noinline)) bool handle_own_(AsyncWebServerRequest *request) {
     char buf[AsyncWebServerRequest::URL_BUF_SIZE];
     const std::string url = request->url_to(buf).str();
     if (request->method() == HTTP_GET) {
@@ -470,34 +482,34 @@ class SettingsGuard : public AsyncWebHandler {
         this->send_network_(request);
       else
         this->send_challenge_(request);
-      return;
+      return true;
     }
     if (url == "/feeder/setup") {
       this->set_setup_(request);
-      return;
+      return true;
     }
 #ifdef USE_OTA
     if (url == "/feeder/firmware") {
       this->finish_firmware_(request);
-      return;
+      return true;
     }
 #endif
     if (url.rfind("/feeder/network/", 0) == 0) {
       this->set_network_(request, url);
-      return;
+      return true;
     }
     if (url == "/feeder/auth/password") {
       this->change_password_(request);
-      return;
+      return true;
     }
     if (url == "/feeder/keys/api" || url == "/feeder/keys/ble") {
       this->set_key_(request, url);
-      return;
+      return true;
     }
     if (url == "/feeder/auth/check") {  // "is this the password?", for the app's Unlock
       if (this->authorised_(request, url + "\n"))
         request->send(200, "application/json", "{}");
-      return;
+      return true;
     }
     // What the tag covers: the path and the value being written, so an answer cannot be moved to another request.
     std::string param;
@@ -505,12 +517,9 @@ class SettingsGuard : public AsyncWebHandler {
       param = request->arg("value");
     else if (request->hasParam("option"))
       param = request->arg("option");
-    if (!this->authorised_(request, url + "\n" + param))
-      return;
-    this->feeder_->web_server()->handleRequest(request);
+    return !this->authorised_(request, url + "\n" + param);  // refused: answered; authorised: the web server's
   }
 
- protected:
   void send_challenge_(AsyncWebServerRequest *request) {
     uint8_t nonce[AUTH_NONCE_SIZE];
     Device d;
@@ -606,20 +615,30 @@ class SettingsGuard : public AsyncWebHandler {
 
  public:
   void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) override {
+    // The flash writes run on the web server's small stack too, so the URL buffer and the check live in
+    // start_firmware_(), gone before the first write (see handleRequest).
+    if (index == 0)
+      this->firmware_body_ = this->start_firmware_(request, total);
+    if (this->firmware_body_)
+      this->upload_.write(data, len);
+  }
+
+ protected:
+  /// The first chunk of a body: if it is a firmware upload, check its signature and start it. False for any other
+  /// request's body (ignored).
+  __attribute__((noinline)) bool start_firmware_(AsyncWebServerRequest *request, size_t total) {
     char buf[AsyncWebServerRequest::URL_BUF_SIZE];
     if (request->url_to(buf).str() != "/feeder/firmware")
-      return;
-    if (index == 0) {
-      this->body_seen_ = true;
-      const std::string sha = request->hasParam("sha256") ? request->arg("sha256") : std::string();
-      uint8_t expected[crypto::Sha256::DIGEST_SIZE];
-      const bool parsed = sha.size() == 2 * sizeof(expected) && from_hex(sha, 0, expected, sizeof(expected));
-      this->auth_ = this->check_auth_(request, "/feeder/firmware\n" + sha, this->auth_wait_);
-      this->upload_.start(parsed ? expected : nullptr, total, this->auth_ == AuthResult::OK, &this->sink_);
-      if (this->upload_.status() == FirmwareUpload::Status::RECEIVING)
-        ESP_LOGI(TAG, "Firmware upload started (%u bytes)", static_cast<unsigned>(total));
-    }
-    this->upload_.write(data, len);
+      return false;
+    this->body_seen_ = true;
+    const std::string sha = request->hasParam("sha256") ? request->arg("sha256") : std::string();
+    uint8_t expected[crypto::Sha256::DIGEST_SIZE];
+    const bool parsed = sha.size() == 2 * sizeof(expected) && from_hex(sha, 0, expected, sizeof(expected));
+    this->auth_ = this->check_auth_(request, "/feeder/firmware\n" + sha, this->auth_wait_);
+    this->upload_.start(parsed ? expected : nullptr, total, this->auth_ == AuthResult::OK, &this->sink_);
+    if (this->upload_.status() == FirmwareUpload::Status::RECEIVING)
+      ESP_LOGI(TAG, "Firmware upload started (%u bytes)", static_cast<unsigned>(total));
+    return true;
   }
 
  protected:
@@ -657,6 +676,7 @@ class SettingsGuard : public AsyncWebHandler {
   AuthResult auth_{AuthResult::OK};
   uint32_t auth_wait_{0};
   bool body_seen_{false};
+  bool firmware_body_{false};  // the body being received is a firmware upload
 #endif
 
   /// POST /feeder/auth/password?salt=<hex>&key=<hex>: set or change it (key masked, see password_unmask), or clear

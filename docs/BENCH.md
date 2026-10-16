@@ -413,3 +413,34 @@ feeder's server waits on (browsers send `Content-Length: 0`).
 
 Left on the board: the build's name and access-point password, no settings password, no API key, the BLE key made
 during the test (a BLE key cannot be cleared, only replaced), setup offered again, the Wi-Fi network the YAML has.
+
+## Firmware 2.0.0 N8 on hardware, part 1: upgrade from 1.1 (2026-10-16)
+
+Waveshare ESP32-S3-Zero, `examples/ble.yaml`. Flash erased, `v1.1.0` flashed over USB, then given non-default
+settings (guard limits, reload pause, refill interval, location, servo pulse range 560 to 2380 µs), calibration
+offsets (slot 3 +1.5°, slot 5 −0.8°), an event in profile B and a fed tray (slot 1, 5 left). Then the 2.0.0 YAML
+build of the same file over ESPHome OTA.
+
+- **First try: rolled back to 1.1.0.** The 2.0 build crashed in its first minute and ESPHome's safe mode rolled the
+  OTA back ("reset before the boot was marked successful"). The crash was a **stack overflow in the web server's
+  task** on the first protected write (here, the test turning Calibration Mode on). It was not about the upgrade:
+  every protected write through the web server crashed the 2.0 build, settings password or not (the N5/N6 run
+  used signed writes on an earlier build). Fixed: see below.
+- **On 2.0** (the feeder came up on a second try, its first boot behind it): Firmware Variant `yaml`;
+  `GET /feeder/network` said `"setup":false` (an updated feeder is not sent through the wizard). With the fix,
+  protected writes answered 200 in about 0.1 s. The full comparison with the 1.1 snapshot was not made (below).
+- **Firmware upload** (`POST /feeder/firmware`, this build's own image, no settings password): a wrong SHA-256 was
+  refused with 422 `sha256` and the feeder kept running; an upload cut after a third left it running, and the next
+  upload aborted the open session; a good one answered 200 `{"restart":true}`, and the feeder restarted into it.
+  About 12 s for 1.4 MB.
+- **Stack headroom** (a temporary build logging the web server task's high-water mark): 472 bytes left after a
+  protected write, 616 after an upload, 1032 after a refused one.
+- Not finished: a clean repeat of the upgrade with the fixed build from erased 1.1 (the OTA went through, then the
+  network went away before it was checked); the upgrade to the prebuilt binary.
+
+Found and fixed during the run:
+- **Stack overflow on every protected write** (since 2.0.0 N7, possibly marginal before): the web server's task has
+  ESP-IDF's 4 KB stack plus 256 bytes, and the settings guard's request handler, with its URL buffer and every route
+  inlined (about 720 bytes), stayed on the stack while it passed the write to the web server's own handler. The
+  routes now live in a separate, non-inlined function that returns first; the pass-through costs 32 bytes. The
+  firmware upload's body handler had the same pattern while writing to flash, fixed the same way.

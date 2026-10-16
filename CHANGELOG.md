@@ -67,6 +67,9 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   checking it against the release. The upload is signed with the settings password and the
   feeder checks the image's SHA-256 before switching, then restarts once the tray is still.
 - New Firmware Variant sensor: `full`, `no-ble` or `yaml` (built from your own YAML).
+- Fixed on the bench (N8): every protected write through the web server (guard limits, calibration, pins) crashed
+  the feeder with a stack overflow in the web server's task, which on a fresh upgrade made ESPHome roll the update
+  back. The settings guard no longer keeps its own stack frame while the web server handles the write.
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)
