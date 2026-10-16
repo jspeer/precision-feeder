@@ -1400,6 +1400,31 @@ static void test_network() {
   }
 }
 
+static void test_setup_flag() {
+  current = "setup wizard flag";
+  {
+    Flash flash;
+    auto f = boot(flash, T0);
+    CHECK(f->setup_needed(), "a new feeder needs setting up");
+    f->set_setup_done(true);
+    CHECK(!f->setup_needed() && flash.have_device && flash.device_saves == 1, "finished: saved at once");
+    f->set_setup_done(true);
+    CHECK(flash.device_saves == 1, "no change, no write");
+    auto g = boot(flash, T0 + 60);
+    CHECK(!g->setup_needed(), "kept across a restart");
+    g->set_setup_done(false);
+    CHECK(g->setup_needed() && g->ble_may_change_guard(), "offered again; other flags kept");
+  }
+  {
+    // An update from 1.x: settings and a calibration saved, no Device record yet.
+    Flash flash;
+    { auto f = boot(flash, T0); f->set_min_gap_s(120); f->advance(5000); }
+    flash.have_device = false;
+    auto f = boot(flash, T0 + 60);
+    CHECK(flash.have_settings && !flash.have_device && !f->setup_needed(), "an existing feeder is not set up again");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -1433,6 +1458,7 @@ int main() {
   test_settings_password();
   test_ble_settings();
   test_network();
+  test_setup_flag();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

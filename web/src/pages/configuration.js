@@ -1,6 +1,41 @@
 // Configuration: the feeder's settings, each with the device's own limits and unit, saved when you press Set (or
 // Enter) and confirmed by the device. The feed guard's limits are the device's: this page only changes them.
 
+/** A settings row choosing the time zone by place (IANA name), which sets the Timezone entity to the POSIX string
+ *  ESPHome would compile for it (tz_zones.js). Null without the Timezone entity. */
+function timezonePicker() {
+  if (!store.has(E.timezone)) return null;
+  const browser = (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+  const zones = tzZones();
+  const sel = h('select', { class: 'input', 'aria-label': 'Time zone', onchange: () => {
+    if (!sel.value) return;
+    api.setAndConfirm(E.timezone, sel.value === '-' ? '' : tzPosix(sel.value))
+      .then(() => toast('Time zone saved', 'ok'), err => { toastError(err); sel._update(true); });
+  } },
+  h('option', { value: '-' }, 'From the YAML (or Home Assistant)'),
+  h('option', { value: '', hidden: true }, 'Other (a rule typed below)'),
+  zones.map(([n]) => h('option', { value: n }, n.replace(/_/g, ' '))));
+  sel._update = force => {
+    if (!force && document.activeElement === sel) return;
+    const posix = store.text(E.timezone);
+    if (!posix) { sel.value = '-'; return; }
+    const names = tzNamesFor(posix);
+    // Several places share a rule: keep the one shown if it still fits, else prefer this browser's.
+    sel.value = names.includes(sel.value) ? sel.value : names.includes(browser) ? browser : names[0] || '';
+  };
+  sel._update();
+  const here = tzPosix(browser) ? h('button', { class: 'btn btn-small', type: 'button', onclick: () => {
+    sel.value = browser;
+    sel.dispatchEvent(new Event('change'));
+  } }, `Use ${browser.replace(/_/g, ' ')}`) : null;
+  const el = h('div', { class: 'setting' },
+    h('div', { class: 'setting-text' }, h('div', { class: 'setting-label' }, 'Time zone'),
+      h('div', { class: 'hint' }, 'Where the feeder is. Daylight saving and sunrise and sunset follow it.')),
+    h('div', { class: 'setting-control' }, sel, here));
+  el._update = () => sel._update();
+  return el;
+}
+
 PAGES.configuration = {
   mount(root) {
     this.rows = [];
@@ -29,9 +64,11 @@ PAGES.configuration = {
     const loc = card('Location and time',
       h('p', { class: 'hint' }, 'The location is only needed for sunrise and sunset events. Decimal degrees: north and ' +
                                  'east are positive, south and west negative. Both 0 means not set.'));
-    const tz = setting('Time zone', 'A POSIX TZ string, for example CET-1CEST,M3.5.0,M10.5.0/3 (not a name like ' +
-                       'Europe/Berlin). Empty: the one in your YAML, or Home Assistant\'s.', E.timezone);
-    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), tz].filter(Boolean)) {
+    const tz = setting('Time zone rule', 'Set by the place above, or type a POSIX TZ string, for example ' +
+                       'CET-1CEST,M3.5.0,M10.5.0/3. Empty: the one in your YAML, or Home Assistant\'s.', E.timezone);
+    const zone = timezonePicker();
+    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), zone, tz]
+      .filter(Boolean)) {
       this.rows.push(r);
       loc.appendChild(r);
     }
@@ -62,7 +99,8 @@ PAGES.configuration = {
       });
     }
     d('Firmware', () => store.text(E.firmware));
-    dev.appendChild(h('p', { class: 'hint' }, 'Diagnostics shows every address and the live log.'));
+    dev.appendChild(h('p', { class: 'hint' }, 'Diagnostics shows every address and the live log. ',
+                      h('a', { href: '#setup' }, 'Run the setup wizard again'), '.'));
 
     this.hw = this.hardwareCard();
 

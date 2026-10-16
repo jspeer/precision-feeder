@@ -411,3 +411,12 @@ a { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---- setup wizard (pages/setup.js) ---- */
+.wizard-head { width: 100%; max-width: 720px; margin: 0 auto 12px; box-sizing: border-box; }
+.wizard-count { color: var(--muted); font-size: 0.9em; margin-bottom: 6px; }
+.wizard-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.wizard-bar::before { content: ""; display: block; height: 100%; width: var(--done); background: var(--accent); }
+#page > .card { width: 100%; box-sizing: border-box; max-width: 720px; margin-left: auto; margin-right: auto; }
+.wizard-nav { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.wizard-skip { max-width: 720px; margin: 10px auto 0; }

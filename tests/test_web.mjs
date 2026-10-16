@@ -217,3 +217,26 @@ test('keys: base64 in and out (2.0.0 N4)', () => {
   assert.equal(A.keyFromBase64('not base64!'), null, 'not base64');
   assert.equal(A.keyFromBase64(A.keyToBase64(new Uint8Array(32))), null, 'the all-zero key is refused');
 });
+
+// ---- time zones (web/src/tz_zones.js, 2.0.0 N6) ----
+const tzSrc = readFileSync(new URL('../web/src/tz_zones.js', import.meta.url), 'utf8');
+const tctx = vm.createContext({});
+vm.runInContext(`${tzSrc}\nthis.T = { tzZones, tzPosix, tzNamesFor, TZ_RULES };`, tctx);
+const T = tctx.T;
+
+test('time zones: names to the POSIX strings ESPHome compiles', () => {
+  assert.equal(T.tzPosix('Europe/Berlin'), 'CET-1CEST,M3.5.0,M10.5.0/3');
+  assert.equal(T.tzPosix('America/New_York'), 'EST5EDT,M3.2.0,M11.1.0');
+  assert.equal(T.tzPosix('Asia/Kolkata'), 'IST-5:30');
+  assert.equal(T.tzPosix('Nowhere/Special'), '');
+  assert.ok(T.tzNamesFor('CET-1CEST,M3.5.0,M10.5.0/3').includes('Europe/Paris'));
+  const names = T.tzZones().map(([n]) => n);
+  assert.ok(names.length > 400 && names.every(n => n.includes('/')), 'Area/Location names only');
+});
+
+test('time zones: every rule the app can send is one the device parser is tested on (tests/tz_golden.h)', () => {
+  const golden = new Set([...readFileSync(new URL('./tz_golden.h', import.meta.url), 'utf8')
+    .matchAll(/^\s*\{"([^"]+)"/gm)].map(m => m[1]));
+  const missing = T.TZ_RULES.filter(r => !golden.has(r));
+  assert.deepEqual([...missing], [], 'regenerate both with ESPHome\'s Python: tools/gen_tz_golden.py, gen_tz_zones.py');
+});

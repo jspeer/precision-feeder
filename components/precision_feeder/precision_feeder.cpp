@@ -392,7 +392,7 @@ class SettingsGuard : public AsyncWebHandler {
       return false;
     if (url == "/feeder/auth/password" || url == "/feeder/auth/check" || url == "/feeder/keys/api" ||
         url == "/feeder/keys/ble" || url == "/feeder/network/name" || url == "/feeder/network/ap" ||
-        url == "/feeder/network/wifi")
+        url == "/feeder/network/wifi" || url == "/feeder/setup")
       return true;
     // POST /<domain>/<name>/<action>: protected when "<domain>/<name>" is on the list.
     const size_t action = url.rfind('/');
@@ -407,6 +407,10 @@ class SettingsGuard : public AsyncWebHandler {
         this->send_network_(request);
       else
         this->send_challenge_(request);
+      return;
+    }
+    if (url == "/feeder/setup") {
+      this->set_setup_(request);
       return;
     }
     if (url.rfind("/feeder/network/", 0) == 0) {
@@ -626,7 +630,7 @@ class SettingsGuard : public AsyncWebHandler {
   /// comes from, and whether a Wi-Fi network can be saved. Never a password.
   void send_network_(AsyncWebServerRequest *request) {
     std::string in_use, saved;
-    bool has_ap, restart;
+    bool has_ap, restart, setup;
     KeySource ap = KeySource::BUILD;
     {
       LockGuard guard(this->feeder_->password_lock());
@@ -635,14 +639,32 @@ class SettingsGuard : public AsyncWebHandler {
       has_ap = this->feeder_->has_ap();
       ap = this->feeder_->ap_password_source();
       restart = this->feeder_->network_restart_needed();
+      setup = this->feeder_->setup_needed();
     }
     // Names are checked hostnames (letters, digits, hyphens), so they need no escaping.
     std::string body = "{\"name\":\"" + in_use + "\",\"name_saved\":\"" + saved + "\",\"name_build\":\"" +
                        this->feeder_->hostname_build() + "\",\"ap\":\"" +
                        (has_ap ? (ap == KeySource::DEVICE ? "device" : "build") : "off") + "\",\"wifi\":" +
                        (PrecisionFeeder::wifi_settable() ? "true" : "false") + ",\"restart\":" +
-                       (restart ? "true" : "false") + "}";
+                       (restart ? "true" : "false") + ",\"setup\":" + (setup ? "true" : "false") + "}";
     request->send(200, "application/json", body.c_str());
+  }
+
+  /// POST /feeder/setup?done=1 (the setup wizard finished or skipped) or done=0 (offer it again). Signed.
+  void set_setup_(AsyncWebServerRequest *request) {
+    const std::string done = request->arg("done");
+    if (!this->authorised_(request, "/feeder/setup\n" + done))
+      return;
+    if (done != "0" && done != "1") {
+      request->send(400, "application/json", "{\"error\":\"format\"}");
+      return;
+    }
+    PrecisionFeeder *feeder = this->feeder_;
+    feeder->run_on_main_loop([feeder, done]() {
+      LockGuard guard(feeder->password_lock());
+      feeder->set_setup_done(done == "1");
+    });
+    request->send(200, "application/json", "{}");
   }
 
   /// A secret text sent masked, in hex (password_unmask_text), unmasked into `out`; false if malformed or too long.

@@ -142,7 +142,7 @@ class Feeder:
         self.keys = {"api": "none", "ble": "off" if args.no_ble else "build"}
         # The network settings (DESIGN.md section 9.3), as GET /feeder/network reports them. Never a password.
         self.network = {"name": "precision-feeder", "name_saved": "", "name_build": "precision-feeder",
-                        "ap": "build", "wifi": True}
+                        "ap": "build", "wifi": True, "setup": not getattr(args, "set_up", False)}
         self.network_boot = ("", "build")  # what the feeder started with: a change waits for a restart
         self.entities: dict[str, Entity] = {}
         self._build(args)
@@ -196,6 +196,7 @@ class Feeder:
         a("number", "Latitude", 0.0, category=CONFIG, uom="°", decimals=4, min_value=-90, max_value=90, step=0.0001)
         a("number", "Longitude", 0.0, category=CONFIG, uom="°", decimals=4, min_value=-180, max_value=180,
           step=0.0001)
+        a("text", "Timezone", "", icon="mdi:map-clock-outline", category=CONFIG, max_length=63)
         # schedule_editor.yaml
         a("text_sensor", "Edited Profile", "", icon="mdi:calendar-edit")
         a("text_sensor", "Schedule Data", "", icon="mdi:code-braces", category=DIAGNOSTIC, disabled=True)
@@ -581,6 +582,10 @@ class Feeder:
                     ev[4] = mask
                 else:
                     self.profiles[self.edit_profile]["fast"] = mask
+            elif name == "Timezone":
+                # The device parses it (tz_rules.h); the mock only keeps it, and shows the clock as before.
+                self.set("text", "Timezone", value.strip())
+                self.log("I", "precision_feeder", f"Timezone set to {value.strip() or 'the build' + chr(39) + 's'}")
             elif name == "Add One-shot Feed" and value:
                 try:
                     t = time.mktime(time.strptime(value, "%Y-%m-%d %H:%M"))
@@ -767,6 +772,15 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                     feeder.keys[kind] = "device" if key else "none"
                     feeder.log("W", "precision_feeder", f"{kind.upper()} key {'set' if key else 'cleared'} from the web app")
                     return self._send(200, b"{}", "application/json")
+                if path == "/feeder/setup":
+                    done = params.get("done", "")
+                    if not password.check(header, f"{path}\n{done}"):
+                        return self._send(*refused)
+                    if done not in ("0", "1"):
+                        return self._send(400, b'{"error":"format"}', "application/json")
+                    feeder.network["setup"] = done == "0"
+                    feeder.log("I", "precision_feeder", "Setup finished" if done == "1" else "Setup offered again")
+                    return self._send(200, b"{}", "application/json")
                 if path.startswith("/feeder/network/"):
                     return self._send(*self._network(path, params, header, refused))
                 if path == "/feeder/auth/password":
@@ -875,6 +889,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--host", default="::", help="address to listen on (default: all, IPv6 and IPv4)")
     ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--set-up", action="store_true", help="a feeder already set up (no setup wizard)")
     ap.add_argument("--auth", metavar="USER:PASS", help="require HTTP basic authentication")
     ap.add_argument("--no-calibration", action="store_true", help="as a build without the calibration package")
     ap.add_argument("--no-diagnostics", action="store_true", help="as a build without the diagnostics package")

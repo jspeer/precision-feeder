@@ -508,6 +508,12 @@ class FeederCore {
   /// Save the access point's password ("" goes back to the build's). INVALID_ARG unless 8 to 63 printable
   /// characters; UNSUPPORTED in a build without an access point.
   Result set_ap_password(const std::string &password);
+  // ---- setup wizard (DESIGN.md section 9.4) ----
+  /// True until the setup wizard is finished or skipped. A feeder that already had settings or a calibration when it
+  /// first met a Device record (an update from 1.x) counts as set up.
+  bool setup_needed() const { return (this->dev_.flags & DEVICE_SETUP_DONE) == 0; }
+  /// Mark the setup finished (or not, to offer it again). Saved at once.
+  void set_setup_done(bool done);
   bool network_restart_needed() const {
     return this->network_runtime_ && (std::strcmp(this->dev_.hostname, this->boot_hostname_) != 0 ||
                                       std::strcmp(this->dev_.ap_password, this->boot_ap_password_) != 0);

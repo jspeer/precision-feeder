@@ -39,6 +39,12 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   fallback access point's password (after the next restart). Protected by the settings
   password, with the passwords masked by it; the feeder never sends one back. The access
   point is now named `<name>-setup` from the name in use.
+- Setup wizard: a new feeder opens a step-by-step setup in the web app (network, time zone
+  and location, board and pins, keys, settings password, then calibration). Every step
+  saves as it goes and can be skipped; Configuration can start it again. A feeder updated
+  from 1.x is not sent through it.
+- Time zone by place: the web app lists every IANA zone and sets the Timezone entity to the
+  POSIX string ESPHome would compile for it (setup wizard and Configuration).
 - New `name_add_mac_suffix` substitution (off by default): adds the end of the MAC
   address to the name, so feeders built from one YAML do not clash.
 - New `improv_serial` package (on in both examples): set Wi-Fi over the USB cable from an

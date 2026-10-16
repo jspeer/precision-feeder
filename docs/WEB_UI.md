@@ -49,7 +49,8 @@ else the feeder lists under Faults.
 - **Configuration:**
   - the feeding safety limits, reload pause, refill interval and location, each with
     the feeder's own limits and units;
-  - the time zone (a POSIX string; empty means the YAML's, or Home Assistant's);
+  - the time zone, chosen by place or typed as a POSIX string (empty means the YAML's, or
+    Home Assistant's);
   - network: the name (used after a restart), joining another Wi-Fi network (at once), and
     the fallback access point's password (used after a restart). Passwords are never shown
     or sent back;
@@ -63,6 +64,10 @@ else the feeder lists under Faults.
     saved on the feeder); generate one (made in the browser and shown once), enter
     your own, or clear the Home Assistant key, where the build allows it; and the two
     switches for what Bluetooth may change. The feeder never sends a key back.
+- **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
+  Configuration (Device). Steps: welcome, network, time zone (by place) and location,
+  board and pins, keys, settings password, calibration. Each saves as it goes and can be
+  skipped; Finish (or skipping) tells the feeder setup is done.
 - **Maintenance:**
   - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
     and the servo pulse range;

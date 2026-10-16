@@ -272,6 +272,18 @@ const auth = {
     if (kind !== 'wifi') await this.loadNetwork();
   },
 
+  /** The setup wizard finished or skipped (true), or to be offered again (false). Signed when a password is set. */
+  async setSetupDone(done) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = '/feeder/setup', value = done ? '1' : '0';
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, value)) } : {};
+    const r = await fetch(`${location.origin}${path}?done=${value}`, { method: 'POST', headers });
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+    await this.loadNetwork();
+  },
+
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
   async setPassword(password) {
     const c = await this.challenge();

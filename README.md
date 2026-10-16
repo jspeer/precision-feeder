@@ -314,6 +314,13 @@ the servo pulse range and calibration offsets, the timezone, and (with the `hard
 pins, and in the web app the name, the Wi-Fi network and the fallback access point's password ([Network](#network)). Pins change at the next restart; the selects offer only pins the ESP32-S3 can spare (no flash, PSRAM, USB or
 strapping pins), and "none" for a button or LED that is not fitted.
 
+## Setup wizard
+
+A new feeder (firmware 2.0.0) opens a setup wizard in the web app: its name and network, the time zone (chosen by
+place) and location, board and pins, keys, an optional settings password, and then the calibration walkthrough.
+Every step saves as it goes and can be skipped. Configuration (Device) starts it again. A feeder updated from an
+earlier version is not sent through it.
+
 ## Network
 
 The web app's Configuration page has a **Network** card (firmware 2.0.0). With a settings password set, all of it
@@ -405,8 +412,8 @@ over-fed tank:
 ## Limits
 
 - **The Timezone entity takes a POSIX TZ string** (`CET-1CEST,M3.5.0,M10.5.0/3`),
-  not an IANA name like `Europe/Berlin`. Left empty, the build's timezone (or Home
-  Assistant's) is used.
+  not an IANA name like `Europe/Berlin`; the web app picks it for you from a place name.
+  Left empty, the build's timezone (or Home Assistant's) is used.
 - **After a power cut with no network,** scheduled feeding waits until the clock
   is set again (NTP, Home Assistant, or BLE). There is no battery-backed clock.
 - **Six portions per load.** Schedules that feed several times a day need

@@ -9,6 +9,8 @@ const TABS = [
     shown: () => store.has(E.calibrationMode) || store.has(E.declarePosition) || store.has(E.portions24h) },
   { id: 'bluetooth', title: 'Bluetooth', short: 'BLE', icon: 'bluetooth', shown: () => store.has(E.bleSession) },
   { id: 'diagnostics', title: 'Diagnostics', short: 'Diag', icon: 'activity', shown: () => true },
+  // Not in the tab bar: opened by itself on a feeder that is not set up yet, and from Configuration.
+  { id: 'setup', title: 'Setup', hidden: true, shown: () => store.has(E.dailyCap) },
 ];
 // The initial list of entities arrives in a burst; it has settled once nothing new has come for this long.
 const SETTLE_MS = 700;
@@ -46,6 +48,11 @@ const app = {
     store.subscribe(changed => this.update(changed));
     store.start();
     auth.refresh();
+    // A feeder that is not set up yet (2.0.0 N6) opens the setup wizard, unless a page was asked for.
+    auth.loadNetwork().then(n => {
+      const want = location.hash.replace(/^#/, '');
+      if (n && n.setup && (!want || (want === 'dashboard' && !this.navigated))) location.hash = '#setup';
+    });
     this.update(new Set(['*all']));
     // Re-check the route once the first burst of entities has settled.
     const settle = setInterval(() => {
@@ -86,7 +93,7 @@ const app = {
   },
 
   updateTabs() {
-    const tabs = this.visibleTabs();
+    const tabs = this.visibleTabs().filter(t => !t.hidden);
     const active = this.current ? this.current.id : '';
     const key = tabs.map(t => t.id).join() + '|' + active;
     if (key === this.tabsKey) return;
@@ -115,7 +122,7 @@ const app = {
         if (!this.current) this.showLoading();
         return;
       }
-      tab = tabs[0];
+      tab = tabs.find(t => !t.hidden);
       if (want) history.replaceState(null, '', `#${tab.id}`);
     }
     const sub = rest.join('/');

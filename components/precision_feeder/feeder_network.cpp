@@ -77,6 +77,15 @@ void FeederCore::set_network_in_use(const std::string &hostname, bool has_ap, co
     std::memcpy(this->boot_ap_password_, ap.data(), ap.size());
 }
 
+void FeederCore::set_setup_done(bool done) {
+  if (this->setup_needed() == !done)
+    return;
+  this->dev_.flags = static_cast<uint8_t>(done ? this->dev_.flags | DEVICE_SETUP_DONE
+                                               : this->dev_.flags & ~DEVICE_SETUP_DONE);
+  this->hal_save_device(this->dev_);
+  this->log_(LogLevel::kInfo, done ? "Setup finished" : "Setup will be offered again");
+}
+
 Result FeederCore::set_hostname(const std::string &name) {
   if (!this->network_runtime_)
     return Result::UNSUPPORTED;
