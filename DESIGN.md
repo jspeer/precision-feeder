@@ -770,6 +770,8 @@ precision-feeder/
   docs/CALIBRATION.md  setup and calibration walkthrough
   docs/BENCH.md        hardware test results
   docs/WEB_UI.md       the built-in web app, page by page
+  docs/INSTALL.md      installing the prebuilt binaries, updates, recovery, the binary and flash matrix
+  docs/SECURITY.md     the security model, for users
   docs/plans/          release plans: milestones and the decisions behind them
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
@@ -1135,18 +1137,27 @@ precision-feeder/
     `manual_ip` still works. Fixing it would need a static IPv4 address set at run time (a Device record field and a
     call to ESPHome's Wi-Fi before it connects). Documented; not planned yet (2026-10-16).
 
-## 15. Implementation status (v1.1.0)
+21. Factory reset: listed among the protected settings (owner, 2026-10-15) but not built in 2.0. Wiping a feeder is
+    an erase-and-flash from the install page (docs/INSTALL.md, Recovery). To decide: a protected "factory reset" in
+    the web app (erase our records and ESPHome's Wi-Fi slot), or keep erase-and-flash.
+
+## 15. Implementation status (v2.0.1)
 
 Everything in sections 3 to 10 is built. On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
 power cuts, schedules on NTP, Home Assistant and BLE time, every BLE command,
-the button, Needs Food and the over-cap warning ([docs/BENCH.md](docs/BENCH.md)).
+the button, Needs Food and the over-cap warning; for 2.0, the upgrades from 1.1
+(to a YAML build and to a prebuilt binary), a fresh install from the install page,
+the setup wizard, firmware uploads and their refusals, the update check's outcomes,
+IPv4-only and dual-stack networks, the keys and the BOOT reset
+([docs/BENCH.md](docs/BENCH.md); what is still unchecked is in section 14).
 Host tests (`tests/`, `tools/`) cover the core logic with a simulated clock, the
-calendar and sun maths, the BLE protocol and its cryptography, and the Python
+calendar and sun maths, the timezone parser, the settings password, the firmware
+upload, the BLE protocol and its cryptography, the web app's parsers and the Python
 client. Version history: [CHANGELOG.md](CHANGELOG.md).
 
-Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5: about 53% of the 1.8 MB app
-partition without BLE, 71% with it.
+Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries): 60.9% of the
+1.8 MB app partition without BLE, 78.9% with it (section 9.5).
 
 Deviations from the first draft of this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said
@@ -1163,9 +1174,9 @@ Deviations from the first draft of this design, all deliberate:
 - The minimum gap uses uptime when available, otherwise the saved epoch.
 - Polar days use a 06:00 / 18:00 fallback instead of skipping (section 5.2).
 
-Saved data: three records, each with its own preference key and version
+Saved data: four records, each with its own preference key and version
 (`feeder_core.h`): settings (schedule, guard, location), calibration (pulse range
-and offsets) and tray state. A layout change gets a new key and a migration from
+and offsets), tray state, and the device record (section 9.2). A layout change gets a new key and a migration from
 the old layout; saved data is never simply discarded.
 
 Not yet exercised: a real daylight-saving changeover (event times use wall-clock

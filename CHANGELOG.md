@@ -11,6 +11,9 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 2.0.0 was never released: the bench (2.0.0 N8, [docs/BENCH.md](docs/BENCH.md)) found two faults in it. 2.0.1 is
 2.0.0 (below) with them fixed.
 
+- New guides: [docs/INSTALL.md](docs/INSTALL.md) (installing the prebuilt firmware, updates, recovery, the binary
+  and flash matrix) and [docs/SECURITY.md](docs/SECURITY.md) (the security model).
+
 - Fixed on the bench (N8): every protected write through the web server (guard limits, calibration, pins) crashed
   the feeder with a stack overflow in the web server's task, which on a fresh upgrade made ESPHome roll the update
   back. The settings guard no longer keeps its own stack frame while the web server handles the write.

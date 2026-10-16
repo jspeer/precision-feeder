@@ -135,8 +135,11 @@ signal wire to GND. (It did not on the bench build.)
 
 ## Prebuilt binaries
 
-From firmware 2.0.0 you need not build anything: flash a release from the install page,
-**<https://jspeer.github.io/precision-feeder/>** (published with the first 2.0.0 release), in Chrome or Edge on a
+The full guide, with recovery and the security model, is [docs/INSTALL.md](docs/INSTALL.md) and
+[docs/SECURITY.md](docs/SECURITY.md).
+
+From firmware 2.0 you need not build anything: flash a release from the install page,
+**<https://jspeer.github.io/precision-feeder/>** (published with the first 2.0 release, 2.0.1), in Chrome or Edge on a
 computer. Plug the board in over USB, choose a variant, and the page then asks for your Wi-Fi network (Improv).
 Open the feeder's address and the [setup wizard](#setup-wizard) does the rest. Images are also on the
 [releases page](https://github.com/jspeer/precision-feeder/releases).
@@ -479,6 +482,8 @@ over-fed tank:
 
 | Document | For |
 |---|---|
+| [docs/INSTALL.md](docs/INSTALL.md) | installing the prebuilt firmware, updates and recovery |
+| [docs/SECURITY.md](docs/SECURITY.md) | the security model: who can change what, and the limits |
 | [docs/WEB_UI.md](docs/WEB_UI.md) | the built-in web app, page by page |
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | building schedule profiles |
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | lining up the tray |

@@ -134,7 +134,8 @@ HMAC are `crypto.h`), which must stay free of
 
 ```
 README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
-docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md, WEB_UI.md; plans/ (release plans)
+docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md, WEB_UI.md, INSTALL.md, SECURITY.md;
+              plans/ (release plans)
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; feeder_password.cpp
               settings password, BLE key and BLE permissions; feeder_pins.cpp runtime pins and pin validator;
