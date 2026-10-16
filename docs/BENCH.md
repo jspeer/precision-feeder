@@ -453,3 +453,22 @@ Found and fixed during the run:
   inlined (about 720 bytes), stayed on the stack while it passed the write to the web server's own handler. The
   routes now live in a separate, non-inlined function that returns first; the pass-through costs 32 bytes. The
   firmware upload's body handler had the same pattern while writing to flash, fixed the same way.
+
+## Firmware 2.0.0 N8 on hardware, part 2: a fresh install from the install page (2026-10-16)
+
+The site `tools/make_release.py` makes (install page, manifests, the fixed `full` image) served on
+`http://localhost:8123` (a secure context, so Web Serial works), Chrome on macOS, the S3-Zero over USB.
+
+- **ESP Web Tools 10.4.0** found the board, offered to erase, erased and installed the `full` factory image; its
+  Wi-Fi step was skipped. The page's version line came from `manifest.json`.
+- **Open access point:** `precision-feeder-add020-setup` showed on a phone with no password; joining it opened the
+  captive portal's page (owner's check).
+- **Improv serial** (a script, after the installer let go of the port): joined the phone hotspot and answered with
+  the feeder's address.
+- **First boot:** `GET /feeder/network` said `"setup":true`, `"ap":"open"`, `"ap_build_open":true`; no API or BLE key,
+  no settings password; Firmware Variant `full`; build defaults (Daily Portion Cap 4). The web app opened `#setup` by
+  itself; the wizard's network step said the access point has no password, with a "Strongly recommended" badge and
+  "Set a password" as the main button.
+- Fixed: the badge stretched across the card; it now sits inline.
+- Harness: the Claude desktop app's browser pane has Web Serial, but its port chooser is drawn outside the page,
+  so a person picks the port; only one program can hold the port at a time (close the installer before Improv).
