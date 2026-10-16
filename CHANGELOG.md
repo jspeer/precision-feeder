@@ -17,6 +17,8 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 - Fixed on the bench (N8): the firmware upload accepted a first-flash `.factory.bin` (the bootloader then refused to
   start it, so the old firmware came back). The feeder and the Firmware page now refuse anything that is not an app
   image.
+- Fixed on the bench (N8): the update check waited indefinitely on a network that drops packets silently; it now
+  says "Couldn't check for updates" after 10 seconds.
 
 ## 2.0.0: appliance (not released; see 2.0.1)
 

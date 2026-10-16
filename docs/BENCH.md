@@ -497,3 +497,28 @@ Python client doing what `auth.uploadFirmware` does (PBKDF2 key, HMAC over the p
   "Restarting into the uploaded firmware"; after the restart the tray was at slot 1, loaded, 5 left, no faults (a
   restart mid-move would have left the position unknown).
 - The test password was removed afterwards.
+
+## Firmware 2.0.1 N8 on hardware, part 4: the update check without internet (2026-10-16)
+
+The 2.0.1 `full` image (uploaded through `/feeder/firmware`), the Firmware page in the Claude desktop app's browser.
+Nothing is published on GitHub Pages yet, so the outcomes were driven by stubbing `fetch` for the manifest's URL in
+the page; the rest of the page was the feeder's own.
+
+| Manifest | Page | Time |
+|---|---|---|
+| 2.0.1 (same) | Up to date (latest release 2.0.1) | 0.4 s |
+| 2.1.0 | Version 2.1.0 is available, with the release notes link | 0.4 s |
+| 2.1.0 with no image for this variant | Latest release 2.1.0, releases link | 0.4 s |
+| 404, or the connection refused | Couldn't check for updates, releases link | 0.4 s |
+| No answer at all (a firewall dropping packets) | Couldn't check for updates | 10.2 s |
+| The real network today (nothing published) | Couldn't check for updates | 0.4 s |
+
+- Found and fixed: with no answer at all the check had no timeout and would have said "Checking…" for as long as
+  the browser waited. It now gives up after 10 s.
+- **The feeder's own internet blocked:** not tested. The phone hotspot's per-client block refused the feeder's
+  Wi-Fi association altogether (it could not join), so "on the LAN without internet" could not be set up there. By
+  design the check never involves the feeder (the browser fetches the manifest), and the feeder's only outbound
+  traffic is NTP (and Home Assistant).
+- Harness: opening the S3's USB serial port from this Mac resets the board (USB_UART_CHIP_RESET), even with DTR and
+  RTS held low; a tab left open across an upload keeps the old app until reloaded (the app's "feeder was updated"
+  banner covers that).

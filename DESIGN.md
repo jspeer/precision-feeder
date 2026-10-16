@@ -613,8 +613,8 @@ binary's config.
   image's `name`, `size` and `sha256`. Pages serves it with `Access-Control-Allow-Origin: *` (section 14, item 10).
 - **Update check, in the browser** (web app, `#firmware`, linked from Diagnostics): fetches `manifest.json` when
   the page opens, unless turned off in that browser, and compares it with Firmware Version and Firmware Variant.
-  Up to date, update available (release notes link), "Couldn't check" (releases link), or for a `yaml` build the
-  latest version and "update with ESPHome". The feeder itself never contacts the internet.
+  Up to date, update available (release notes link), "Couldn't check" (releases link; also after 10 s with no
+  answer), or for a `yaml` build the latest version and "update with ESPHome". The feeder itself never contacts the internet.
 - **Upload** (`POST /feeder/firmware?sha256=<hex>`, the image as the raw body, `application/octet-stream`):
   a route of the settings guard (section 10.1), signed over the path and the hash. The browser hashes the file and
   names it from the manifest (release, variant; a factory image is refused; an unknown file needs a confirmation).

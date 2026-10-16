@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '5736cd3b348f';
+const BUILD_ID = '8692ea3511e5';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -3407,6 +3407,8 @@ PAGES.setup = {
 const MANIFEST_URL = 'https://jspeer.github.io/precision-feeder/manifest.json';
 const RELEASES_URL = 'https://github.com/jspeer/precision-feeder/releases';
 const CHECK_PREF = 'pf.updateCheck';  // 'off' turns the check off in this browser
+// A network that drops packets silently would leave the check "Checking…" for minutes: give up after this long.
+const CHECK_TIMEOUT_MS = 10000;
 
 function updateCheckOn() {
   try { return localStorage.getItem(CHECK_PREF) !== 'off'; } catch (e) { return true; }
@@ -3448,12 +3450,15 @@ PAGES.firmware = {
       return;
     }
     this.show(h('p', { class: 'hint' }, 'Checking…'));
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), CHECK_TIMEOUT_MS);
     try {
-      const r = await fetch(MANIFEST_URL, { cache: 'no-store' });
+      const r = await fetch(MANIFEST_URL, { cache: 'no-store', signal: abort.signal });
       this.manifest = r.ok ? await r.json() : null;
     } catch (e) {
       this.manifest = null;
     }
+    clearTimeout(timer);
     const u = updateState(this.manifest, store.text(E.firmware), store.text(E.firmwareVariant));
     const notes = this.manifest && this.manifest.notes;
     if (!this.manifest) this.show(h('p', {}, 'Couldn\'t check for updates. ', link('Releases')));
