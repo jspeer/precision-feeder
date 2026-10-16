@@ -566,3 +566,24 @@ Tag `v2.0.1`: the Release workflow checked, built both variants and published th
 `manifest.json`; notes from CHANGELOG.md with the unreleased 2.0.0 section and absolute links) and GitHub Pages (the
 install page, the install manifests, the factory images, `manifest.json` with `Access-Control-Allow-Origin: *`). The
 bench feeder's Firmware page, reading the live manifest: "Up to date (latest release 2.0.1)".
+
+## Firmware 2.0.2 on hardware: NTP servers (2026-10-16)
+
+The owner's bench feeder, set up from a fresh, erased install of the released 2.0.1 `full` (saved name, timezone
+`CST6`, location, setup finished, no keys or password), on a GL.iNet travel router whose own NTP server answers at
+192.168.8.1. The 2.0.2 `full` image uploaded through `/feeder/firmware` (200, restarted). The log was read from the web
+server's `/events`.
+
+- **Device record v1 → v2:** after the upload every value matched the 2.0.1 snapshot (name and saved name, access
+  point `open`, setup done, password scheme, keys, timezone, board and the three pins, both BLE permissions, a guard
+  limit, the location, the Wi-Fi network); only the version and the time source ("kept across restart" until the
+  next sync) differed. NTP Servers empty: the build's.
+- **A local server:** with an unreachable server (192.0.2.1) the clock went 2 minutes without a sync; set to
+  `192.168.8.1` it synced 3 s later (Minutes Since Clock Sync back to 0, Time Source NTP). Logged "NTP servers set to
+  192.168.8.1" and "NTP: asking the servers set on the feeder".
+- **Unreachable server:** 150 s with no sync, as expected; the feeder kept running on its clock.
+- **Refused:** four servers ("more than three servers", logged); the saved list stayed.
+- **Back to the build's** (empty): "NTP: asking the build's servers", synced 5 s later.
+- **Kept across a restart:** set to 192.168.8.1, restarted: the setting was kept and the clock synced from it (the
+  only server set).
+- Left on the feeder: the build's servers (as before the test), 2.0.2.

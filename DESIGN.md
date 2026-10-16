@@ -334,7 +334,8 @@ path.
   applied at once. ESPHome sets its servers once and has no setter, so the adapter stops ESP-IDF's SNTP client, gives
   it the new names and starts it again (empty goes back to the build's, read from ESP-IDF at boot). Not protected by
   the settings password, like the timezone (owner, 2026-10-16). **Found in 2.0.2:** ESP-IDF's default
-  `CONFIG_LWIP_SNTP_MAX_SERVERS` is 1, so before 2.0.2 only the first server was ever asked; core.yaml now sets 3.
+  `CONFIG_LWIP_SNTP_MAX_SERVERS` is 1, so before 2.0.2 only the first server was ever asked; core.yaml now sets 3. Checked on
+  the bench (docs/BENCH.md, 2.0.2): a local server, an unreachable one, back to the build's, kept across a restart.
 - **BLE `SET_TIME` is the fallback.** It carries `epoch u32` (UTC) and
   `utc_offset_min i16`. Policy `ble_time_policy`:
   - `fallback_only` (recommended): accepted only if NTP has not synced within
