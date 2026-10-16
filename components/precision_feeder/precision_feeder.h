@@ -13,6 +13,9 @@
 #include "esphome/core/preferences.h"
 #include "esphome/components/output/float_output.h"
 #include "esphome/components/time/real_time_clock.h"
+#ifdef USE_TIME_TIMEZONE
+#include "esphome/components/time/posix_tz.h"
+#endif
 
 #include <cmath>
 #include <string>
@@ -76,6 +79,8 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_save_settings(const Settings &settings, bool flush) override;
   void hal_save_calibration(const Calibration &calibration, bool flush) override;
   void hal_save_state(const State &state, bool flush) override;
+  void hal_save_device(const Device &device) override;
+  void hal_apply_timezone(const TzRules *rules) override;
   void hal_log(LogLevel level, const char *message) override;
 
   output::FloatOutput *output_{nullptr};
@@ -83,6 +88,10 @@ class PrecisionFeeder : public Component, public FeederCore {
   ESPPreferenceObject pref_settings_;
   ESPPreferenceObject pref_calibration_;
   ESPPreferenceObject pref_state_;
+  ESPPreferenceObject pref_device_;
+#ifdef USE_TIME_TIMEZONE
+  time::ParsedTimezone build_tz_{};  // the timezone in use at boot, before any set on the device
+#endif
 };
 
 }  // namespace precision_feeder

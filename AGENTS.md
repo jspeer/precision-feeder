@@ -93,7 +93,7 @@ substitutions.
   `python3 -m unittest test_precision_feeder_ble` in `tools/`. The C++ and Python
   protocol tests share golden byte vectors; change them together.
 - Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
-  `feeder_schedule.cpp` and `feeder_text.cpp`), which must stay free of
+  `feeder_schedule.cpp` and `feeder_text.cpp`; the timezone parser is `tz_rules.h`), which must stay free of
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
   `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.

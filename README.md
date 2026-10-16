@@ -346,13 +346,14 @@ over-fed tank:
 | Servo buzzes or strains at one end | Pulse range too wide for your servo; narrow **Servo Min/Max Pulse**. |
 | Tray position "unknown" | Power was cut or Stop pressed during a move. Declare the position or press Tray Reload. |
 | Home Assistant does not find it | Different network segment: add the ESPHome integration by IP with the API key (port 6053). |
-| Wrong times (an hour off) | The `timezone` substitution. With the `time_homeassistant` package, Home Assistant's timezone is used instead unless you pin yours (see that package's comment). |
+| Wrong times (an hour off) | The **Timezone** entity, if set (a POSIX string such as `CET-1CEST,M3.5.0,M10.5.0/3`); otherwise the `timezone` substitution, or Home Assistant's timezone with the `time_homeassistant` package unless you pin yours (see that package's comment). |
 | Food sticks | Use pellets; flake food is not advised. |
 
 ## Limits
 
-- **The timezone is fixed when you build** (or comes from Home Assistant with the
-  `time_homeassistant` package); it cannot be changed from the dashboard.
+- **The Timezone entity takes a POSIX TZ string** (`CET-1CEST,M3.5.0,M10.5.0/3`),
+  not an IANA name like `Europe/Berlin`. Left empty, the build's timezone (or Home
+  Assistant's) is used.
 - **After a power cut with no network,** scheduled feeding waits until the clock
   is set again (NTP, Home Assistant, or BLE). There is no battery-backed clock.
 - **Six portions per load.** Schedules that feed several times a day need

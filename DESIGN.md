@@ -300,14 +300,23 @@ path.
   2026-10-14), useful when the internet is down but HA is up. By default HA also
   pushes its timezone; a build can pin its own (packages/time_homeassistant.yaml). With NTP and HA both enabled, last sync wins;
   the policy gate applies only to BLE.
-- **Timezone:** a build-time YAML substitution (IANA name or POSIX string), or
-  pushed by Home Assistant when the HA time package is enabled. **Finding
-  (ESPHome 2026.9.1):** the timezone is pre-parsed at build time into a struct;
-  there is no on-device POSIX parser, so a runtime timezone entity is not
-  possible without writing our own parser. For BLE-only units with no way to
-  receive a timezone, the offset from `SET_TIME` could be used (the client
-  would send the current offset each time to cover DST). `SET_TIMEZONE`
-  (chunked POSIX string) is only worth it if we write that parser; deferred.
+- **Timezone:** three sources, strongest first (firmware 2.0.0):
+  1. The **Timezone** entity: a POSIX TZ string set at run time, saved in the
+     Device record (section 9.2) and applied at once, no reboot. It wins over
+     the other two, and is put back after Home Assistant pushes its own.
+  2. Home Assistant's timezone, pushed with each time sync when the HA time
+     package is enabled and does not pin one.
+  3. The build's `timezone` substitution (IANA name or POSIX string).
+  **Finding (ESPHome 2026.9.1):** ESPHome parses its timezone at build time,
+  and Home Assistant sends a parsed one; nothing parses a string on the device.
+  So `tz_rules.h` is our own parser, written fresh, producing exactly the fields
+  of ESPHome's reference parser (checked against every IANA zone,
+  `tests/tz_golden.h`). The adapter applies it with ESPHome's
+  `time::set_global_tz()`. It is stricter than the reference: no trailing
+  characters, no daylight-saving name without rules, offsets up to 24 h. IANA
+  names are converted to POSIX strings off the device (the setup wizard, N6).
+  A change never repeats a feed: fired events are stored by day number.
+  BLE `SET_TIMEZONE` stays reserved (protocol unchanged); adding it needs a decision.
 - **Time quality is exposed** (HA and GATT): source (none / BLE / NTP / HA) and
   sync age. A BLE-set clock that has aged is flagged "time stale" and keeps
   running. The clock free-runs at a few seconds of drift per day, so a week
@@ -347,7 +356,7 @@ immediately and are saved a couple of seconds later, so there is no Save
 button. Event time and days are text entities (`HH:MM` or signed `+03:00`;
 `mon,wed,fri` / `weekdays` / `all`). Config: guard settings, gap between
 portions, latitude, longitude, reload pause, refill interval
-(timezone is build-time, see section 6). Calibration: mode switch, position
+and the timezone (a POSIX string, see section 6). Calibration: mode switch, position
 select, one offset number, servo min/max pulse (saved, tuned at run time),
 declare-position recovery.
 
@@ -451,6 +460,32 @@ Entities publish only when their value changes: each package refreshes its
 entities from one 1-second interval through `publish_number/text/bool/option`
 (`precision_feeder.h`), instead of each entity polling on its own.
 
+### 9.2 Device record (firmware 2.0.0)
+
+The settings a prebuilt binary needs at run time are saved in their own record,
+`Device` (`feeder_core.h`, preference key `precision_feeder.device.v1`, version 1),
+next to Settings, Calibration and State. Its layout already holds every field 2.0
+sets at run time, so later milestones fill fields in instead of changing it:
+
+| Field | Meaning | "Use the build's value" | Milestone |
+|---|---|---|---|
+| `servo_pin`, `button_pin`, `led_pin` | GPIO numbers; `PIN_NONE` for no button or LED | `PIN_BUILD` | N3 |
+| `flags` | setup done; BLE may change guard limits; BLE may change calibration (both on by default) | | N4, N6 |
+| `hostname` | device name | empty | N5 |
+| `timezone` | POSIX TZ string | empty | N1 (built) |
+| `ap_password` | fallback access-point password | empty | N5 |
+| `ble_key` | BLE key | all zero (no key set here) | N4 |
+| `password_scheme`, `password_salt`, `password_hash` | settings password (0: none) | | N2 |
+
+- **The YAML stays in charge until the device is changed.** A fresh record says "use
+  the build's value" everywhere, and nothing is saved until a setting changes, so a
+  YAML build keeps following edits to its YAML. A value set on the device wins.
+- Saved at once (not debounced): these change rarely and matter after a reboot.
+- On load, strings are terminated, unknown flag bits cleared, and a timezone that no
+  longer parses is dropped (with a warning) in favour of the build's.
+- The API key and Wi-Fi networks are not in it: ESPHome keeps them in its own
+  preference slots (section 14, item 10).
+
 ## 10. BLE security
 
 Decided 2026-10-14 (owner: "use best practices"), built in protocol 2
@@ -508,7 +543,8 @@ precision-feeder/
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
-                                    feeder_internal.h, calendar.h, solar.h; precision_feeder.*
+                                    feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
+                                    parser); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
   components/precision_feeder_ble/  optional BLE protocol: protocol.h, crypto.h and the
                                     BleEngine (engine.*: every handler), all host-tested;
@@ -520,7 +556,8 @@ precision-feeder/
   web/                 the web app: src/ (plain JavaScript and CSS, no dependencies), dist/ (built by
                        tools/build_web.py, committed, embedded by packages/web_server.yaml)
   tests/               host-side C++ tests (core, logic, protocol, BLE engine); test_consistency.py;
-                       test_web.mjs (the web app's parsers, under Node)
+                       test_web.mjs (the web app's parsers, under Node); tz_golden.h (generated by
+                       tools/gen_tz_golden.py)
   tools/               Python reference client: precision_feeder_ble.py (entry point) and
                        precision_feeder_client/ (protocol, client, selftest, cli); check.sh;
                        mock_device.py (a fake device for building the web app)
@@ -614,6 +651,15 @@ precision-feeder/
   - When built, this reverses "no web-server OTA" and "every pin is a
     substitution", and drops the build-time-only timezone (sections 6 and 13,
     AGENTS.md); each is updated in the change that builds it.
+- **2.0.0 N1 (2026-10-15):**
+  - The Device record holds the whole 2.0 layout now, with "use the build's value"
+    markers, so YAML builds keep following their YAML (section 9.2).
+  - The timezone is a POSIX string set at run time; one set on the device wins over
+    Home Assistant's and the build's. Our own parser, stricter than ESPHome's
+    reference and checked against it (section 6).
+  - Owner, 2026-10-15: the API key is meant to be provisioned by Home Assistant on
+    adoption. N4 keeps Generate and Clear as well (and a way to enter a key of your
+    own, for one API key shared across devices): options do not hurt.
 
 ## 14. Open items
 

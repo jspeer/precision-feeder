@@ -220,8 +220,8 @@ source. The device's `time_policy` decides:
 
 So a client can push the time on every connection without risk: with the default
 policy it is ignored whenever the device already has good network time. The
-device's timezone is fixed at build time; `utc_offset_min` is accepted for
-forward compatibility and not used. The device does not remember the clock across
+device's timezone comes from the build, Home Assistant or its Timezone entity, never
+from BLE; `utc_offset_min` is accepted for forward compatibility and not used. The device does not remember the clock across
 a power loss, so a PLC should push the time after every connect.
 
 ## Status (read, notify)

@@ -62,6 +62,26 @@ void FeederCore::defaults_() {
   std::memset(&this->state_, 0, sizeof(this->state_));
   this->state_.version = STATE_VERSION;
   this->state_.moving_to = NO_MOVE;
+
+  std::memset(&this->dev_, 0, sizeof(this->dev_));
+  this->dev_.version = DEVICE_VERSION;
+  this->dev_.servo_pin = PIN_BUILD;
+  this->dev_.button_pin = PIN_BUILD;
+  this->dev_.led_pin = PIN_BUILD;
+  this->dev_.flags = DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION;
+}
+
+void FeederCore::clamp_device_() {
+  Device &d = this->dev_;
+  d.hostname[HOSTNAME_SIZE - 1] = '\0';
+  d.timezone[TIMEZONE_SIZE - 1] = '\0';
+  d.ap_password[AP_PASSWORD_SIZE - 1] = '\0';
+  d.flags &= DEVICE_FLAGS_KNOWN;
+  TzRules tz;
+  if (d.timezone[0] != '\0' && !parse_tz(d.timezone, tz)) {
+    this->log_(LogLevel::kWarn, "Saved timezone not understood, using the build's");
+    d.timezone[0] = '\0';
+  }
 }
 
 void FeederCore::clamp_loaded_() {
@@ -205,8 +225,12 @@ void FeederCore::migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration
 }
 
 void FeederCore::core_start(const Settings *settings, const Calibration *calibration, const State *state,
-                            const legacy::SettingsV3 *legacy_v3) {
+                            const legacy::SettingsV3 *legacy_v3, const Device *device) {
   this->defaults_();
+  if (device != nullptr && device->version == DEVICE_VERSION) {
+    this->dev_ = *device;
+    this->clamp_device_();
+  }
   const bool have_calibration = calibration != nullptr && calibration->version == CALIBRATION_VERSION;
   if (have_calibration)
     this->calib = *calibration;
@@ -227,6 +251,8 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
     this->log_(LogLevel::kInfo, "No saved tray state, assuming a freshly loaded tray at position 0");
   }
   this->clamp_loaded_();
+  if (this->dev_.timezone[0] != '\0')
+    this->apply_timezone_();
   this->clock_kept_ = this->hal_time_valid();
   if (this->clock_kept_)
     this->log_(LogLevel::kInfo, "Clock kept across a restart (valid at boot, not a fresh sync)");
@@ -275,6 +301,11 @@ void FeederCore::core_loop() {
     this->hal_save_settings(this->cfg, true);
     this->hal_save_calibration(this->calib, true);
     this->cfg_dirty_ = false;
+  }
+  if (this->tz_reapply_) {
+    this->tz_reapply_ = false;
+    if (this->dev_.timezone[0] != '\0')
+      this->apply_timezone_();
   }
   if (now - this->last_tick_ >= 1000) {
     this->last_tick_ = now;
@@ -786,8 +817,47 @@ void FeederCore::note_time_sync(TimeSource source) {
   this->last_sync_ms_[static_cast<uint8_t>(source)] = this->hal_uptime_ms();
   this->last_time_source_ = source;
   this->project_dirty_ = true;
+  // Home Assistant sends its timezone with the time, right after this call; a timezone set on the device wins.
+  if (source == TimeSource::HOME_ASSISTANT && this->dev_.timezone[0] != '\0')
+    this->tz_reapply_ = true;
   // Debug only: NTP and Home Assistant each re-sync every 15 minutes, so at INFO this would fill the log.
   this->log_(LogLevel::kDebug, "Clock set by %s", this->time_source_text().c_str());
+}
+
+Result FeederCore::set_timezone(const std::string &posix) {
+  TzRules tz;
+  if (!posix.empty() && !parse_tz(posix.c_str(), tz)) {
+    this->log_(LogLevel::kWarn, "Timezone '%.63s' not understood (expected a POSIX TZ string)", posix.c_str());
+    return Result::INVALID_ARG;
+  }
+  if (posix == this->dev_.timezone)
+    return Result::OK;
+  std::memset(this->dev_.timezone, 0, sizeof(this->dev_.timezone));
+  std::memcpy(this->dev_.timezone, posix.data(), posix.size());  // parse_tz() checked the length
+  this->hal_save_device(this->dev_);
+  if (posix.empty()) {
+    this->hal_apply_timezone(nullptr);
+    this->log_(LogLevel::kInfo, "Timezone: back to the build's");
+  } else {
+    this->hal_apply_timezone(&tz);
+    this->log_(LogLevel::kInfo, "Timezone set to %s", this->dev_.timezone);
+  }
+  this->timezone_changed_();
+  return Result::OK;
+}
+
+void FeederCore::apply_timezone_() {
+  TzRules tz;
+  if (parse_tz(this->dev_.timezone, tz))
+    this->hal_apply_timezone(&tz);
+  this->timezone_changed_();
+}
+
+void FeederCore::timezone_changed_() {
+  // Days, midnights and sun times all depend on the timezone: work them out again. Events already fired today stay
+  // fired (State::fired holds day numbers), so a change never repeats a feed.
+  this->day_cache_hour_ = -1;
+  this->project_dirty_ = true;
 }
 
 void FeederCore::set_system_time(uint32_t epoch) {

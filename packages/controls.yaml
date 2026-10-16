@@ -227,6 +227,22 @@ number:
       - lambda: id(feeder).set_location(id(feeder).cfg.latitude, x);
     update_interval: never
 
+text:
+  # --- Timezone (changes without a rebuild) ---------------------------------
+  # A POSIX TZ string such as "CET-1CEST,M3.5.0,M10.5.0/3" (not an IANA name like "Europe/Berlin"). Empty means the
+  # build's timezone (the timezone substitution), or the one Home Assistant sends; one set here wins over both.
+  - platform: template
+    id: pf_timezone
+    name: "Timezone"
+    icon: mdi:map-clock-outline
+    entity_category: config
+    mode: text
+    min_length: 0
+    max_length: 63
+    set_action:
+      - lambda: id(feeder).set_timezone(x);
+    update_interval: never
+
 # Publish the entities above only when their value changes (see packages/status.yaml).
 interval:
   - interval: 1s
@@ -243,3 +259,4 @@ interval:
           publish_number(id(pf_refill_interval), id(feeder).cfg.refill_interval_days);
           publish_number(id(pf_latitude), id(feeder).cfg.latitude);
           publish_number(id(pf_longitude), id(feeder).cfg.longitude);
+          publish_text(id(pf_timezone), id(feeder).timezone_text());

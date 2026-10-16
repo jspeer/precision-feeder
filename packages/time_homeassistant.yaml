@@ -16,6 +16,9 @@
 #   time:
 #     - id: !extend ha_time
 #       timezone: ${timezone}
+#
+# Or, without a rebuild, set the device's Timezone entity (packages/controls.yaml):
+# a timezone set there wins over the one Home Assistant sends.
 
 time:
   - platform: homeassistant

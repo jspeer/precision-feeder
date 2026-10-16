@@ -23,10 +23,13 @@ struct Flash {
   bool have_state{false};
   bool have_calibration{false};
   bool have_v3{false};
+  bool have_device{false};
   Settings settings{};
   State state{};
   Calibration calibration{};
   legacy::SettingsV3 v3{};
+  Device device{};
+  int device_saves{0};
   int settings_saves{0};
   bool settings_flushed{false};
   bool state_flushed{false};  // whether the last state save asked for an immediate flush
@@ -46,7 +49,8 @@ class FakeFeeder : public FeederCore {
     this->set_detach_delay(1000);
     this->core_start(flash_.have_settings ? &flash_.settings : nullptr,
                      flash_.have_calibration ? &flash_.calibration : nullptr,
-                     flash_.have_state ? &flash_.state : nullptr, flash_.have_v3 ? &flash_.v3 : nullptr);
+                     flash_.have_state ? &flash_.state : nullptr, flash_.have_v3 ? &flash_.v3 : nullptr,
+                     flash_.have_device ? &flash_.device : nullptr);
     this->set_feed_listener([this](const FeedRecord &r) { this->records.push_back(r); });
   }
 
@@ -79,6 +83,9 @@ class FakeFeeder : public FeederCore {
   std::vector<float> angles;
   int releases{0};
   std::vector<std::string> logs;
+  int tz_applies{0};         // calls to hal_apply_timezone
+  bool tz_applied{false};    // the last call set a timezone (false: went back to the build's)
+  TzRules tz_rules{};        // what the last call set
 
  protected:
   uint32_t hal_millis() override { return static_cast<uint32_t>(this->uptime_ms_); }
@@ -120,6 +127,17 @@ class FakeFeeder : public FeederCore {
     flash_.state_flushed = flush;
     flash_.state = s;
     flash_.have_state = true;
+  }
+  void hal_save_device(const Device &d) override {
+    flash_.device_saves++;
+    flash_.device = d;
+    flash_.have_device = true;
+  }
+  void hal_apply_timezone(const TzRules *rules) override {
+    this->tz_applies++;
+    this->tz_applied = rules != nullptr;
+    if (rules != nullptr)
+      this->tz_rules = *rules;
   }
   void hal_log(LogLevel, const char *message) override { this->logs.emplace_back(message); }
 

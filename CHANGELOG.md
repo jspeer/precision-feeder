@@ -6,6 +6,18 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.0.0: appliance (in progress)
+
+Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plans/2.0.0-appliance.md)).
+
+- Timezone without a rebuild: the new **Timezone** entity (Configuration) takes a
+  POSIX TZ string such as `CET-1CEST,M3.5.0,M10.5.0/3` and applies it at once. One
+  set there wins over Home Assistant's and the build's; empty goes back to them.
+- A new saved record, Device, for the settings 2.0 changes at run time (pins,
+  names, keys, timezone). A YAML build keeps following its YAML until a value is
+  changed on the device. Nothing existing is migrated or lost.
+- CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
+
 ## 1.1.0: local first (2026-10-15)
 
 The built-in web app, so the feeder is fully usable from a browser with no Home

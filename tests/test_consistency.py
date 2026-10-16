@@ -111,5 +111,29 @@ class Consistency(unittest.TestCase):
             self.assertIn(name, self.e, f"mock_device.py serves {name!r}, which no package defines")
 
 
+    def test_timezone_length(self):
+        """The Timezone entity takes as many characters as the device's parser accepts."""
+        tz_h = (ROOT / "components/precision_feeder/tz_rules.h").read_text()
+        limit = int(re.search(r"TZ_TEXT_MAX = (\d+);", tz_h).group(1))
+        controls = (ROOT / "packages/controls.yaml").read_text()
+        block = controls[controls.index('name: "Timezone"'):]
+        self.assertEqual(int(re.search(r"max_length: (\d+)", block).group(1)), limit)
+
+    def test_timezone_golden(self):
+        """tests/tz_golden.h still matches ESPHome's reference parser (skipped without aioesphomeapi)."""
+        try:
+            from aioesphomeapi.posix_tz import parse_posix_tz
+        except ImportError:
+            self.skipTest("aioesphomeapi not installed")
+        rows = re.findall(r'\{"(.*?)", (-?\d+), (-?\d+), \{(.*?)\}, \{(.*?)\}\}',
+                          (ROOT / "tests/tz_golden.h").read_text())
+        self.assertGreater(len(rows), 80)
+        for text, std, dst, start, end in rows:
+            p = parse_posix_tz(text)
+            rule = lambda r: ", ".join(str(v) for v in (r.time_seconds, r.day, int(r.type), r.month, r.week, r.day_of_week))
+            self.assertEqual((int(std), int(dst), rule(p.dst_start), rule(p.dst_end)),
+                             (p.std_offset_seconds, p.dst_offset_seconds, start, end), text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,7 @@ static const char *current = "";
   } while (0)
 
 #include "fake_feeder.h"
+#include "tz_golden.h"
 
 // ---- tests -----------------------------------------------------------------------------------
 
@@ -817,6 +818,8 @@ class DstFeeder : public FeederCore {
   void hal_save_settings(const Settings &, bool) override {}
   void hal_save_calibration(const Calibration &, bool) override {}
   void hal_save_state(const State &, bool) override {}
+  void hal_save_device(const Device &) override {}
+  void hal_apply_timezone(const TzRules *) override {}
 
   int64_t up_{0};
   int64_t ms_;
@@ -938,6 +941,138 @@ static void test_web_app_data() {
   CHECK(k->feed_guard_text() == "daily cap reached", "daily cap");
 }
 
+static bool same_rule(const TzRule &r, const TzGoldenRule &g) {
+  return r.time_s == g.time_s && r.day == g.day && static_cast<int>(r.type) == g.type && r.month == g.month &&
+         r.week == g.week && r.day_of_week == g.day_of_week;
+}
+
+static void test_tz_parser() {
+  current = "POSIX TZ parser";
+  // Every timezone in the IANA database parses to exactly what ESPHome's reference parser gives.
+  int n = 0;
+  for (const auto &g : TZ_GOLDEN) {
+    TzRules tz;
+    const bool ok = parse_tz(g.text, tz);
+    if (!ok || tz.std_offset_s != g.std_offset_s || tz.dst_offset_s != g.dst_offset_s ||
+        !same_rule(tz.dst_start, g.start) || !same_rule(tz.dst_end, g.end)) {
+      std::printf("  mismatch: %s\n", g.text);
+      CHECK(false, "golden timezone");
+    }
+    n++;
+  }
+  CHECK(n > 80, "golden table present");
+
+  TzRules tz;
+  CHECK(parse_tz("EST5EDT,M3.2.0,M11.1.0", tz) && tz.has_dst() && tz.std_offset_s == 18000 &&
+            tz.dst_offset_s == 14400 && tz.dst_start.time_s == 7200,
+        "DST one hour ahead and 02:00 by default");
+  CHECK(parse_tz("<+0545>-5:45", tz) && !tz.has_dst() && tz.std_offset_s == -(5 * 3600 + 45 * 60), "quoted name");
+  CHECK(parse_tz("UTC0", tz) && tz.std_offset_s == 0, "UTC");
+  CHECK(parse_tz("XXX3YYY,J60/-1:30,300/26", tz) && tz.dst_start.type == TzRuleType::JULIAN_NO_LEAP &&
+            tz.dst_start.time_s == -5400 && tz.dst_end.type == TzRuleType::DAY_OF_YEAR && tz.dst_end.time_s == 93600,
+        "Julian and day-of-year rules with times");
+
+  // Refused: typed by a person, so anything doubtful is an error rather than a guess.
+  const char *bad[] = {
+      "",                            // empty
+      "America/New_York",            // an IANA name, not a POSIX string
+      "EST",                         // no offset
+      "ES5",                         // name too short
+      "<+0>0",                       // quoted name too short
+      "<+05-5",                      // unterminated quoted name
+      "EST25",                       // offset beyond 24 h
+      "EST5:60",                     // minutes out of range
+      "EST5 ",                       // trailing space
+      "EST5EDT",                     // daylight saving with no rules
+      "EST5EDT,M3.2.0",              // only one rule
+      "EST5EDT,M13.2.0,M11.1.0",     // month 13
+      "EST5EDT,M3.6.0,M11.1.0",      // week 6
+      "EST5EDT,M3.2.7,M11.1.0",      // weekday 7
+      "EST5EDT,J0,J300",             // Julian day 0
+      "EST5EDT,366,300",             // day of year 366
+      "EST5EDT,M3.2.0/168,M11.1.0",  // transition beyond 167 h
+      "EST5EDT,M3.2.0,M11.1.0,",     // trailing comma
+      "EST5EDT,m3.2.0,m11.1.0",      // lower-case rule letter
+      "EST5,M3.2.0,M11.1.0",         // rules without a DST name
+      "EST999999",                   // number too long
+  };
+  for (const char *text : bad) {
+    TzRules before;
+    before.std_offset_s = 123;
+    if (parse_tz(text, before)) {
+      std::printf("  accepted: '%s'\n", text);
+      CHECK(false, "bad timezone refused");
+    }
+    CHECK(before.std_offset_s == 123, "output untouched on failure");
+  }
+  std::string longest = "<" + std::string(60, 'A') + ">5";  // 63 characters: the limit
+  CHECK(parse_tz(longest.c_str(), tz), "63 characters accepted");
+  longest.insert(1, "A");
+  CHECK(!parse_tz(longest.c_str(), tz), "64 characters refused");
+  CHECK(!parse_tz(nullptr, tz), "null refused");
+}
+
+static void test_device_record() {
+  current = "device record";
+  Flash flash;
+  {
+    auto f = boot(flash, T0);
+    const Device &d = f->device();
+    CHECK(d.version == DEVICE_VERSION && d.servo_pin == PIN_BUILD && d.button_pin == PIN_BUILD &&
+              d.led_pin == PIN_BUILD,
+          "fresh device follows the build's pins");
+    CHECK(d.flags == (DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION), "BLE toggles default on, setup not done");
+    CHECK(f->timezone_text().empty() && f->tz_applies == 0, "no timezone of its own");
+    CHECK(!flash.have_device, "nothing saved until something changes");
+
+    CHECK(f->set_timezone("Europe/Berlin") == Result::INVALID_ARG, "IANA name refused");
+    CHECK(!flash.have_device && f->tz_applies == 0, "refused: nothing saved or applied");
+    CHECK(f->set_timezone("CET-1CEST,M3.5.0,M10.5.0/3") == Result::OK, "POSIX string accepted");
+    CHECK(flash.have_device && flash.device_saves == 1, "saved at once");
+    CHECK(f->tz_applies == 1 && f->tz_applied && f->tz_rules.std_offset_s == -3600 && f->tz_rules.has_dst(),
+          "applied at once");
+    CHECK(f->timezone_text() == "CET-1CEST,M3.5.0,M10.5.0/3", "reported");
+    CHECK(f->set_timezone("CET-1CEST,M3.5.0,M10.5.0/3") == Result::OK && flash.device_saves == 1,
+          "the same again is not rewritten");
+
+    // Home Assistant pushes its own timezone right after a time sync: ours is put back on the next loop.
+    f->note_time_sync(TimeSource::HOME_ASSISTANT);
+    CHECK(f->tz_applies == 1, "not inside the sync callback");
+    f->advance(250);
+    CHECK(f->tz_applies == 2 && f->tz_applied, "re-applied after Home Assistant's sync");
+    f->note_time_sync(TimeSource::NTP);
+    f->advance(250);
+    CHECK(f->tz_applies == 2, "an NTP sync does not touch the timezone");
+  }
+  {
+    auto f = boot(flash, T0);
+    CHECK(f->tz_applies == 1 && f->tz_rules.std_offset_s == -3600, "applied at boot from the saved record");
+    CHECK(f->set_timezone("") == Result::OK && f->tz_applies == 2 && !f->tz_applied, "cleared: build's again");
+    CHECK(flash.device.timezone[0] == '\0', "clearing is saved");
+    f->note_time_sync(TimeSource::HOME_ASSISTANT);
+    f->advance(250);
+    CHECK(f->tz_applies == 2, "with none set, Home Assistant's timezone stands");
+  }
+  {
+    // A damaged record: unterminated strings, unknown flag bits and a timezone that no longer parses.
+    std::memset(flash.device.hostname, 'x', sizeof(flash.device.hostname));
+    std::strcpy(flash.device.timezone, "EST5EDT");
+    flash.device.flags = 0xFF;
+    flash.device.servo_pin = 4;
+    auto f = boot(flash, T0);
+    const Device &d = f->device();
+    CHECK(d.hostname[HOSTNAME_SIZE - 1] == '\0', "strings terminated");
+    CHECK(f->timezone_text().empty() && f->tz_applies == 0, "bad saved timezone dropped, build's used");
+    CHECK(d.flags == DEVICE_FLAGS_KNOWN, "unknown flag bits cleared");
+    CHECK(d.servo_pin == 4, "the rest kept");
+  }
+  {
+    flash.device.version = DEVICE_VERSION + 1;  // a layout this firmware does not know
+    auto f = boot(flash, T0);
+    CHECK(f->device().servo_pin == PIN_BUILD, "unknown version: defaults");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -965,6 +1100,8 @@ int main() {
   test_projection_matches_firing();
   test_daylight_saving();
   test_web_app_data();
+  test_tz_parser();
+  test_device_record();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

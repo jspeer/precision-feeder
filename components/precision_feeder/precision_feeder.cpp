@@ -24,12 +24,19 @@ void PrecisionFeeder::setup() {
   this->pref_calibration_ =
       global_preferences->make_preference<Calibration>(fnv1_hash("precision_feeder.calibration.v1"));
   this->pref_state_ = global_preferences->make_preference<State>(fnv1_hash("precision_feeder.state"));
+  this->pref_device_ = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v1"));
   Settings settings;
   Calibration calibration;
   State state;
+  Device device;
   const bool have_settings = this->pref_settings_.load(&settings);
   const bool have_calibration = this->pref_calibration_.load(&calibration);
   const bool have_state = this->pref_state_.load(&state);
+  const bool have_device = this->pref_device_.load(&device);
+#ifdef USE_TIME_TIMEZONE
+  // The time platforms set the build's timezone before any component starts.
+  this->build_tz_ = time::get_global_tz();
+#endif
   legacy::SettingsV3 v3;
   bool have_v3 = false;
   if (!have_settings) {
@@ -37,7 +44,7 @@ void PrecisionFeeder::setup() {
     have_v3 = pref_v3.load(&v3);
   }
   this->core_start(have_settings ? &settings : nullptr, have_calibration ? &calibration : nullptr,
-                   have_state ? &state : nullptr, have_v3 ? &v3 : nullptr);
+                   have_state ? &state : nullptr, have_v3 ? &v3 : nullptr, have_device ? &device : nullptr);
 }
 
 void PrecisionFeeder::dump_config() {
@@ -117,6 +124,41 @@ void PrecisionFeeder::hal_save_state(const State &state, bool flush) {
   this->pref_state_.save(&state);
   if (flush)
     global_preferences->sync();
+}
+
+void PrecisionFeeder::hal_save_device(const Device &device) {
+  this->pref_device_.save(&device);
+  global_preferences->sync();
+}
+
+void PrecisionFeeder::hal_apply_timezone(const TzRules *rules) {
+#ifdef USE_TIME_TIMEZONE
+  if (rules == nullptr) {
+    // Home Assistant, if it sends a timezone, sends it again at its next time sync.
+    time::set_global_tz(this->build_tz_);
+    return;
+  }
+  // The same fields and meanings as ESPHome's parser (tz_rules.h).
+  auto rule = [](const TzRule &r) {
+    time::DSTRule out{};
+    out.time_seconds = r.time_s;
+    out.day = r.day;
+    out.type = static_cast<time::DSTRuleType>(r.type);
+    out.month = r.month;
+    out.week = r.week;
+    out.day_of_week = r.day_of_week;
+    return out;
+  };
+  time::ParsedTimezone tz{};
+  tz.std_offset_seconds = rules->std_offset_s;
+  tz.dst_offset_seconds = rules->dst_offset_s;
+  tz.dst_start = rule(rules->dst_start);
+  tz.dst_end = rule(rules->dst_end);
+  time::set_global_tz(tz);
+#else
+  (void) rules;
+  ESP_LOGW(TAG, "This build has no timezone support (no time platform with a timezone): timezone not applied");
+#endif
 }
 
 void PrecisionFeeder::hal_log(LogLevel level, const char *message) {

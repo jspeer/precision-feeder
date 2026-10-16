@@ -16,6 +16,7 @@
 
 #include "calendar.h"
 #include "solar.h"
+#include "tz_rules.h"
 
 namespace esphome {
 namespace precision_feeder {
@@ -37,6 +38,7 @@ constexpr int POLAR_SUNSET_MIN = 18 * 60;
 constexpr uint32_t SETTINGS_VERSION = 4;       // 2: no late start; 3: servo pulse range; 4: calibration moved out
 constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
+constexpr uint32_t DEVICE_VERSION = 1;
 // Setting limits: the single source of truth. Every way of changing a setting (Home Assistant, BLE, loading from
 // flash) goes through the setters below, which check against these. The YAML entities repeat them as min/max for
 // their input boxes; tests/test_consistency.py checks that they agree.
@@ -54,6 +56,22 @@ constexpr uint16_t PULSE_MIN_HI = 1500;
 constexpr uint16_t PULSE_MAX_LO = 1500;
 constexpr uint16_t PULSE_MAX_HI = 3000;
 constexpr uint16_t PULSE_SPAN_MIN = 500;  // max - min
+
+// Device record (2.0): pins, names and credentials that a prebuilt binary sets at run time. Each field has a "use
+// the build's value" setting, so a YAML build keeps following its YAML until something is changed on the device.
+constexpr uint8_t PIN_BUILD = 0xFE;  // use the YAML substitution
+constexpr uint8_t PIN_NONE = 0xFF;   // no button or no LED fitted
+constexpr unsigned HOSTNAME_SIZE = 32;                 // ESPHome names are at most 31 characters
+constexpr unsigned TIMEZONE_SIZE = TZ_TEXT_MAX + 1;    // POSIX TZ string and its terminator
+constexpr unsigned AP_PASSWORD_SIZE = 64;              // WPA2: at most 63 characters
+constexpr unsigned DEVICE_KEY_SIZE = 32;               // BLE key, as docs/PROTOCOL.md
+constexpr unsigned PASSWORD_SALT_SIZE = 16;
+constexpr unsigned PASSWORD_HASH_SIZE = 32;            // SHA-256
+// Device::flags
+constexpr uint8_t DEVICE_SETUP_DONE = 0x01;        // the setup wizard has finished
+constexpr uint8_t DEVICE_BLE_GUARD = 0x02;         // BLE may change the guard limits (default on)
+constexpr uint8_t DEVICE_BLE_CALIBRATION = 0x04;   // BLE may change the calibration (default on)
+constexpr uint8_t DEVICE_FLAGS_KNOWN = DEVICE_SETUP_DONE | DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION;
 
 /// Where a feed request came from.
 // ESPHOME: a feed button of the device itself, pressed in Home Assistant (native API) or the web UI.
@@ -139,6 +157,24 @@ struct Calibration {
   uint16_t max_pulse_us;           // servo pulse for 180 degrees
 };
 
+/// Device settings, saved on their own (DESIGN.md section 9.2). The layout holds everything 2.0 sets at run time, so
+/// later milestones fill fields in rather than change it. Strings are NUL-terminated; empty means "the build's value".
+struct Device {
+  uint32_t version;
+  uint8_t servo_pin;   // GPIO number or PIN_BUILD
+  uint8_t button_pin;  // GPIO number, PIN_NONE or PIN_BUILD
+  uint8_t led_pin;     // GPIO number, PIN_NONE or PIN_BUILD
+  uint8_t flags;       // DEVICE_* bits
+  char hostname[HOSTNAME_SIZE];
+  char timezone[TIMEZONE_SIZE];  // POSIX TZ string; empty = the build's timezone, or the one Home Assistant sends
+  char ap_password[AP_PASSWORD_SIZE];
+  uint8_t ble_key[DEVICE_KEY_SIZE];  // all zero = no key set on the device
+  uint8_t password_scheme;           // 0 = no settings password
+  uint8_t reserved[3];
+  uint8_t password_salt[PASSWORD_SALT_SIZE];
+  uint8_t password_hash[PASSWORD_HASH_SIZE];
+};
+
 namespace legacy {
 /// Settings as saved by firmware 0.3.0 to 0.4.x (version 3, with the calibration inside). Migrated, not discarded.
 struct SettingsV3 {
@@ -221,7 +257,7 @@ class FeederCore {
   /// Start up. Pass what was loaded from storage (nullptr if nothing was); wrong versions are ignored. `legacy_v3`
   /// is the old settings record, used only when there are no current settings: it is migrated.
   void core_start(const Settings *settings, const Calibration *calibration, const State *state,
-                  const legacy::SettingsV3 *legacy_v3 = nullptr);
+                  const legacy::SettingsV3 *legacy_v3 = nullptr, const Device *device = nullptr);
   /// Call often (every main-loop pass). Runs motion, the scheduler and debounced saving.
   void core_loop();
 
@@ -322,6 +358,15 @@ class FeederCore {
   /// Milliseconds since boot, without the 49-day wrap of a 32-bit millisecond counter.
   int64_t uptime() { return this->hal_uptime_ms(); }
 
+  // ---- device settings ----
+  const Device &device() const { return this->dev_; }
+  /// Set the timezone from a POSIX TZ string ("CET-1CEST,M3.5.0,M10.5.0/3"); empty goes back to the build's
+  /// timezone (or Home Assistant's). Saved at once and applied without a reboot. INVALID_ARG if it does not parse.
+  /// While one is set, it wins over the timezone Home Assistant sends.
+  Result set_timezone(const std::string &posix);
+  /// The timezone set on the device, or "" when the build's (or Home Assistant's) is in use.
+  std::string timezone_text() const { return this->dev_.timezone; }
+
   // ---- feed events ----
   /// Called once for every feed request with its final outcome, accepted or refused.
   void set_feed_listener(std::function<void(const FeedRecord &)> &&listener) { this->feed_listener_ = std::move(listener); }
@@ -415,6 +460,9 @@ class FeederCore {
   virtual void hal_save_settings(const Settings &settings, bool flush) = 0;
   virtual void hal_save_calibration(const Calibration &calibration, bool flush) = 0;
   virtual void hal_save_state(const State &state, bool flush) = 0;
+  virtual void hal_save_device(const Device &device) = 0;  // always written at once
+  /// Use this timezone for local time from now on; nullptr goes back to the one in use before any was applied.
+  virtual void hal_apply_timezone(const TzRules *rules) = 0;
   virtual void hal_log(LogLevel /*level*/, const char * /*message*/) {}
 
   enum class Phase : uint8_t { IDLE, STEP_A, STEP_B, STEP_C, GAP, SETTLE };
@@ -429,6 +477,9 @@ class FeederCore {
   void log_(LogLevel level, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
   void defaults_();
   void clamp_loaded_();
+  void clamp_device_();
+  void apply_timezone_();
+  void timezone_changed_();
   void migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration);
   void save_state_(bool flush);
 
@@ -544,6 +595,8 @@ class FeederCore {
   bool reload_pause_ms_active_{false};
   bool was_time_valid_{false};
   bool cfg_dirty_{false};
+  Device dev_{};
+  bool tz_reapply_{false};  // Home Assistant pushed its timezone over ours: put ours back on the next loop
   uint32_t cfg_dirty_since_{0};
 
   // A scheduled event or one-shot refused with BUSY / TOO_SOON / HOLD inside its window is retried
