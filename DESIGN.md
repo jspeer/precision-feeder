@@ -666,20 +666,56 @@ precision-feeder/
    a snapshot and names any that changed (found and handled in 1.1.0 M9; reproduced only by moving the cursor
    continuously). A complete fix needs a firmware change, for example a write-only text entity taking a whole
    event at once ("A 2 1c405/2/7e"). Not planned yet (2026-10-15).
-10. Checks for 2.0.0 (milestone N0 in [docs/plans/2.0.0-appliance.md](docs/plans/2.0.0-appliance.md)):
-    - ESPHome:
-      - `encryption: {}` with `save_noise_psk()` called from our component, and OTA
-        with the provisioned key.
-      - Whether the captive portal is active only while the fallback access point
-        is up.
-      - Starting BLE at runtime.
-      - Excluding a single entity from the web server.
-      - Improv serial with ESP Web Tools.
-      - Runtime setup of the servo PWM, LED and button.
-    - Hardware and hosting:
-      - Reading GPIO0 (BOOT) after startup.
-      - GitHub Pages CORS for the update manifest.
-      - The flash budget of both variants against 4 MB.
+10. Checks for 2.0.0 (milestone N0 in [docs/plans/2.0.0-appliance.md](docs/plans/2.0.0-appliance.md)).
+    Answered 2026-10-15 from the ESPHome 2026.9.1 source, by validating and compiling a
+    2.0-shaped test configuration, and by querying GitHub Pages. Two items wait for the bench.
+    - **API key provisioning.** `api: encryption: {}` boots with no key so that Home Assistant
+      can provision one on adoption (the owner's intent, 2026-10-15): until a key is saved the
+      device accepts Noise with the well-known all-zero key (the key travels encrypted; this path
+      stays after 2027.2.0) and, deprecated, plaintext. Home Assistant sends
+      `NoiseEncryptionSetKeyRequest`, the key is saved in its own preference slot (NVS) and
+      plaintext stops. `save_noise_psk()` and `clear_noise_psk()` are public, so our component
+      can also set or clear the key. Until the first key arrives, whoever reaches the device
+      first can provision it (trust on first use); documented in the security model.
+    - **OTA with the provisioned key.** Works: `ota: esphome` uses the API server's live key
+      (or the saved key in safe mode). **Finding:** with a runtime key, OTA can only *offer*
+      encryption; `ota: encryption:` (required) fails validation, so plaintext OTA is accepted.
+      Fix: `ota: password: ""` compiles the password path, and our component sets a random
+      password at runtime with `set_auth_password()`. Noise clients skip the password (the key
+      authenticates them); plaintext clients then need a password nobody knows. Validated.
+    - **ESPHome's browser upload (`ota: web_server`)** is guarded only by web auth, which 2.0
+      does not use. N7 adds its own upload handler on ESPHome's OTA backend
+      (`ota::make_ota_backend()`), behind the settings password, instead.
+    - **Captive portal:** active only while the access point is up. It starts with the access
+      point (first boot with no network, or the fallback after `ap_timeout`), ends when Wi-Fi
+      connects, and only answers GET requests while active.
+    - **BLE at runtime:** yes. `esp32_ble: enable_on_boot: false`, then `enable()` from our
+      component; the GATT server registers its services once BLE is active and does not hold
+      up boot while it is off. Validated.
+    - **Excluding one entity from the web server:** not possible. The per-entity `web_server:`
+      block only sorts; only `internal: true` hides an entity, and that hides it from Home
+      Assistant too. Two ways remain: the plan's fallback (read-only entities, changed through
+      `api: actions:`), or a handler of ours registered before `web_server`'s (handlers are
+      matched first come, first served) that answers POSTs to protected entities. N2 picks one.
+    - **Improv serial:** validates with the default logger on the ESP32-S3 (USB Serial/JTAG;
+      only `USB_CDC` is refused). Still to try on the bench with ESP Web Tools.
+    - **Runtime servo, LED and button pins:** feasible. LEDC, the RMT LED strip and the GPIO
+      binary sensor read their pin in `setup()` at HARDWARE priority; ESP32 pin objects have a
+      public `set_pin()`, and a pin can take a YAML `id` (validated). Our component, set up
+      earlier, can load the Device record and rewrite the pins first. "None" for the button and
+      LED needs its own handling in N3 (the drivers always claim their pin).
+    - **GPIO0 (BOOT) after startup:** still to check on the bench (owner).
+    - **GitHub Pages:** sends `Access-Control-Allow-Origin: *`, so the browser can read
+      `manifest.json`. Pages is also reachable over IPv6 (github.com is not), so the update
+      check works on IPv6-only networks; only downloading the image needs IPv4. Release
+      downloads from github.com send no CORS header, which is fine: the user downloads them.
+    - **Flash budget:** measured by compiling (ESP-IDF, 1.8 MB app slot of the 4 MB layout).
+      The 2.0-shaped test build (both 1.1.0 examples plus the button, runtime API key, OTA
+      password path, browser upload, Improv serial, BLE off at boot) uses **76.3% with BLE**
+      (1,400,991 bytes) and **58.3% without** (1,070,315 bytes); the 1.1.0 examples use 75.7%
+      and 57.5%. So those ESPHome pieces cost only 12 to 15 KB, and about 430 KB is left in the
+      BLE build for 2.0's own code (settings, TZ parser, password, upload handler, wizard). Both
+      variants fit 4 MB; no 8 MB variant is needed on current numbers. Measured again in N7.
 11. Roadmap after 2.0.0 (owner, 2026-10-15), not planned in detail yet:
     - 2.1.x: more 3D-printed feeder models driven by a servo (other trays and geometries).
     - 2.2.x (maybe; needs hardware to test): auger-style feeders, which portion by motor time or steps, not tray
