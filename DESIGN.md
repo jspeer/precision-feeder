@@ -518,9 +518,60 @@ Hence application-layer authentication, plus link encryption where offered:
   authenticated writes, so the animals are protected; a client that must trust
   what it reads should pair.
 
-SHA-256 and HMAC are a small pure implementation (crypto.h) so the device code
+SHA-256 and HMAC are a small pure implementation (crypto.h, in precision_feeder since 2.0.0) so the device code
 is the host-tested code (FIPS 180-4 and RFC 4231 vectors, plus golden vectors
 shared with the Python client).
+
+### 10.1 Settings password (firmware 2.0.0)
+
+Protects the guard limits and the calibration from changes through the web server.
+None by default. Home Assistant (API key) and BLE (BLE key) are not affected: they
+are already authenticated (and BLE's access gets its own toggles in N4).
+
+- **What it protects** is the firmware's list, `protected_entities` in
+  `packages/web_server.yaml`: Minimum Gap Between Feeds, Gap Between Portions,
+  Daily Portion Cap, Portions Counted (24 h), Max Portions Per Command, and every
+  calibration entity except Declare Tray Position (everyday recovery). Never the
+  schedule, feeding, hold, tray reload, location or timezone.
+  `tests/test_consistency.py` checks the list names real entities and covers the
+  guard limits and calibration. Later milestones add their settings to it.
+- **How:** ESPHome cannot hide one entity from the web server (section 14,
+  item 10), so a handler of ours (`SettingsGuard`, precision_feeder.cpp) is
+  registered ahead of the web server's: handlers are matched in order, and ours is
+  added from code generation, before any component starts. It takes POSTs to
+  protected entities, checks the proof, and passes good ones on to the web
+  server's own handler. If `auth:` is configured, it wraps ours too (our code
+  generation runs after the web server's).
+- **The password never crosses plain HTTP.** The browser turns it into a key with
+  PBKDF2-HMAC-SHA256 (20 000 rounds, a random 16-byte salt kept on the device).
+  The device stores only the salt and that key, in the Device record (section 9.2).
+- **Every protected change is signed:** `GET /feeder/auth` returns a one-time
+  16-byte challenge (it also gives the salt, the rounds, the wait and the
+  protected list). The request carries `X-Feeder-Auth: hex(nonce) hex(tag)`,
+  where the tag is HMAC-SHA256(key, nonce || path || "\n" || value) and value is
+  the `value` or `option` parameter. A challenge answers one request, right or
+  wrong, and expires after a minute, so a recorded request cannot be replayed or
+  moved to another value.
+- **Failures:** a wait of 1 s after the first failure, doubling to 60 s; inside
+  it nothing is checked (429). A success resets it.
+- **Endpoints:** `POST /feeder/auth/check` (the app's Unlock), and
+  `POST /feeder/auth/password?salt=&key=` to set, change or (no parameters)
+  remove it, signed with the current one. A new key travels masked:
+  key XOR HMAC-SHA256(current key, nonce || "new key"); with no current password
+  it travels as it is (it is a derived key, not the password).
+- **Cross-site requests:** the auth header makes browsers ask permission first (a
+  CORS preflight), which the web server does not grant, so another website cannot
+  make a protected change through a visitor's browser.
+- **Recovery:** hold BOOT (GPIO0, `boot_pin`) for 10 s while the feeder runs. It
+  clears the password and nothing else (FeederCore::boot_button, host-tested).
+- **Threads:** the handler runs on the web server's task. FeederCore's password
+  state is touched only under a lock (also held around the main loop's
+  core_loop()); saving to flash is deferred to the main loop.
+- **Limits, documented:** someone recording the network sees a challenge and its
+  answer, and can try to guess the password offline; PBKDF2 slows that down, but
+  a short password falls. The key is in flash without flash encryption (section
+  13, appliance). An unknown scheme saved by a newer firmware refuses everything
+  until BOOT clears it.
 
 ## 11. Out of scope hardware
 
@@ -543,10 +594,11 @@ precision-feeder/
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
+                                    feeder_password.cpp (settings password), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
                                     parser); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
-  components/precision_feeder_ble/  optional BLE protocol: protocol.h, crypto.h and the
+  components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
                                     BleEngine (engine.*: every handler), all host-tested;
                                     precision_feeder_ble.* is the thin ESPHome adapter
   packages/            core, status, controls, schedule_editor, calibration,
@@ -660,6 +712,14 @@ precision-feeder/
   - Owner, 2026-10-15: the API key is meant to be provisioned by Home Assistant on
     adoption. N4 keeps Generate and Clear as well (and a way to enter a key of your
     own, for one API key shared across devices): options do not hurt.
+- **2.0.0 N2 (2026-10-15):**
+  - The settings password guards web-server writes with a handler of ours in front
+    of the web server's (section 10.1), not `api: actions:`, so Home Assistant keeps
+    its ordinary entities.
+  - Protected: the guard limits and the calibration, except Declare Tray Position.
+    The timezone is not (it is not in the owner's protected list).
+  - Each protected change is signed over a one-time challenge (PBKDF2 key,
+    HMAC-SHA256); waits after failures double from 1 s to 60 s.
 
 ## 14. Open items
 
@@ -767,6 +827,14 @@ precision-feeder/
     - 2.2.x (maybe; needs hardware to test): auger-style feeders, which portion by motor time or steps, not tray
       slots, and may need a continuous-rotation servo or a stepper. That needs explicit decisions against the
       "no external hardware" rule (section 11, AGENTS.md) and the 6-slot magazine model (section 3).
+12. Cross-site requests to unprotected controls (found in 2.0.0 N2). ESPHome's web server sends
+    `Access-Control-Allow-Origin: *`, and a plain POST needs no preflight, so a web page the user
+    visits could press, for example, Feed One Portion on the feeder. The feed guard still applies to
+    every feed, and protected settings need the settings password, so this is limited, but not
+    nothing. A fix (for example requiring a header the browser cannot send cross-site on every
+    write) would touch every web-server write; not planned yet (2026-10-15).
+13. BOOT button on the bench: N2 reads GPIO0 after startup for the password reset; that it reads
+    cleanly on the Waveshare ESP32-S3-Zero and the DevKitC-1 is still an N0 bench check.
 
 ## 15. Implementation status (v1.1.0)
 

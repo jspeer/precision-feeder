@@ -5,6 +5,8 @@ Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """
 
+import re
+
 import esphome.codegen as cg
 from esphome.components import output, time as time_
 import esphome.config_validation as cv
@@ -24,6 +26,19 @@ CONF_INVERT = "invert"
 CONF_STEP_TIME = "step_time"
 CONF_WIGGLE = "wiggle"
 CONF_DETACH_DELAY = "detach_delay"
+CONF_WEB_SERVER_ID = "web_server_id"
+CONF_PROTECTED = "protected_entities"
+
+WebServer = cg.esphome_ns.namespace("web_server").class_("WebServer")
+
+
+def protected_entity(value):
+    """"<domain>/<name>" as the web server addresses an entity, for example "number/Daily Portion Cap"."""
+    value = cv.string_strict(value)
+    if not re.fullmatch(r'[a-z_]+/[^/"\\]+', value):
+        raise cv.Invalid(f"expected <domain>/<entity name> (no quotes, backslashes or extra slashes), got {value!r}")
+    return value
+
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -55,6 +70,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_WIGGLE, default=True): cv.boolean,
         # Release the servo (no PWM pulses) this long after the last move, to stop jitter and heat.
         cv.Optional(CONF_DETACH_DELAY, default="1s"): cv.positive_time_period_milliseconds,
+        # With the web server: entities ("<domain>/<name>") whose changes through the web server need the settings
+        # password when one is set (DESIGN.md section 10.1). Home Assistant and BLE are not affected.
+        cv.OnlyWith(CONF_WEB_SERVER_ID, "web_server"): cv.use_id(WebServer),
+        cv.Optional(CONF_PROTECTED, default=[]): cv.ensure_list(protected_entity),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -89,3 +108,10 @@ async def to_code(config):
     cg.add(var.set_step_time(config[CONF_STEP_TIME].total_milliseconds))
     cg.add(var.set_wiggle(config[CONF_WIGGLE]))
     cg.add(var.set_detach_delay(config[CONF_DETACH_DELAY].total_milliseconds))
+
+    if CONF_WEB_SERVER_ID in config:
+        cg.add(var.set_web_server(await cg.get_variable(config[CONF_WEB_SERVER_ID])))
+        for entity in config[CONF_PROTECTED]:
+            cg.add(var.add_protected(entity))
+        # Emitted before App.setup(), so the guard is registered ahead of the web server's own handler.
+        cg.add(var.register_settings_guard())

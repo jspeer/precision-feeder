@@ -2,7 +2,7 @@
 // device's few HTTP sockets are never flooded and writes arrive in the order they were made. The device answers
 // 200 as soon as it has queued an action; whether it took effect shows up as the entity's next state, which the
 // firmware publishes within about a second (waitFor). Nothing here decides anything about feeding: the device's
-// feed guard does, for every request.
+// feed guard does, for every request. Which settings need the settings password is the device's list, too.
 
 const api = {
   _queue: Promise.resolve(),
@@ -16,9 +16,27 @@ const api = {
     const url = `/${domain}/${encodeURIComponent(name)}/${action}${query ? '?' + query : ''}`;
     // From the origin, not relative: a page opened as http://user:pass@feeder/ would otherwise put the credentials
     // into every request URL, which browsers refuse. The browser still sends the cached credentials.
-    const run = () => fetch(location.origin + url, { method: 'POST' }).then(r => {
+    // A protected setting (guard limits, calibration) carries the settings password's proof (auth.js), made just
+    // before sending because each challenge is good for one request.
+    const run = async () => {
+      let headers = {};
+      if (auth.isProtected(id)) {
+        const value = params ? (params.value !== undefined ? params.value : params.option) : undefined;
+        try {
+          headers = await auth.headersFor(`/${domain}/${name}/${action}`, value);
+        } catch (e) {
+          throw e instanceof TypeError ? new Error('The feeder could not be reached.') : e;
+        }
+      }
+      let r;
+      try {
+        r = await fetch(location.origin + url, { method: 'POST', headers });
+      } catch (e) {
+        throw new Error('The feeder could not be reached.');
+      }
+      if (r.status === 403 || r.status === 429) throw await auth.refusal(r);
       if (!r.ok) throw new Error(r.status === 404 ? 'This build does not have that control.' : `The feeder answered ${r.status}.`);
-    }, () => { throw new Error('The feeder could not be reached.'); });
+    };
     const done = this._queue.then(run, run);
     this._queue = done.catch(() => {});
     return done;

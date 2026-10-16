@@ -49,6 +49,7 @@ const E = {
   refillInterval: 'number/Refill Interval',
   latitude: 'number/Latitude',
   longitude: 'number/Longitude',
+  timezone: 'text/Timezone',
 
   // packages/schedule_editor.yaml
   editedProfile: 'text_sensor/Edited Profile',
@@ -89,6 +90,9 @@ const E = {
   ipAddress3: 'text_sensor/IP Address 3',
   ipAddress4: 'text_sensor/IP Address 4',
   wifiSignal: 'sensor/Wi-Fi Signal',
+
+  // packages/web_server.yaml
+  settingsPassword: 'binary_sensor/Settings Password',
 
   // packages/ble_gatt.yaml
   bleInfo: 'text_sensor/BLE Info',

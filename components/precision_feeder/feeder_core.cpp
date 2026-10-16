@@ -295,6 +295,13 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
 void FeederCore::core_loop() {
   this->run_motion_();
   const uint32_t now = this->hal_millis();
+  if (this->boot_pressed_ && !this->boot_handled_ && now - this->boot_pressed_ms_ >= BOOT_HOLD_MS) {
+    this->boot_handled_ = true;
+    if (this->password_set())
+      this->clear_password("BOOT held for 10 s");
+    else
+      this->log_(LogLevel::kInfo, "BOOT held for 10 s: no settings password to clear");
+  }
   if (this->cfg_dirty_ && now - this->cfg_dirty_since_ >= CFG_SAVE_DELAY_MS) {
     // Flushed: otherwise ESPHome holds the write for up to its flash_write_interval (60 s by default), and a power
     // cut in that time would lose the edit. Records that did not change are not rewritten.

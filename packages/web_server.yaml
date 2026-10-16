@@ -9,9 +9,15 @@
 # (web/dist/, built from web/src/ by tools/build_web.py), so nothing is loaded from the internet. It shows only
 # what your build includes: leave a package out and its page or section disappears.
 #
-# Everything on the device is reachable there, so protect it on a shared network: uncomment `auth` and add
-# web_username / web_password to your secrets.yaml. Note: this is HTTP authentication over plain HTTP, so it
-# keeps casual visitors out but is not encrypted; do not reuse a password you care about.
+# Settings password (DESIGN.md section 10.1): none by default. Once set in the app (Configuration), changing the
+# guard limits or the calibration through the web server needs it; feeding, the schedule, hold, tray reload and
+# location never do. Home Assistant and BLE are not affected (they have their own keys). The password itself never
+# crosses the network: the browser proves it knows it. Forgotten: hold the BOOT button for 10 seconds while the
+# feeder runs; that clears the password and nothing else.
+#
+# To keep visitors out of the app altogether on a shared network, also uncomment `auth` below and add
+# web_username / web_password to your secrets.yaml. That is HTTP authentication over plain HTTP: it keeps casual
+# visitors out but is not encrypted; do not reuse a password you care about.
 
 web_server:
   port: 80
@@ -29,3 +35,46 @@ web_server:
   # auth:
   #   username: !secret web_username
   #   password: !secret web_password
+
+precision_feeder:
+  # Changes through the web server that need the settings password, when one is set. "<domain>/<entity name>";
+  # tests/test_consistency.py checks each one exists. The guard limits and the calibration (not Declare Tray
+  # Position, which is everyday recovery).
+  protected_entities:
+    - number/Minimum Gap Between Feeds
+    - number/Gap Between Portions
+    - number/Daily Portion Cap
+    - number/Portions Counted (24 h)
+    - number/Max Portions Per Command
+    - switch/Calibration Mode
+    - select/Calibration Position
+    - number/Calibration Offset
+    - number/Servo Min Pulse
+    - number/Servo Max Pulse
+
+binary_sensor:
+  # The BOOT button, read once the feeder is running: hold it for 10 seconds to clear the settings password.
+  # (Held while the board powers up, it starts the chip's download mode instead, as always.)
+  - platform: gpio
+    id: pf_boot_button
+    internal: true
+    pin:
+      number: ${boot_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+      # A strapping pin: only read after startup, so it does not change how the chip boots. (ESPHome refuses
+      # this line for a pin that is not a strapping pin: drop it if you move boot_pin.)
+      ignore_strapping_warning: true
+    on_press:
+      - lambda: id(feeder).boot_button(true);
+    on_release:
+      - lambda: id(feeder).boot_button(false);
+
+  - platform: template
+    id: pf_settings_password
+    name: "Settings Password"
+    icon: mdi:form-textbox-password
+    entity_category: diagnostic
+    lambda: return id(feeder).password_set();

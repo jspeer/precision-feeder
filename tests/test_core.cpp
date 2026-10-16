@@ -820,6 +820,7 @@ class DstFeeder : public FeederCore {
   void hal_save_state(const State &, bool) override {}
   void hal_save_device(const Device &) override {}
   void hal_apply_timezone(const TzRules *) override {}
+  void hal_random(uint8_t *out, size_t n) override { std::memset(out, 0, n); }
 
   int64_t up_{0};
   int64_t ms_;
@@ -1073,6 +1074,114 @@ static void test_device_record() {
   }
 }
 
+static std::vector<uint8_t> unhex(const char *h) {
+  std::vector<uint8_t> out;
+  for (; h[0] && h[1]; h += 2)
+    out.push_back(static_cast<uint8_t>(std::strtoul(std::string(h, 2).c_str(), nullptr, 16)));
+  return out;
+}
+
+// Shared with tests/test_web.mjs: password "correct horse", salt 00..0f, PBKDF2-HMAC-SHA256 20000 rounds.
+static const char *const PW_KEY = "f353b5100691ea4531a49c82821a088e2083178c2c6954a17a1ec53b3900da25";
+static const char *const PW_MESSAGE = "/number/Daily Portion Cap/set\n3";
+static const char *const PW_TAG = "9b2b5e3df64049cfbdb3b02ebddb43277df22b4cc0fe8c6c96f61ac11ed79330";  // nonce 10..1f
+// "battery staple", salt 20..2f, masked with the key above and nonce 10..1f.
+static const char *const PW_NEW_KEY = "880ec4efdf8f0c832ce0d85cc76b3191b73014a0c3768c3bbd5a14354698425c";
+static const char *const PW_NEW_MASKED = "2e33a9c5afad47f2f7547a0ab2ab9f9ff8f2acea70fc7609bdf3b4903cedea2f";
+
+static void test_settings_password() {
+  current = "settings password";
+  Flash flash;
+  const auto key = unhex(PW_KEY), tag = unhex(PW_TAG);
+  uint8_t salt[PASSWORD_SALT_SIZE];
+  for (unsigned i = 0; i < PASSWORD_SALT_SIZE; i++)
+    salt[i] = static_cast<uint8_t>(i);
+  uint8_t nonce[AUTH_NONCE_SIZE];
+  uint32_t wait = 0;
+  {
+    auto f = boot(flash, T0);
+    CHECK(!f->password_set(), "none by default");
+    f->password_challenge(nonce);
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::OK, "no password: everything passes");
+
+    f->set_password(salt, key.data());
+    CHECK(f->password_set() && flash.device.password_scheme == PASSWORD_SCHEME_PBKDF2, "set and saved");
+    CHECK(std::memcmp(flash.device.password_hash, key.data(), PASSWORD_HASH_SIZE) == 0, "the derived key is stored");
+
+    f->random_next = 16;
+    f->password_challenge(nonce);
+    CHECK(nonce[0] == 16 && nonce[15] == 31, "challenge from the random source");
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::OK, "right answer");
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::NO_CHALLENGE, "never twice");
+
+    f->random_next = 16;
+    f->password_challenge(nonce);
+    CHECK(f->password_check(nonce, tag.data(), "/number/Daily Portion Cap/set\n6", wait) == AuthResult::REFUSED &&
+              wait == AUTH_WAIT_MIN_MS,
+          "an answer for another request is refused, and a wait starts");
+    f->random_next = 16;
+    f->password_challenge(nonce);
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::WAIT && wait > 0,
+          "inside the wait nothing is checked, even the right answer");
+    f->advance(1000);
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::OK,
+          "after the wait the same challenge can still be answered");
+
+    uint32_t expect = AUTH_WAIT_MIN_MS;
+    for (int i = 0; i < 8; i++) {
+      f->password_challenge(nonce);
+      CHECK(f->password_check(nonce, key.data(), PW_MESSAGE, wait) == AuthResult::REFUSED && wait == expect,
+            "the wait doubles");
+      f->advance(wait);
+      expect = std::min(expect * 2, AUTH_WAIT_MAX_MS);
+    }
+    CHECK(expect == AUTH_WAIT_MAX_MS, "and stops at the maximum");
+
+    f->password_challenge(nonce);
+    f->advance(AUTH_NONCE_TTL_MS);
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::NO_CHALLENGE, "challenges expire");
+    uint8_t other[AUTH_NONCE_SIZE]{};
+    f->password_challenge(nonce);
+    CHECK(f->password_check(other, tag.data(), PW_MESSAGE, wait) == AuthResult::NO_CHALLENGE, "wrong nonce");
+    CHECK(f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::NO_CHALLENGE,
+          "a wrong nonce uses up the challenge");
+
+    // Changing it: the new key travels masked by the current one.
+    const auto masked = unhex(PW_NEW_MASKED), new_key = unhex(PW_NEW_KEY);
+    uint8_t n16[AUTH_NONCE_SIZE], out[PASSWORD_HASH_SIZE];
+    for (unsigned i = 0; i < AUTH_NONCE_SIZE; i++)
+      n16[i] = static_cast<uint8_t>(16 + i);
+    f->password_unmask(n16, masked.data(), out);
+    CHECK(std::memcmp(out, new_key.data(), PASSWORD_HASH_SIZE) == 0, "unmasked with the current key");
+  }
+  {
+    auto f = boot(flash, T0);
+    CHECK(f->password_set(), "kept across a reboot");
+    // BOOT held for 10 s clears it, and only it.
+    f->set_timezone("UTC0");
+    f->boot_button(true);
+    f->advance(BOOT_HOLD_MS - 500);
+    CHECK(f->password_set(), "not before 10 s");
+    f->boot_button(false);
+    f->boot_button(true);
+    f->advance(BOOT_HOLD_MS - 500);
+    CHECK(f->password_set(), "a release starts the count again");
+    f->advance(500);
+    CHECK(!f->password_set() && flash.device.password_scheme == PASSWORD_SCHEME_NONE, "cleared after 10 s");
+    CHECK(flash.device.password_hash[0] == 0 && f->timezone_text() == "UTC0", "key wiped, other settings kept");
+    uint8_t mask_out[PASSWORD_HASH_SIZE], zero[PASSWORD_HASH_SIZE]{};
+    f->password_unmask(nonce, zero, mask_out);
+    CHECK(std::memcmp(mask_out, zero, PASSWORD_HASH_SIZE) == 0, "no password: the new key is not masked");
+  }
+  {
+    flash.device.password_scheme = 7;  // from a newer firmware
+    auto f = boot(flash, T0);
+    f->password_challenge(nonce);
+    CHECK(f->password_set() && f->password_check(nonce, tag.data(), PW_MESSAGE, wait) == AuthResult::REFUSED,
+          "an unknown scheme refuses everything until BOOT clears it");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -1102,6 +1211,7 @@ int main() {
   test_web_app_data();
   test_tz_parser();
   test_device_record();
+  test_settings_password();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

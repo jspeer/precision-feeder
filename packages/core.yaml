@@ -16,6 +16,7 @@ substitutions:
   servo_pin: GPIO1             # servo signal wire
   button_pin: GPIO2            # optional push button to GND (button package only)
   status_led_pin: GPIO21       # onboard WS2812 (status LED package only)
+  boot_pin: GPIO0              # the board's BOOT button: held 10 s, clears the settings password (web_server package)
 
   # --- Time ---------------------------------------------------------------
   # NTP is the primary time source. Leave the pool servers, or point at a

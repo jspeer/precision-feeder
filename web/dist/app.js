@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '62188d452326';
+const BUILD_ID = 'd6ebc78f2c62';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -57,6 +57,7 @@ const E = {
   refillInterval: 'number/Refill Interval',
   latitude: 'number/Latitude',
   longitude: 'number/Longitude',
+  timezone: 'text/Timezone',
 
   // packages/schedule_editor.yaml
   editedProfile: 'text_sensor/Edited Profile',
@@ -97,6 +98,9 @@ const E = {
   ipAddress3: 'text_sensor/IP Address 3',
   ipAddress4: 'text_sensor/IP Address 4',
   wifiSignal: 'sensor/Wi-Fi Signal',
+
+  // packages/web_server.yaml
+  settingsPassword: 'binary_sensor/Settings Password',
 
   // packages/ble_gatt.yaml
   bleInfo: 'text_sensor/BLE Info',
@@ -466,12 +470,216 @@ const store = {
   },
 };
 
+// ---- auth.js ----
+// The settings password (DESIGN.md section 10.1). The page is plain HTTP, where browsers offer no crypto.subtle, so
+// SHA-256, HMAC and PBKDF2 are written out here (small, and tested against the device's vectors in
+// tests/test_web.mjs). The password never leaves this page: it becomes a key (PBKDF2 with the device's salt), kept in
+// memory only, and each protected change carries HMAC(key, one-time challenge || what is changed).
+
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
+  0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8,
+  0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+  0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+  0xc67178f2]);
+const SHA256_IV = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+
+/** One 64-byte block into state h (8 words), in place. */
+function sha256Block(h, block, w) {
+  for (let i = 0; i < 16; i++)
+    w[i] = (block[4 * i] << 24) | (block[4 * i + 1] << 16) | (block[4 * i + 2] << 8) | block[4 * i + 3];
+  for (let i = 16; i < 64; i++) {
+    const a = w[i - 15], b = w[i - 2];
+    const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+    const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+    w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+  }
+  let [a, b, c, d, e, f, g, k] = h;
+  for (let i = 0; i < 64; i++) {
+    const t1 = (k + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) +
+                ((e & f) ^ (~e & g)) + SHA256_K[i] + w[i]) | 0;
+    const t2 = ((((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) +
+                ((a & b) ^ (a & c) ^ (b & c))) | 0;
+    k = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+  }
+  h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+  h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + k) | 0;
+}
+
+/** SHA-256 of bytes, continuing from state `start` after `done` bytes (for HMAC's precomputed pads). */
+function sha256From(start, done, bytes) {
+  const h = start.slice(), w = new Int32Array(64);
+  const total = done + bytes.length;
+  const padded = new Uint8Array(((bytes.length + 9 + 63) >> 6) << 6);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const bits = total * 8;
+  for (let i = 0; i < 4; i++) padded[padded.length - 1 - i] = (bits / 2 ** (8 * i)) & 0xff;
+  for (let i = 0; i < padded.length; i += 64) sha256Block(h, padded.subarray(i, i + 64), w);
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 8; i++) {
+    out[4 * i] = h[i] >>> 24; out[4 * i + 1] = h[i] >>> 16; out[4 * i + 2] = h[i] >>> 8; out[4 * i + 3] = h[i];
+  }
+  return out;
+}
+
+function sha256(bytes) { return sha256From(SHA256_IV, 0, bytes); }
+
+function concatBytes(...parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+/** HMAC-SHA256 with the key's pads hashed once: returns (message bytes) => tag. */
+function hmacSha256Keyed(key) {
+  if (key.length > 64) key = sha256(key);
+  const pad = (x) => {
+    const block = new Uint8Array(64);
+    for (let i = 0; i < 64; i++) block[i] = (key[i] || 0) ^ x;
+    const h = SHA256_IV.slice();
+    sha256Block(h, block, new Int32Array(64));
+    return h;
+  };
+  const inner = pad(0x36), outer = pad(0x5c);
+  return msg => sha256From(outer, 64, sha256From(inner, 64, msg));
+}
+
+function hmacSha256(key, msg) { return hmacSha256Keyed(key)(msg); }
+
+/** PBKDF2-HMAC-SHA256, one 32-byte block (all the device needs). */
+function pbkdf2Sha256(password, salt, iterations) {
+  const mac = hmacSha256Keyed(password);
+  let u = mac(concatBytes(salt, new Uint8Array([0, 0, 0, 1])));
+  const out = u.slice();
+  for (let i = 1; i < iterations; i++) {
+    u = mac(u);
+    for (let j = 0; j < 32; j++) out[j] ^= u[j];
+  }
+  return out;
+}
+
+const utf8 = s => new TextEncoder().encode(s);
+const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+function fromHex(hex) {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(2 * i, 2), 16);
+  return out;
+}
+
+/** What a protected entity change is signed over: the path the device sees and the value written. */
+function authMessage(path, value) { return `${path}\n${value === undefined || value === null ? '' : String(value)}`; }
+
+/** The X-Feeder-Auth header: nonce then HMAC(key, nonce || message), in hex. */
+function authHeader(key, nonce, message) { return toHex(nonce) + toHex(hmacSha256(key, concatBytes(nonce, utf8(message)))); }
+
+/** A new key travels masked by the current one (none: unmasked), as FeederCore::password_unmask expects. */
+function maskKey(newKey, currentKey, nonce) {
+  if (!currentKey) return newKey.slice();
+  const mask = hmacSha256(currentKey, concatBytes(nonce, utf8('new key')));
+  return newKey.map((b, i) => b ^ mask[i]);
+}
+
+const auth = {
+  available: false,   // the device has the settings guard (the web server package with it)
+  set: false,         // a settings password is set
+  key: null,          // the derived key once unlocked (memory only: a reload locks again)
+  protectedIds: new Set(),
+  _listeners: [],
+
+  onChange(fn) { this._listeners.push(fn); },
+  _changed() { for (const fn of this._listeners) fn(); },
+
+  /** Ask the device for a challenge (and its current state). */
+  async challenge() {
+    const r = await fetch(`${location.origin}/feeder/auth`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+    const c = await r.json();
+    this.available = true;
+    this.set = c.scheme !== 0;
+    if (!this.set) this.key = null;
+    this.protectedIds = new Set(c.protected || []);
+    c.nonceBytes = fromHex(c.nonce);
+    c.saltBytes = fromHex(c.salt);
+    return c;
+  },
+  async refresh() {
+    try { await this.challenge(); } catch (e) { this.available = false; }
+    this._changed();
+  },
+  isProtected(id) { return this.protectedIds.has(id); },
+  locked() { return this.set && !this.key; },
+
+  /** Headers for a request to `path` writing `value`: {} without a password; throws while locked. */
+  async headersFor(path, value) {
+    const c = await this.challenge();
+    if (!this.set) return {};
+    if (!this.key) throw new Error('Locked: unlock with the settings password (Configuration) first.');
+    return { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, value)) };
+  },
+
+  /** Turn a refused answer into a message. */
+  async refusal(r) {
+    let wait = 0;
+    try { wait = (await r.json()).wait || 0; } catch (e) { /* no body */ }
+    if (r.status === 429) return new Error(`Too many tries: wait ${Math.ceil(wait / 1000)} s.`);
+    if (r.status === 403) {
+      this.key = null;
+      this._changed();
+      return new Error('The settings password was not accepted. Unlock again.');
+    }
+    return new Error(`The feeder answered ${r.status}.`);
+  },
+
+  async unlock(password) {
+    const c = await this.challenge();
+    if (!this.set) return;
+    const key = pbkdf2Sha256(utf8(password), c.saltBytes, c.iterations);
+    const path = '/feeder/auth/check';
+    const r = await fetch(location.origin + path, { method: 'POST',
+      headers: { 'X-Feeder-Auth': authHeader(key, c.nonceBytes, authMessage(path, '')) } });
+    if (!r.ok) {
+      const err = await this.refusal(r);
+      throw r.status === 403 ? new Error('That is not the settings password.') : err;
+    }
+    this.key = key;
+    this._changed();
+  },
+
+  lock() { this.key = null; this._changed(); },
+
+  /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
+  async setPassword(password) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Unlock with the current password first.');
+    const path = '/feeder/auth/password';
+    let query = '', saltHex = '', keyHex = '', newKey = null;
+    if (password) {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      newKey = pbkdf2Sha256(utf8(password), salt, c.iterations);
+      saltHex = toHex(salt);
+      keyHex = toHex(maskKey(newKey, this.set ? this.key : null, c.nonceBytes));
+      query = `?salt=${saltHex}&key=${keyHex}`;
+    }
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, `${path}\n${saltHex}${keyHex}`) } : {};
+    const r = await fetch(location.origin + path + query, { method: 'POST', headers });
+    if (!r.ok) throw await this.refusal(r);
+    this.key = newKey;
+    this.set = !!password;
+    this._changed();
+  },
+};
+
 // ---- api.js ----
 // Changes to the device: ESPHome's web server actions (POST /<domain>/<name>/<action>), one at a time, so the
 // device's few HTTP sockets are never flooded and writes arrive in the order they were made. The device answers
 // 200 as soon as it has queued an action; whether it took effect shows up as the entity's next state, which the
 // firmware publishes within about a second (waitFor). Nothing here decides anything about feeding: the device's
-// feed guard does, for every request.
+// feed guard does, for every request. Which settings need the settings password is the device's list, too.
 
 const api = {
   _queue: Promise.resolve(),
@@ -485,9 +693,27 @@ const api = {
     const url = `/${domain}/${encodeURIComponent(name)}/${action}${query ? '?' + query : ''}`;
     // From the origin, not relative: a page opened as http://user:pass@feeder/ would otherwise put the credentials
     // into every request URL, which browsers refuse. The browser still sends the cached credentials.
-    const run = () => fetch(location.origin + url, { method: 'POST' }).then(r => {
+    // A protected setting (guard limits, calibration) carries the settings password's proof (auth.js), made just
+    // before sending because each challenge is good for one request.
+    const run = async () => {
+      let headers = {};
+      if (auth.isProtected(id)) {
+        const value = params ? (params.value !== undefined ? params.value : params.option) : undefined;
+        try {
+          headers = await auth.headersFor(`/${domain}/${name}/${action}`, value);
+        } catch (e) {
+          throw e instanceof TypeError ? new Error('The feeder could not be reached.') : e;
+        }
+      }
+      let r;
+      try {
+        r = await fetch(location.origin + url, { method: 'POST', headers });
+      } catch (e) {
+        throw new Error('The feeder could not be reached.');
+      }
+      if (r.status === 403 || r.status === 429) throw await auth.refusal(r);
       if (!r.ok) throw new Error(r.status === 404 ? 'This build does not have that control.' : `The feeder answered ${r.status}.`);
-    }, () => { throw new Error('The feeder could not be reached.'); });
+    };
     const done = this._queue.then(run, run);
     this._queue = done.catch(() => {});
     return done;
@@ -1835,15 +2061,18 @@ PAGES.configuration = {
     const loc = card('Location and time',
       h('p', { class: 'hint' }, 'The location is only needed for sunrise and sunset events. Decimal degrees: north and ' +
                                  'east are positive, south and west negative. Both 0 means not set.'));
-    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude)].filter(Boolean)) {
+    const tz = setting('Time zone', 'A POSIX TZ string, for example CET-1CEST,M3.5.0,M10.5.0/3 (not a name like ' +
+                       'Europe/Berlin). Empty: the one in your YAML, or Home Assistant\'s.', E.timezone);
+    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), tz].filter(Boolean)) {
       this.rows.push(r);
       loc.appendChild(r);
     }
     this.timeRows = [];
     const add = (label, fn) => this.timeRows.push(boundRow(loc, label, fn));
-    add('Time zone', () => {
+    add('Time zone in use', () => {
       const t = parseDeviceTime(store.text(E.deviceTime));
-      return t ? `UTC${t.offset}, set in the YAML (or by Home Assistant)` : 'Set in the YAML (or by Home Assistant)';
+      const from = store.text(E.timezone) ? 'set here' : 'from the YAML (or Home Assistant)';
+      return t ? `UTC${t.offset}, ${from}` : from;
     });
     add('Clock', () => {
       if (store.bool(E.clockValid) === false) return 'Not set';
@@ -1865,11 +2094,67 @@ PAGES.configuration = {
       });
     }
     d('Firmware', () => store.text(E.firmware));
-    dev.appendChild(h('p', { class: 'hint' }, 'Wi-Fi, the name and the time zone are set in your YAML configuration. ' +
+    dev.appendChild(h('p', { class: 'hint' }, 'Wi-Fi and the name are set in your YAML configuration. ' +
                                               'Diagnostics shows every address and the live log.'));
 
-    append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev));
+    this.pw = card('Settings password');
+    this.pw.hidden = true;
+    auth.onChange(() => this.updatePassword());
+    auth.refresh();
+
+    append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
+           h('div', { class: 'grid' }, this.pw));
     this.update();
+  },
+
+  /** The password card: what is protected, and lock, unlock, set, change or remove. */
+  updatePassword() {
+    const pw = this.pw;
+    if (!pw || !pw.isConnected) return;
+    pw.hidden = !auth.available;
+    while (pw.children.length > 1) pw.lastChild.remove();
+    const what = 'Changing the feeding safety limits or the calibration from this app';
+    const btn = (label, onclick, cls = 'btn') => h('button', { class: cls, onclick }, label);
+    const run = (p, ok) => p.then(() => ok && toast(ok, 'ok'), toastError);
+    const forgot = h('p', { class: 'hint' }, 'Forgotten? Hold the BOOT button on the board for 10 seconds while the ' +
+                     'feeder runs: that clears the password and nothing else. Home Assistant and Bluetooth do not ' +
+                     'use it; they have their own keys.');
+    let text, actions;
+    if (!auth.set) {
+      text = `No settings password. ${what} needs none: anyone who can open this page can change them.`;
+      actions = [btn('Set a password', () => this.passwordDialog(false), 'btn btn-primary')];
+    } else if (auth.locked()) {
+      text = `${what} needs the settings password.`;
+      actions = [btn('Unlock', () => this.unlockDialog(), 'btn btn-primary')];
+    } else {
+      text = 'Unlocked on this page until you reload it or lock it.';
+      actions = [btn('Lock', () => auth.lock()), btn('Change', () => this.passwordDialog(true)),
+                 btn('Remove', async () => {
+                   if (!await confirmDialog({ title: 'Remove the settings password?', danger: true, ok: 'Remove',
+                                              body: `${what} will need no password.` })) return;
+                   run(auth.setPassword(''), 'Settings password removed');
+                 }, 'btn btn-danger')];
+    }
+    append(pw, h('p', {}, text), h('div', { class: 'actions' }, actions), forgot);
+  },
+
+  async unlockDialog() {
+    const input = h('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
+    if (!await formDialog({ title: 'Unlock settings', ok: 'Unlock', body: field('Settings password', input),
+                            validate: () => (input.value ? '' : 'Enter the password') })) return;
+    auth.unlock(input.value).then(() => toast('Unlocked', 'ok'), toastError);
+  },
+
+  async passwordDialog(change) {
+    const a = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
+    const b = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
+    const body = [field('New password', a, 'It is never sent to the feeder; this page proves it knows it. A long ' +
+                        'one is best: someone recording your network could try to guess it.'),
+                  field('Again', b)];
+    const ok = await formDialog({ title: change ? 'Change the settings password' : 'Set a settings password', body,
+      validate: () => (a.value.length < 8 ? 'At least 8 characters' : a.value !== b.value ? 'The two do not match' : '') });
+    if (!ok) return;
+    auth.setPassword(a.value).then(() => toast(change ? 'Password changed' : 'Password set', 'ok'), toastError);
   },
 
   update() {
@@ -2471,6 +2756,7 @@ const app = {
     });
     store.subscribe(changed => this.update(changed));
     store.start();
+    auth.refresh();
     this.update(new Set(['*all']));
     // Re-check the route once the first burst of entities has settled.
     const settle = setInterval(() => {

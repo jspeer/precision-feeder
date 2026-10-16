@@ -49,7 +49,11 @@ else the feeder lists under Faults.
 - **Configuration:**
   - the feeding safety limits, reload pause, refill interval and location, each with
     the feeder's own limits and units;
-  - the time zone and Wi-Fi are shown; they are set in your YAML.
+  - the time zone (a POSIX string; empty means the YAML's, or Home Assistant's);
+    Wi-Fi is shown and set in your YAML;
+  - the settings password: set, unlock (for this page, until it is reloaded), lock,
+    change or remove. Locked, changes to the safety limits and the calibration are
+    refused with a message saying so.
 - **Maintenance:**
   - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
     and the servo pulse range;

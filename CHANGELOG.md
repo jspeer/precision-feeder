@@ -16,6 +16,11 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
 - A new saved record, Device, for the settings 2.0 changes at run time (pins,
   names, keys, timezone). A YAML build keeps following its YAML until a value is
   changed on the device. Nothing existing is migrated or lost.
+- Settings password (none by default): set in the app, it protects the feeding safety
+  limits and the calibration from changes through the web server. The password never
+  crosses the network: the app proves it knows it for each change. Holding BOOT for 10
+  seconds clears it. Home Assistant and BLE are unaffected. New Settings Password sensor.
+- The Configuration page edits the timezone and manages the settings password.
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)

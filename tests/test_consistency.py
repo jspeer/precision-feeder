@@ -45,6 +45,21 @@ def yaml_entities() -> dict[str, dict[str, float]]:
     return entities
 
 
+def entity_domains() -> dict[str, str]:
+    """name -> the top-level YAML key it is defined under (number, switch, ...), for every package entity."""
+    domains = {}
+    for path in (ROOT / "packages").glob("*.yaml"):
+        domain = None
+        for line in path.read_text().splitlines():
+            m = re.match(r"(\w+):", line)
+            if m:
+                domain = m.group(1)
+            m = re.match(r'\s+name: "(.*)"', line)
+            if m and domain:
+                domains[m.group(1)] = domain
+    return domains
+
+
 class Consistency(unittest.TestCase):
     def setUp(self):
         self.c = core_constants()
@@ -110,6 +125,26 @@ class Consistency(unittest.TestCase):
         for name in served:
             self.assertIn(name, self.e, f"mock_device.py serves {name!r}, which no package defines")
 
+
+    def test_protected_entities(self):
+        """The settings guard's list names real entities, and covers the guard limits and the calibration."""
+        spec = importlib.util.spec_from_file_location("mock_device", ROOT / "tools/mock_device.py")
+        mock = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mock)
+        listed = mock.protected_entities()
+        self.assertGreater(len(listed), 5)
+        for entry in listed:
+            domain, name = entry.split("/", 1)
+            self.assertIn(name, self.e, f"protected entity {entry!r} not found in packages/")
+            self.assertEqual(entity_domains().get(name), domain, entry)
+        names = {entry.split("/", 1)[1] for entry in listed}
+        for guard in ("Minimum Gap Between Feeds", "Gap Between Portions", "Daily Portion Cap",
+                      "Portions Counted (24 h)", "Max Portions Per Command"):
+            self.assertIn(guard, names, f"guard limit {guard!r} is not protected")
+        calibration = re.findall(r'name: "(.*)"', (ROOT / "packages/calibration.yaml").read_text())
+        for name in calibration:
+            if not name.startswith("Declare"):
+                self.assertIn(name, names, f"calibration entity {name!r} is not protected")
 
     def test_timezone_length(self):
         """The Timezone entity takes as many characters as the device's parser accepts."""

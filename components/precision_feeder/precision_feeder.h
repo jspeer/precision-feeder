@@ -10,6 +10,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/output/float_output.h"
 #include "esphome/components/time/real_time_clock.h"
@@ -19,6 +20,11 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
+
+#ifdef USE_WEBSERVER
+#include "esphome/components/web_server/web_server.h"
+#endif
 
 #include "feeder_core.h"
 
@@ -61,8 +67,27 @@ class PrecisionFeeder : public Component, public FeederCore {
   /// is already valid (kept by the RTC across a soft reset); only a real SNTP synchronisation counts as NTP.
   void note_sntp_sync();
 
+#ifdef USE_WEBSERVER
+  /// The settings password guards writes to these entities ("number/Daily Portion Cap") through the web server.
+  void set_web_server(web_server::WebServer *web_server) { this->web_server_ = web_server; }
+  void add_protected(const char *entity) { this->protected_.emplace_back(entity); }
+  /// Put the settings guard in front of the web server's own handler. Called before any component starts, so it is
+  /// registered first and sees every request before the web server does.
+  void register_settings_guard();
+  bool is_protected(const std::string &entity) const;
+  const std::vector<std::string> &protected_entities() const { return this->protected_; }
+  web_server::WebServer *web_server() const { return this->web_server_; }
+#endif
+  /// The settings-password calls of FeederCore run on the web server's task too: they go through this lock.
+  Mutex &password_lock() { return this->password_lock_; }
+  /// Run `f` on the main loop (safe to call from the web server's task).
+  void run_on_main_loop(std::function<void()> &&f) { this->defer(std::move(f)); }
+
   void setup() override;
-  void loop() override { this->core_loop(); }
+  void loop() override {
+    LockGuard guard(this->password_lock_);
+    this->core_loop();
+  }
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
 
@@ -82,6 +107,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_save_device(const Device &device) override;
   void hal_apply_timezone(const TzRules *rules) override;
   void hal_log(LogLevel level, const char *message) override;
+  void hal_random(uint8_t *out, size_t n) override;
 
   output::FloatOutput *output_{nullptr};
   time::RealTimeClock *time_{nullptr};
@@ -89,6 +115,11 @@ class PrecisionFeeder : public Component, public FeederCore {
   ESPPreferenceObject pref_calibration_;
   ESPPreferenceObject pref_state_;
   ESPPreferenceObject pref_device_;
+  Mutex password_lock_;
+#ifdef USE_WEBSERVER
+  web_server::WebServer *web_server_{nullptr};
+  std::vector<std::string> protected_;
+#endif
 #ifdef USE_TIME_TIMEZONE
   time::ParsedTimezone build_tz_{};  // the timezone in use at boot, before any set on the device
 #endif

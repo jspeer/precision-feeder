@@ -1,4 +1,5 @@
-// Precision Feeder BLE protocol: SHA-256, HMAC-SHA256 and the protocol's authentication helpers.
+// Precision Feeder: SHA-256 and HMAC-SHA256 (for the BLE protocol and the settings password), and the BLE
+// protocol's authentication helpers.
 //
 // Pure C++ with no ESPHome or ESP-IDF dependencies, so the exact code that runs on the device is tested on a host
 // (tests/test_protocol.cpp: FIPS 180-4 and RFC 4231 vectors, plus golden vectors shared with the Python client).

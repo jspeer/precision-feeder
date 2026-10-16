@@ -154,3 +154,46 @@ test('address kinds', () => {
   assert.equal(P.addressKind('0.0.0.0'), '');
   assert.equal(P.addressKind('::'), '');
 });
+
+// ---- the settings password (web/src/auth.js): the same answers as the device (tests/test_core.cpp) ----
+const authSrc = readFileSync(new URL('../web/src/auth.js', import.meta.url), 'utf8');
+const actx = vm.createContext({ TextEncoder });
+vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey };`, actx);
+const A = actx.A;
+
+test('SHA-256 and HMAC-SHA256 (FIPS 180-4, RFC 4231)', () => {
+  assert.equal(A.toHex(A.sha256(A.utf8('abc'))), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.equal(A.toHex(A.sha256(A.utf8(''))), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  assert.equal(A.toHex(A.sha256(A.utf8('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq'))),
+               '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
+  assert.equal(A.toHex(A.sha256(new Uint8Array(1000).fill(0x61))),
+               '41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3');
+  // RFC 4231 test case 2, and case 6 (a key longer than a block).
+  assert.equal(A.toHex(A.hmacSha256(A.utf8('Jefe'), A.utf8('what do ya want for nothing?'))),
+               '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843');
+  assert.equal(A.toHex(A.hmacSha256(new Uint8Array(131).fill(0xaa),
+                                    A.utf8('Test Using Larger Than Block-Size Key - Hash Key First'))),
+               '60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54');
+});
+
+test('PBKDF2-HMAC-SHA256', () => {
+  // RFC 7914 section 11.
+  assert.equal(A.toHex(A.pbkdf2Sha256(A.utf8('passwd'), A.utf8('salt'), 1)),
+               '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc');
+});
+
+test('settings password: the device vectors', () => {
+  const salt = Uint8Array.from({ length: 16 }, (_, i) => i);
+  const nonce = Uint8Array.from({ length: 16 }, (_, i) => 16 + i);
+  const key = A.pbkdf2Sha256(A.utf8('correct horse'), salt, 20000);
+  assert.equal(A.toHex(key), 'f353b5100691ea4531a49c82821a088e2083178c2c6954a17a1ec53b3900da25');
+  const message = A.authMessage('/number/Daily Portion Cap/set', 3);
+  assert.equal(message, '/number/Daily Portion Cap/set\n3');
+  assert.equal(A.authHeader(key, nonce, message),
+               A.toHex(nonce) + '9b2b5e3df64049cfbdb3b02ebddb43277df22b4cc0fe8c6c96f61ac11ed79330');
+  const newKey = A.pbkdf2Sha256(A.utf8('battery staple'), Uint8Array.from({ length: 16 }, (_, i) => 32 + i), 20000);
+  assert.equal(A.toHex(newKey), '880ec4efdf8f0c832ce0d85cc76b3191b73014a0c3768c3bbd5a14354698425c');
+  assert.equal(A.toHex(A.maskKey(newKey, key, nonce)), '2e33a9c5afad47f2f7547a0ab2ab9f9ff8f2acea70fc7609bdf3b4903cedea2f');
+  assert.equal(A.toHex(A.maskKey(newKey, null, nonce)), A.toHex(newKey), 'no current password: not masked');
+  assert.equal(A.authMessage('/switch/Calibration Mode/turn_on'), '/switch/Calibration Mode/turn_on\n');
+});

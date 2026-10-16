@@ -15,6 +15,7 @@
 #include <string>
 
 #include "calendar.h"
+#include "crypto.h"
 #include "solar.h"
 #include "tz_rules.h"
 
@@ -72,6 +73,26 @@ constexpr uint8_t DEVICE_SETUP_DONE = 0x01;        // the setup wizard has finis
 constexpr uint8_t DEVICE_BLE_GUARD = 0x02;         // BLE may change the guard limits (default on)
 constexpr uint8_t DEVICE_BLE_CALIBRATION = 0x04;   // BLE may change the calibration (default on)
 constexpr uint8_t DEVICE_FLAGS_KNOWN = DEVICE_SETUP_DONE | DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION;
+
+// Settings password (DESIGN.md section 10.1). The browser derives a key from the password with PBKDF2 and proves it
+// knows the key with an HMAC over a one-time challenge, so the password never crosses plain HTTP.
+constexpr uint8_t PASSWORD_SCHEME_NONE = 0;
+constexpr uint8_t PASSWORD_SCHEME_PBKDF2 = 1;        // PBKDF2-HMAC-SHA256, PASSWORD_ITERATIONS rounds
+constexpr uint32_t PASSWORD_ITERATIONS = 20000;
+constexpr unsigned AUTH_NONCE_SIZE = 16;
+constexpr unsigned AUTH_TAG_SIZE = 32;               // HMAC-SHA256
+constexpr uint32_t AUTH_NONCE_TTL_MS = 60000;        // a challenge must be answered within a minute
+constexpr uint32_t AUTH_WAIT_MIN_MS = 1000;          // wait after the first failure, doubling after each one
+constexpr uint32_t AUTH_WAIT_MAX_MS = 60000;
+constexpr uint32_t BOOT_HOLD_MS = 10000;             // hold BOOT this long to clear the settings password
+
+/// The answer to a settings-password check.
+enum class AuthResult : uint8_t {
+  OK = 0,            // proven, or no password is set
+  REFUSED = 1,       // wrong answer (a wait starts)
+  WAIT = 2,          // too soon after a failure: not even checked
+  NO_CHALLENGE = 3,  // no challenge outstanding, or it expired or was for another nonce
+};
 
 /// Where a feed request came from.
 // ESPHOME: a feed button of the device itself, pressed in Home Assistant (native API) or the web UI.
@@ -367,6 +388,29 @@ class FeederCore {
   /// The timezone set on the device, or "" when the build's (or Home Assistant's) is in use.
   std::string timezone_text() const { return this->dev_.timezone; }
 
+  // ---- settings password (DESIGN.md section 10.1) ----
+  // These are called from the web server's task as well as the main loop: the adapter serialises them with a lock,
+  // and writes to flash (set_password, clear_password) happen on the main loop.
+  bool password_set() const { return this->dev_.password_scheme != PASSWORD_SCHEME_NONE; }
+  /// A fresh one-time challenge. It replaces any outstanding one and expires after AUTH_NONCE_TTL_MS.
+  void password_challenge(uint8_t nonce[AUTH_NONCE_SIZE]);
+  /// Check tag = HMAC-SHA256(key, nonce || message). Consumes the challenge whatever the outcome. OK without a
+  /// password. After a refusal, every check waits (1 s, doubling to 60 s); `wait_ms` says how long is left.
+  AuthResult password_check(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t tag[AUTH_TAG_SIZE],
+                            const std::string &message, uint32_t &wait_ms);
+  /// Milliseconds before the next check is allowed (0 = now).
+  uint32_t password_wait_ms();
+  /// A new key travels masked: key XOR HMAC-SHA256(current key, nonce || "new key"); without a password the mask
+  /// is zero. Call after password_check() passed for that nonce.
+  void password_unmask(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t masked[PASSWORD_HASH_SIZE],
+                       uint8_t key[PASSWORD_HASH_SIZE]) const;
+  /// Store a new password: its salt and the key the browser derived from it. Saved at once.
+  void set_password(const uint8_t salt[PASSWORD_SALT_SIZE], const uint8_t key[PASSWORD_HASH_SIZE]);
+  /// Remove the settings password. Saved at once.
+  void clear_password(const char *why);
+  /// The BOOT button (GPIO0), pressed or released. Held for BOOT_HOLD_MS, it clears the settings password only.
+  void boot_button(bool pressed);
+
   // ---- feed events ----
   /// Called once for every feed request with its final outcome, accepted or refused.
   void set_feed_listener(std::function<void(const FeedRecord &)> &&listener) { this->feed_listener_ = std::move(listener); }
@@ -464,6 +508,7 @@ class FeederCore {
   /// Use this timezone for local time from now on; nullptr goes back to the one in use before any was applied.
   virtual void hal_apply_timezone(const TzRules *rules) = 0;
   virtual void hal_log(LogLevel /*level*/, const char * /*message*/) {}
+  virtual void hal_random(uint8_t *out, size_t n) = 0;  // cryptographically strong
 
   enum class Phase : uint8_t { IDLE, STEP_A, STEP_B, STEP_C, GAP, SETTLE };
 
@@ -596,7 +641,16 @@ class FeederCore {
   bool was_time_valid_{false};
   bool cfg_dirty_{false};
   Device dev_{};
-  bool tz_reapply_{false};  // Home Assistant pushed its timezone over ours: put ours back on the next loop
+  bool tz_reapply_{false};
+  uint8_t auth_nonce_[AUTH_NONCE_SIZE]{};
+  bool auth_nonce_live_{false};
+  uint32_t auth_nonce_ms_{0};
+  uint8_t auth_failures_{0};
+  uint32_t auth_wait_from_ms_{0};
+  uint32_t auth_wait_ms_{0};
+  bool boot_pressed_{false};
+  bool boot_handled_{false};
+  uint32_t boot_pressed_ms_{0};  // Home Assistant pushed its timezone over ours: put ours back on the next loop
   uint32_t cfg_dirty_since_{0};
 
   // A scheduled event or one-shot refused with BUSY / TOO_SOON / HOLD inside its window is retried

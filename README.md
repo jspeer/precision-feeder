@@ -307,9 +307,18 @@ the servo pulse range and calibration offsets.
 
 ## The web dashboard password
 
-The dashboard (`web_server` package) has no password by default. To add one,
-uncomment the `auth` lines in [`packages/web_server.yaml`](packages/web_server.yaml)
-and add `web_username` and `web_password` to your `secrets.yaml`.
+**Settings password.** Set one in the app (Configuration, "Settings password") and
+changing the feeding safety limits or the calibration from the app needs it.
+Feeding, the schedule, hold, tray reload and location never do, and Home Assistant
+and BLE are not affected. The password itself is never sent: the app proves it
+knows it. Pick a long one, because someone recording your network could try to
+guess it. Forgotten it? Hold the board's **BOOT** button for 10 seconds while the
+feeder runs: that clears it and nothing else.
+
+**Keeping visitors out altogether.** The dashboard (`web_server` package) has no
+login by default. To add one, uncomment the `auth` lines in
+[`packages/web_server.yaml`](packages/web_server.yaml) and add `web_username` and
+`web_password` to your `secrets.yaml`.
 
 Be aware that the dashboard is plain HTTP: the password is sent unencrypted on
 every request, so it only keeps casual visitors out. It is not real security on a

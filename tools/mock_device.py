@@ -25,6 +25,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
+import hmac
+import os
 import json
 import math
 import pathlib
@@ -535,7 +538,61 @@ class Feeder:
             self.log("W", "schedule_editor", f"Event time '{text}' not understood")
 
 
+def protected_entities() -> list[str]:
+    """The settings guard's list, read from packages/web_server.yaml (the device's own list)."""
+    names, inside = [], False
+    for line in (ROOT / "packages/web_server.yaml").read_text().splitlines():
+        if line.strip() == "protected_entities:":
+            inside = True
+        elif inside and line.strip().startswith("- "):
+            names.append(line.strip()[2:])
+        elif inside and line.strip() and not line.strip().startswith("#"):
+            inside = False
+    return names
+
+
+class SettingsPassword:
+    """The device's settings password (FeederCore, feeder_password.cpp): one-time challenges and HMAC answers."""
+
+    ITERATIONS = 20000
+
+    def __init__(self):
+        self.salt = bytes(16)
+        self.key: bytes | None = None
+        self.nonce: bytes | None = None
+        self.protected = protected_entities()
+
+    def challenge(self) -> dict:
+        self.nonce = os.urandom(16)
+        return {"scheme": 1 if self.key else 0, "iterations": self.ITERATIONS, "salt": self.salt.hex(),
+                "nonce": self.nonce.hex(), "wait": 0, "protected": self.protected}
+
+    def check(self, header: str | None, message: str) -> bool:
+        if self.key is None:
+            return True
+        nonce, self.nonce = self.nonce, None
+        if not header or nonce is None or header[:32] != nonce.hex():
+            return False
+        tag = hmac.new(self.key, nonce + message.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(tag, header[32:].lower())
+
+    def change(self, header: str | None, salt_hex: str, key_hex: str) -> bool:
+        nonce = bytes.fromhex(header[:32]) if header else bytes(16)
+        current = self.key
+        if not self.check(header, f"/feeder/auth/password\n{salt_hex}{key_hex}"):
+            return False
+        if not key_hex:
+            self.key = None
+            return True
+        mask = hmac.new(current, nonce + b"new key", hashlib.sha256).digest() if current else bytes(32)
+        self.salt = bytes.fromhex(salt_hex)
+        self.key = bytes(a ^ b for a, b in zip(bytes.fromhex(key_hex), mask))
+        return True
+
+
 def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
+    password = SettingsPassword()
+
     expected = "Basic " + base64.b64encode(auth.encode()).decode() if auth else None
 
     class Handler(BaseHTTPRequestHandler):
@@ -578,6 +635,9 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 return self._send(200, body, "text/javascript" if path.endswith("js") else "text/css")
             if path == "/events":
                 return self._events()
+            if path == "/feeder/auth":
+                with feeder.lock:
+                    return self._send(200, json.dumps(password.challenge()).encode(), "application/json")
             if path == "/feeder/ble" and hasattr(feeder, "ble_activity"):
                 with feeder.lock:
                     body = json.dumps({"entries": feeder.ble_activity}).encode()
@@ -593,10 +653,23 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
         def do_POST(self):
             if not self._authorized():
                 return
-            _, parts, params = self._parts()
+            path, parts, params = self._parts()
             length = int(self.headers.get("Content-Length") or 0)
             if length:
                 params.update({k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()})
+            header = self.headers.get("X-Feeder-Auth")
+            refused = (403, b'{"error":"refused","wait":0}', "application/json")
+            with feeder.lock:
+                if path == "/feeder/auth/check":
+                    return self._send(200, b"{}", "application/json") if password.check(header, path + "\n") \
+                        else self._send(*refused)
+                if path == "/feeder/auth/password":
+                    ok = password.change(header, params.get("salt", ""), params.get("key", ""))
+                    return self._send(200, b"{}", "application/json") if ok else self._send(*refused)
+                if len(parts) == 3 and "/".join(parts[:2]) in password.protected:
+                    value = params.get("value", params.get("option", ""))
+                    if not password.check(header, "/" + "/".join(parts) + "\n" + value):
+                        return self._send(*refused)
             if len(parts) == 3:
                 with feeder.lock:
                     if feeder.action(parts[0], parts[1], parts[2], params):

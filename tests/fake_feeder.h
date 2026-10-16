@@ -86,6 +86,7 @@ class FakeFeeder : public FeederCore {
   int tz_applies{0};         // calls to hal_apply_timezone
   bool tz_applied{false};    // the last call set a timezone (false: went back to the build's)
   TzRules tz_rules{};        // what the last call set
+  uint8_t random_next{16};   // hal_random fills n bytes counting up from this, then moves it on
 
  protected:
   uint32_t hal_millis() override { return static_cast<uint32_t>(this->uptime_ms_); }
@@ -138,6 +139,11 @@ class FakeFeeder : public FeederCore {
     this->tz_applied = rules != nullptr;
     if (rules != nullptr)
       this->tz_rules = *rules;
+  }
+  void hal_random(uint8_t *out, size_t n) override {
+    for (size_t i = 0; i < n; i++)
+      out[i] = static_cast<uint8_t>(this->random_next + i);
+    this->random_next = static_cast<uint8_t>(this->random_next + n);
   }
   void hal_log(LogLevel, const char *message) override { this->logs.emplace_back(message); }
 

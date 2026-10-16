@@ -6,7 +6,13 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#ifdef USE_WEBSERVER
+#include "esphome/components/web_server_base/web_server_base.h"
+#endif
 
+#include <cstring>
+
+#include <esp_random.h>
 #include <esp_sntp.h>
 #include <esp_timer.h>
 #include <sys/time.h>
@@ -160,6 +166,217 @@ void PrecisionFeeder::hal_apply_timezone(const TzRules *rules) {
   ESP_LOGW(TAG, "This build has no timezone support (no time platform with a timezone): timezone not applied");
 #endif
 }
+
+void PrecisionFeeder::hal_random(uint8_t *out, size_t n) { esp_fill_random(out, n); }
+
+#ifdef USE_WEBSERVER
+// ---- Settings guard (DESIGN.md section 10.1) -------------------------------------------------------------------
+// Runs on the web server's task. FeederCore's password state is only touched under password_lock(); anything that
+// writes to flash is deferred to the main loop.
+
+static const char *const AUTH_HEADER = "X-Feeder-Auth";  // hex: nonce (16 bytes) then tag (32 bytes)
+
+static void to_hex(const uint8_t *data, size_t n, char *out) {
+  static const char DIGITS[] = "0123456789abcdef";
+  for (size_t i = 0; i < n; i++) {
+    out[2 * i] = DIGITS[data[i] >> 4];
+    out[2 * i + 1] = DIGITS[data[i] & 15];
+  }
+  out[2 * n] = '\0';
+}
+
+static bool from_hex(const std::string &text, size_t offset, uint8_t *out, size_t n) {
+  if (text.size() < offset + 2 * n)
+    return false;
+  for (size_t i = 0; i < 2 * n; i++) {
+    const char c = text[offset + i];
+    int v;
+    if (c >= '0' && c <= '9')
+      v = c - '0';
+    else if (c >= 'a' && c <= 'f')
+      v = c - 'a' + 10;
+    else if (c >= 'A' && c <= 'F')
+      v = c - 'A' + 10;
+    else
+      return false;
+    out[i / 2] = static_cast<uint8_t>(i % 2 ? (out[i / 2] | v) : v << 4);
+  }
+  return true;
+}
+
+class SettingsGuard : public AsyncWebHandler {
+ public:
+  explicit SettingsGuard(PrecisionFeeder *feeder) : feeder_(feeder) {}
+
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    const std::string url = request->url_to(buf).str();
+    if (request->method() == HTTP_GET)
+      return url == "/feeder/auth";
+    if (request->method() != HTTP_POST)
+      return false;
+    if (url == "/feeder/auth/password" || url == "/feeder/auth/check")
+      return true;
+    // POST /<domain>/<name>/<action>: protected when "<domain>/<name>" is on the list.
+    const size_t action = url.rfind('/');
+    return action != std::string::npos && action > 0 && this->feeder_->is_protected(url.substr(1, action - 1));
+  }
+
+  void handleRequest(AsyncWebServerRequest *request) override {
+    char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    const std::string url = request->url_to(buf).str();
+    if (request->method() == HTTP_GET) {
+      this->send_challenge_(request);
+      return;
+    }
+    if (url == "/feeder/auth/password") {
+      this->change_password_(request);
+      return;
+    }
+    if (url == "/feeder/auth/check") {  // "is this the password?", for the app's Unlock
+      if (this->authorised_(request, url + "\n"))
+        request->send(200, "application/json", "{}");
+      return;
+    }
+    // What the tag covers: the path and the value being written, so an answer cannot be moved to another request.
+    std::string param;
+    if (request->hasParam("value"))
+      param = request->arg("value");
+    else if (request->hasParam("option"))
+      param = request->arg("option");
+    if (!this->authorised_(request, url + "\n" + param))
+      return;
+    this->feeder_->web_server()->handleRequest(request);
+  }
+
+ protected:
+  void send_challenge_(AsyncWebServerRequest *request) {
+    uint8_t nonce[AUTH_NONCE_SIZE];
+    Device d;
+    uint32_t wait;
+    {
+      LockGuard guard(this->feeder_->password_lock());
+      this->feeder_->password_challenge(nonce);
+      d = this->feeder_->device();
+      wait = this->feeder_->password_wait_ms();
+    }
+    char nonce_hex[2 * AUTH_NONCE_SIZE + 1], salt_hex[2 * PASSWORD_SALT_SIZE + 1];
+    to_hex(nonce, AUTH_NONCE_SIZE, nonce_hex);
+    to_hex(d.password_salt, PASSWORD_SALT_SIZE, salt_hex);
+    char head[200];
+    std::snprintf(head, sizeof(head), "{\"scheme\":%u,\"iterations\":%u,\"salt\":\"%s\",\"nonce\":\"%s\",\"wait\":%u,",
+                  static_cast<unsigned>(d.password_scheme), static_cast<unsigned>(PASSWORD_ITERATIONS), salt_hex,
+                  nonce_hex, static_cast<unsigned>(wait));
+    std::string body = head;
+    body += "\"protected\":[";
+    bool first = true;
+    for (const auto &name : this->feeder_->protected_entities()) {
+      body += first ? "\"" : ",\"";
+      body += name;  // entity names never contain quotes or backslashes (tests/test_consistency.py)
+      body += '"';
+      first = false;
+    }
+    body += "]}";
+    request->send(200, "application/json", body.c_str());
+  }
+
+  /// Check the auth header against `message`; on failure answer the request and return false.
+  bool authorised_(AsyncWebServerRequest *request, const std::string &message) {
+    uint8_t nonce[AUTH_NONCE_SIZE]{}, tag[AUTH_TAG_SIZE]{};
+    const auto header = request->get_header(AUTH_HEADER);
+    const bool parsed = header.has_value() && header->size() == 2 * (AUTH_NONCE_SIZE + AUTH_TAG_SIZE) &&
+                        from_hex(*header, 0, nonce, AUTH_NONCE_SIZE) &&
+                        from_hex(*header, 2 * AUTH_NONCE_SIZE, tag, AUTH_TAG_SIZE);
+    uint32_t wait = 0;
+    AuthResult result;
+    {
+      LockGuard guard(this->feeder_->password_lock());
+      if (!this->feeder_->password_set())
+        return true;
+      result = parsed ? this->feeder_->password_check(nonce, tag, message, wait) : AuthResult::NO_CHALLENGE;
+    }
+    if (result == AuthResult::OK)
+      return true;
+    static const char *const ERRORS[] = {"", "refused", "wait", "challenge"};
+    char body[64];
+    std::snprintf(body, sizeof(body), "{\"error\":\"%s\",\"wait\":%u}", ERRORS[static_cast<uint8_t>(result)],
+                  static_cast<unsigned>(wait));
+    if (result == AuthResult::REFUSED)
+      ESP_LOGW(TAG, "Settings password refused for %s", message.substr(0, message.find('\n')).c_str());
+    request->send(result == AuthResult::WAIT ? 429 : 403, "application/json", body);
+    return false;
+  }
+
+  /// POST /feeder/auth/password?salt=<hex>&key=<hex>: set or change it (key masked, see password_unmask), or clear
+  /// it (no key). Needs the current password when one is set.
+  void change_password_(AsyncWebServerRequest *request) {
+    const std::string salt_hex = request->arg("salt"), key_hex = request->arg("key");
+    if (!this->authorised_(request, "/feeder/auth/password\n" + salt_hex + key_hex))
+      return;
+    if (key_hex.empty()) {
+      bool had;
+      {
+        LockGuard guard(this->feeder_->password_lock());
+        had = this->feeder_->password_set();
+      }
+      if (had) {
+        PrecisionFeeder *feeder = this->feeder_;
+        feeder->run_on_main_loop([feeder]() {
+          LockGuard guard(feeder->password_lock());
+          feeder->clear_password("from the web app");
+        });
+      }
+      request->send(200, "application/json", "{}");
+      return;
+    }
+    uint8_t salt[PASSWORD_SALT_SIZE], masked[PASSWORD_HASH_SIZE], nonce[AUTH_NONCE_SIZE]{};
+    const auto header = request->get_header(AUTH_HEADER);
+    if (header.has_value())
+      from_hex(*header, 0, nonce, AUTH_NONCE_SIZE);  // checked above when a password is set; unused otherwise
+    if (!from_hex(salt_hex, 0, salt, PASSWORD_SALT_SIZE) || salt_hex.size() != 2 * PASSWORD_SALT_SIZE ||
+        !from_hex(key_hex, 0, masked, PASSWORD_HASH_SIZE) || key_hex.size() != 2 * PASSWORD_HASH_SIZE) {
+      request->send(400, "application/json", "{\"error\":\"format\"}");
+      return;
+    }
+    // Unmasked now, with the key that checked this request; stored on the main loop.
+    struct NewPassword {
+      uint8_t salt[PASSWORD_SALT_SIZE];
+      uint8_t key[PASSWORD_HASH_SIZE];
+    };
+    auto *p = new NewPassword;
+    std::memcpy(p->salt, salt, PASSWORD_SALT_SIZE);
+    {
+      LockGuard guard(this->feeder_->password_lock());
+      this->feeder_->password_unmask(nonce, masked, p->key);
+    }
+    PrecisionFeeder *feeder = this->feeder_;
+    feeder->run_on_main_loop([feeder, p]() {
+      {
+        LockGuard guard(feeder->password_lock());
+        feeder->set_password(p->salt, p->key);
+      }
+      std::memset(p, 0, sizeof(*p));
+      delete p;
+    });
+    request->send(200, "application/json", "{}");
+  }
+
+  PrecisionFeeder *feeder_;
+};
+
+void PrecisionFeeder::register_settings_guard() {
+  if (this->web_server_ != nullptr && web_server_base::global_web_server_base != nullptr)
+    web_server_base::global_web_server_base->add_handler(new SettingsGuard(this));  // lives as long as the device
+}
+
+bool PrecisionFeeder::is_protected(const std::string &entity) const {
+  for (const auto &name : this->protected_) {
+    if (name == entity)
+      return true;
+  }
+  return false;
+}
+#endif
 
 void PrecisionFeeder::hal_log(LogLevel level, const char *message) {
   switch (level) {

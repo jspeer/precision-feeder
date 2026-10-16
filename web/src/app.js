@@ -45,6 +45,7 @@ const app = {
     });
     store.subscribe(changed => this.update(changed));
     store.start();
+    auth.refresh();
     this.update(new Set(['*all']));
     // Re-check the route once the first burst of entities has settled.
     const settle = setInterval(() => {

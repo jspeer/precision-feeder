@@ -14,7 +14,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "crypto.h"
+#include "../precision_feeder/crypto.h"
 
 namespace esphome {
 namespace precision_feeder {

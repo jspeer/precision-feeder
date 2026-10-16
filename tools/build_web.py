@@ -31,6 +31,7 @@ SOURCES = [
     "entities.js",   # every entity the app uses, by name (the UI contract)
     "parse.js",      # the device's text formats (pure; tested by tests/test_web.mjs)
     "store.js",      # the /events connection and the entity store
+    "auth.js",       # the settings password: SHA-256, HMAC, PBKDF2 and signed changes
     "api.js",        # writes, one at a time, and waiting for the device's echo
     "ui.js",         # DOM helpers, icons, dialogs, toasts, form controls
     "banners.js",    # the warning banner
