@@ -1069,7 +1069,7 @@ precision-feeder/
       public `set_pin()`, and a pin can take a YAML `id` (validated). Our component, set up
       earlier, can load the Device record and rewrite the pins first. "None" for the button and
       LED needs its own handling in N3 (the drivers always claim their pin).
-    - **GPIO0 (BOOT) after startup:** still to check on the bench (owner).
+    - **GPIO0 (BOOT) after startup:** reads cleanly on the S3-Zero (2.0.0 N8, item 13).
     - **GitHub Pages:** sends `Access-Control-Allow-Origin: *`, so the browser can read
       `manifest.json`. Pages is also reachable over IPv6 (github.com is not), so the update
       check works on IPv6-only networks; only downloading the image needs IPv4. Release
@@ -1093,8 +1093,9 @@ precision-feeder/
     every feed, and protected settings need the settings password, so this is limited, but not
     nothing. A fix (for example requiring a header the browser cannot send cross-site on every
     write) would touch every web-server write; not planned yet (2026-10-15).
-13. BOOT button on the bench: N2 reads GPIO0 after startup for the password reset; that it reads
-    cleanly on the Waveshare ESP32-S3-Zero and the DevKitC-1 is still an N0 bench check.
+13. BOOT button on the bench: N2 reads GPIO0 after startup for the password reset. Checked on the Waveshare
+    ESP32-S3-Zero 2026-10-16 (docs/BENCH.md, N8 part 6): held 10 s, it cleared the password and nothing else, and the
+    feeder kept running. Still to see on a DevKitC-1.
 14. Runtime pins on the bench (2.0.0 N3): compiled and host-tested only. Still to see on
     hardware: a saved servo pin moving the servo to another GPIO after a restart; Button Pin
     and LED Pin "none" leaving the drivers unset with no error in the log; the LED and button
@@ -1102,15 +1103,18 @@ precision-feeder/
     DevKitC-1, chosen without the owner (decisions log, N3).
 15. Keys on the bench (2.0.0 N4): partly checked 2026-10-16 (docs/BENCH.md): an API key made in the web app used by
     an API client (plaintext and a wrong key refused), Clear, plaintext OTA refused, a BLE key made in the web app
-    (selftest 14/14), and detail 7 with the guard permission off. Still to see: Home Assistant adopting a feeder with
-    no key and reconnecting after a new one, encrypted OTA with a runtime key, a new BLE key ending a connected
-    session, and detail 6.
+    (selftest 14/14), and detail 7 with the guard permission off. Checked in N8 (2026-10-16): adoption as Home
+    Assistant does it (aioesphomeapi: the all-zero Noise key, then a key set over the API; afterwards plaintext, the
+    all-zero key and a wrong key refused), encrypted OTA with that runtime key, and detail 6 with no BLE key. Still to
+    see: Home Assistant itself adopting and reconnecting, and a new BLE key ending a connected session.
 
 16. Network on the bench (2.0.0 N5): checked 2026-10-16 (docs/BENCH.md): the MAC-suffixed name, a saved name for
     mDNS and the API after a restart, the access-point password saved, joining another network from the web app,
     an unreachable network taking the feeder off the LAN, and Improv serial recovering it. Still to see: the access
     point's SSID on air (macOS hides scanned SSIDs), the DHCP host name in a router, whether Home Assistant
-    reconnects after a rename or needs the feeder added again, and Improv from ESP Web Tools itself.
+    reconnects after a rename or needs the feeder added again, and Improv from ESP Web Tools itself. Checked in N8
+    (2026-10-16): the open access point's SSID on a phone, the DHCP host name (`precision-feeder-add020` in a GL.iNet
+    router's client list), and ESP Web Tools' install. Still to see: Home Assistant after a rename.
 
 17. ~~Setup wizard on the bench (2.0.0 N6).~~ Done 2026-10-16 (docs/BENCH.md): a freshly erased feeder opens the
     wizard and keeps it across a restart (after a fix: decided at the first boot), and setup done persists.

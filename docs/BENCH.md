@@ -537,3 +537,25 @@ The 2.0.1 `full` image on a GL.iNet travel router (the phone's hotspot behind it
   prebuilt binaries: ESPHome counts Wi-Fi as connected only with an IPv4 address, and the binaries cannot be given a
   static one (`manual_ip` is build-time), so on an IPv6-only network they never join and open their access point.
   DESIGN.md section 14, item 20.
+
+## Firmware 2.0.1 N8 on hardware, part 6: keys, BOOT and the leftovers (2026-10-16)
+
+The same feeder (`full`, no keys yet, on the hotspot).
+
+- **Adoption as Home Assistant does it** (aioesphomeapi, the library Home Assistant uses): connected with the
+  all-zero Noise key (plaintext was accepted too while no key was set), set a new key over the API (true); the web
+  app then reported the API key as `device`. Afterwards plaintext ("requires encryption"), the all-zero key and a wrong
+  key were refused, the new key connected. Home Assistant itself was not available on this network.
+- **Encrypted OTA with the runtime key** (ESPHome's own uploader, `espota2`, with the key as its Noise key): "Encrypted
+  connection established", 1.4 MB in 13.7 s, OTA successful, back on 2.0.1. Plaintext OTA was refused (the device
+  asks for a password nobody knows).
+- **BLE with no key:** AUTH refused with detail 6, which the Python client names ("no BLE key is set on the feeder").
+  The client printed a traceback around it; it now prints the one line.
+- **BOOT held 10 s** with a settings password set (S3-Zero, owner): the password was cleared (scheme 0, Settings
+  Password off); the API key, the settings and the Wi-Fi network were kept, and the feeder kept running.
+- **DHCP host name:** `precision-feeder-add020` in the router's client list (owner).
+- Not checked: Home Assistant itself adopting and reconnecting after a rename; the BLE name on air (macOS showed a name
+  cached from an earlier run); a new BLE key ending a connected session.
+
+Left on the board: 2.0.1 `full`, on the phone hotspot, the API key from this test (not in Home Assistant), no BLE
+key, no settings password, setup offered, IPv4-only router.

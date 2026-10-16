@@ -188,4 +188,6 @@ def main() -> None:
         asyncio.run(_run(args))
     except ValueError as err:  # bad input (a day name, a time, a key): say what, without a traceback
         raise SystemExit(f"error: {err}") from None
+    except PermissionError as err:  # AUTH refused (wrong key, no key on the feeder): the reason, without a traceback
+        raise SystemExit(f"error: {err}") from None
 
