@@ -6,7 +6,19 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.0.0: appliance (in progress)
+## 2.0.1: appliance, fixed on the bench (in progress)
+
+2.0.0 was never released: the bench (2.0.0 N8, [docs/BENCH.md](docs/BENCH.md)) found two faults in it. 2.0.1 is
+2.0.0 (below) with them fixed.
+
+- Fixed on the bench (N8): every protected write through the web server (guard limits, calibration, pins) crashed
+  the feeder with a stack overflow in the web server's task, which on a fresh upgrade made ESPHome roll the update
+  back. The settings guard no longer keeps its own stack frame while the web server handles the write.
+- Fixed on the bench (N8): the firmware upload accepted a first-flash `.factory.bin` (the bootloader then refused to
+  start it, so the old firmware came back). The feeder and the Firmware page now refuse anything that is not an app
+  image.
+
+## 2.0.0: appliance (not released; see 2.0.1)
 
 Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plans/2.0.0-appliance.md)).
 
@@ -67,12 +79,6 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   checking it against the release. The upload is signed with the settings password and the
   feeder checks the image's SHA-256 before switching, then restarts once the tray is still.
 - New Firmware Variant sensor: `full`, `no-ble` or `yaml` (built from your own YAML).
-- Fixed on the bench (N8): every protected write through the web server (guard limits, calibration, pins) crashed
-  the feeder with a stack overflow in the web server's task, which on a fresh upgrade made ESPHome roll the update
-  back. The settings guard no longer keeps its own stack frame while the web server handles the write.
-- Fixed on the bench (N8): the firmware upload accepted a first-flash `.factory.bin` (the bootloader then refused to
-  start it, so the old firmware came back). The feeder and the Firmware page now refuse anything that is not an app
-  image.
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)
