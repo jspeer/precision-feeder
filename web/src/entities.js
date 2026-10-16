@@ -106,4 +106,6 @@ const E = {
   // packages/ble_gatt.yaml
   bleInfo: 'text_sensor/BLE Info',
   bleSession: 'text_sensor/BLE Session',
+  bleGuard: 'switch/BLE Can Change Guard Limits',
+  bleCalibration: 'switch/BLE Can Change Calibration',
 };

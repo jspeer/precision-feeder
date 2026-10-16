@@ -86,7 +86,10 @@ AUTH_DETAILS = {
     3: "wrong key (AUTH refused; the nonce has changed)",
     4: "too soon after a failed AUTH",
     5: "write too short for a tag",
+    6: "no BLE key is set on the feeder (set one in its web app)",
+    7: "this setting is turned off for BLE on the feeder",
 }
+# Firmware may add detail values within protocol 2: show unknown ones by number, never fail on them.
 SOURCES = {0: "schedule", 1: "ESPHome", 2: "ble", 3: "button", 4: "one-shot"}
 TRAY_STATES = {0: "loaded", 1: "empty", 2: "unknown", 3: "calibrating", 4: "moving"}
 TIME_SOURCES = {0: "none", 1: "BLE", 2: "NTP", 3: "Home Assistant"}
@@ -265,6 +268,13 @@ class Response:
     @property
     def result_text(self) -> str:
         return RESULTS.get(self.result, f"unknown ({self.result})")
+
+    @property
+    def detail_text(self) -> str:
+        """The NOT_AUTHORIZED detail in words (unknown values by number); otherwise the number."""
+        if self.result == 16:
+            return AUTH_DETAILS.get(self.detail, f"unknown detail {self.detail}")
+        return f"detail {self.detail}"
 
 
 def parse_response(data: bytes) -> Response:

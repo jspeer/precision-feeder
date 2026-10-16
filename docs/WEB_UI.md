@@ -55,8 +55,12 @@ else the feeder lists under Faults.
     once and used after a restart (Restart is offered when one is waiting); only pins
     the chip can spare are listed, and "none" for a button or LED that is not fitted;
   - the settings password: set, unlock (for this page, until it is reloaded), lock,
-    change or remove. Locked, changes to the safety limits, the calibration and the
-    pins are refused with a message saying so.
+    change or remove. Locked, changes to the safety limits, the calibration, the
+    pins and the keys are refused with a message saying so;
+  - keys: where the Home Assistant and Bluetooth keys come from (none, your YAML, or
+    saved on the feeder); generate one (made in the browser and shown once), enter
+    your own, or clear the Home Assistant key, where the build allows it; and the two
+    switches for what Bluetooth may change. The feeder never sends a key back.
 - **Maintenance:**
   - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
     and the servo pulse range;

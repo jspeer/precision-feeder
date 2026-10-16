@@ -136,6 +136,9 @@ class Feeder:
         self.build_pins = ["GPIO1", "GPIO2", "GPIO21"]  # servo, button, LED: as packages/core.yaml
         self.saved_pins: list[str | None] = [None, None, None]  # None: the build's
         self.pins_in_use = list(self.build_pins)
+        # Where the keys come from, as /feeder/auth reports them: like a prebuilt binary, the API key is provisioned
+        # at run time (none yet) and BLE has the build's key.
+        self.keys = {"api": "none", "ble": "off" if args.no_ble else "build"}
         self.entities: dict[str, Entity] = {}
         self._build(args)
 
@@ -230,8 +233,9 @@ class Feeder:
             a("sensor", "Heap Fragmentation", 9, uom="%")
             a("sensor", "Loop Time", 12, uom="ms")
         if not args.no_ble:  # ble_gatt.yaml: a simulated client that connected and fed once
-            a("text_sensor", "BLE Info", "service=02dd1dd9-ba75-4bbc-bdea-306d21010001;protocol=2;auth=hmac-sha256;"
-              "time=fallback_only;stale_h=24", icon="mdi:bluetooth-settings", category=DIAGNOSTIC, disabled=True)
+            a("text_sensor", "BLE Info", "", icon="mdi:bluetooth-settings", category=DIAGNOSTIC, disabled=True)
+            a("switch", "BLE Can Change Guard Limits", True, icon="mdi:shield-lock-outline", category=CONFIG)
+            a("switch", "BLE Can Change Calibration", True, icon="mdi:tune-variant", category=CONFIG)
             a("text_sensor", "BLE Session", "", icon="mdi:bluetooth-connect", category=DIAGNOSTIC, disabled=True)
             self.ble_activity = [
                 {"id": 1, "t": 5, "kind": "connect"},
@@ -395,6 +399,11 @@ class Feeder:
         s("select", "LED Pin", pins[2])
         s("text_sensor", "Pins In Use", "servo {}, button {}, LED {}".format(*self.pins_in_use))
         s("binary_sensor", "Restart Needed", pins != self.pins_in_use)
+        if "text_sensor/BLE Info" in self.entities:
+            s("text_sensor", "BLE Info", "service=02dd1dd9-ba75-4bbc-bdea-306d21010001;protocol=2;auth=hmac-sha256;"
+              f"time=fallback_only;stale_h=24;key={self.keys['ble']};"
+              f"guard={int(self.get('switch', 'BLE Can Change Guard Limits'))};"
+              f"calibration={int(self.get('switch', 'BLE Can Change Calibration'))}")
         if "switch/Calibration Mode" in self.entities:
             s("switch", "Calibration Mode", self.calibrating)
             s("select", "Calibration Position", str(self.cal_pos))
@@ -613,10 +622,21 @@ class SettingsPassword:
         self.nonce: bytes | None = None
         self.protected = protected_entities()
 
-    def challenge(self) -> dict:
+    def challenge(self, keys: dict) -> dict:
         self.nonce = os.urandom(16)
         return {"scheme": 1 if self.key else 0, "iterations": self.ITERATIONS, "salt": self.salt.hex(),
-                "nonce": self.nonce.hex(), "wait": 0, "protected": self.protected}
+                "nonce": self.nonce.hex(), "wait": 0, "keys": keys, "protected": self.protected}
+
+    def set_key(self, header: str | None, path: str, key_hex: str) -> bytes | None | bool:
+        """POST /feeder/keys/...: the unmasked key, None to clear, or False if refused."""
+        nonce = bytes.fromhex(header[:32]) if header else bytes(16)
+        current = self.key
+        if not self.check(header, f"{path}\n{key_hex}"):
+            return False
+        if not key_hex:
+            return None
+        mask = hmac.new(current, nonce + b"new key", hashlib.sha256).digest() if current else bytes(32)
+        return bytes(a ^ b for a, b in zip(bytes.fromhex(key_hex), mask))
 
     def check(self, header: str | None, message: str) -> bool:
         if self.key is None:
@@ -688,7 +708,7 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 return self._events()
             if path == "/feeder/auth":
                 with feeder.lock:
-                    return self._send(200, json.dumps(password.challenge()).encode(), "application/json")
+                    return self._send(200, json.dumps(password.challenge(feeder.keys)).encode(), "application/json")
             if path == "/feeder/ble" and hasattr(feeder, "ble_activity"):
                 with feeder.lock:
                     body = json.dumps({"entries": feeder.ble_activity}).encode()
@@ -714,6 +734,18 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 if path == "/feeder/auth/check":
                     return self._send(200, b"{}", "application/json") if password.check(header, path + "\n") \
                         else self._send(*refused)
+                if path in ("/feeder/keys/api", "/feeder/keys/ble"):
+                    kind = path.rsplit("/", 1)[1]
+                    key = password.set_key(header, path, params.get("key", ""))
+                    if key is False:
+                        return self._send(*refused)
+                    if feeder.keys[kind] in ("off", "build" if kind == "api" else "-"):
+                        return self._send(409, b'{"error":"build"}', "application/json")
+                    if (key is None and kind == "ble") or (key is not None and (len(key) != 32 or not any(key))):
+                        return self._send(400, b'{"error":"format"}', "application/json")
+                    feeder.keys[kind] = "device" if key else "none"
+                    feeder.log("W", "precision_feeder", f"{kind.upper()} key {'set' if key else 'cleared'} from the web app")
+                    return self._send(200, b"{}", "application/json")
                 if path == "/feeder/auth/password":
                     ok = password.change(header, params.get("salt", ""), params.get("key", ""))
                     return self._send(200, b"{}", "application/json") if ok else self._send(*refused)

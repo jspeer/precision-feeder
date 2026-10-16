@@ -111,11 +111,25 @@ function maskKey(newKey, currentKey, nonce) {
   return newKey.map((b, i) => b ^ mask[i]);
 }
 
+/** A 32-byte key as base64, as ESPHome (api: encryption: key) and the BLE clients write it. */
+function keyToBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
+/** A key typed in: base64 of exactly 32 bytes, not all zero; null otherwise. */
+function keyFromBase64(text) {
+  let raw;
+  try { raw = atob(String(text).trim()); } catch (e) { return null; }
+  if (raw.length !== 32) return null;
+  const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
+  return bytes.some(b => b !== 0) ? bytes : null;
+}
+
 const auth = {
   available: false,   // the device has the settings guard (the web server package with it)
   set: false,         // a settings password is set
   key: null,          // the derived key once unlocked (memory only: a reload locks again)
   protectedIds: new Set(),
+  // Where the API (Home Assistant) and BLE keys come from: none, build (the YAML's), device (saved on it) or off
+  // (this build cannot have one). The device never sends a key.
+  keys: { api: 'off', ble: 'off' },
   _listeners: [],
 
   onChange(fn) { this._listeners.push(fn); },
@@ -130,6 +144,7 @@ const auth = {
     this.set = c.scheme !== 0;
     if (!this.set) this.key = null;
     this.protectedIds = new Set(c.protected || []);
+    this.keys = Object.assign({ api: 'off', ble: 'off' }, c.keys || {});
     c.nonceBytes = fromHex(c.nonce);
     c.saltBytes = fromHex(c.salt);
     return c;
@@ -178,6 +193,26 @@ const auth = {
   },
 
   lock() { this.key = null; this._changed(); },
+
+  /** Save a 32-byte key ('api' or 'ble') on the device, masked like a new password key, or clear the API key with
+   *  null. Signed with the settings password when one is set. The device never sends a key back. */
+  async setKey(kind, bytes) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = `/feeder/keys/${kind}`;
+    const keyHex = bytes ? toHex(maskKey(bytes, this.set ? this.key : null, c.nonceBytes)) : '';
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, keyHex)) } : {};
+    let r;
+    try {
+      r = await fetch(location.origin + path + (keyHex ? `?key=${keyHex}` : ''), { method: 'POST', headers });
+    } catch (e) {
+      throw new Error('The feeder could not be reached.');
+    }
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    if (r.status === 409) throw new Error('This build cannot change that key: it comes from the YAML.');
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+    await this.refresh();
+  },
 
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
   async setPassword(password) {

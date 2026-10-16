@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '30c5e8c5bc3e';
+const BUILD_ID = '2f3b05fb9687';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -114,6 +114,8 @@ const E = {
   // packages/ble_gatt.yaml
   bleInfo: 'text_sensor/BLE Info',
   bleSession: 'text_sensor/BLE Session',
+  bleGuard: 'switch/BLE Can Change Guard Limits',
+  bleCalibration: 'switch/BLE Can Change Calibration',
 };
 
 // ---- parse.js ----
@@ -593,11 +595,25 @@ function maskKey(newKey, currentKey, nonce) {
   return newKey.map((b, i) => b ^ mask[i]);
 }
 
+/** A 32-byte key as base64, as ESPHome (api: encryption: key) and the BLE clients write it. */
+function keyToBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
+/** A key typed in: base64 of exactly 32 bytes, not all zero; null otherwise. */
+function keyFromBase64(text) {
+  let raw;
+  try { raw = atob(String(text).trim()); } catch (e) { return null; }
+  if (raw.length !== 32) return null;
+  const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
+  return bytes.some(b => b !== 0) ? bytes : null;
+}
+
 const auth = {
   available: false,   // the device has the settings guard (the web server package with it)
   set: false,         // a settings password is set
   key: null,          // the derived key once unlocked (memory only: a reload locks again)
   protectedIds: new Set(),
+  // Where the API (Home Assistant) and BLE keys come from: none, build (the YAML's), device (saved on it) or off
+  // (this build cannot have one). The device never sends a key.
+  keys: { api: 'off', ble: 'off' },
   _listeners: [],
 
   onChange(fn) { this._listeners.push(fn); },
@@ -612,6 +628,7 @@ const auth = {
     this.set = c.scheme !== 0;
     if (!this.set) this.key = null;
     this.protectedIds = new Set(c.protected || []);
+    this.keys = Object.assign({ api: 'off', ble: 'off' }, c.keys || {});
     c.nonceBytes = fromHex(c.nonce);
     c.saltBytes = fromHex(c.salt);
     return c;
@@ -660,6 +677,26 @@ const auth = {
   },
 
   lock() { this.key = null; this._changed(); },
+
+  /** Save a 32-byte key ('api' or 'ble') on the device, masked like a new password key, or clear the API key with
+   *  null. Signed with the settings password when one is set. The device never sends a key back. */
+  async setKey(kind, bytes) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = `/feeder/keys/${kind}`;
+    const keyHex = bytes ? toHex(maskKey(bytes, this.set ? this.key : null, c.nonceBytes)) : '';
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, keyHex)) } : {};
+    let r;
+    try {
+      r = await fetch(location.origin + path + (keyHex ? `?key=${keyHex}` : ''), { method: 'POST', headers });
+    } catch (e) {
+      throw new Error('The feeder could not be reached.');
+    }
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    if (r.status === 409) throw new Error('This build cannot change that key: it comes from the YAML.');
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+    await this.refresh();
+  },
 
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
   async setPassword(password) {
@@ -2110,11 +2147,21 @@ PAGES.configuration = {
 
     this.pw = card('Settings password');
     this.pw.hidden = true;
-    auth.onChange(() => this.updatePassword());
+    this.keys = card('Keys');
+    this.keys.hidden = true;
+    this.keyRows = [setting('Bluetooth may change the safety limits', 'Minimum gap, gap between portions, daily cap ' +
+                            'and portions per command.', E.bleGuard),
+                    setting('Bluetooth may change the calibration', 'Offsets, servo pulse range and calibration mode.',
+                            E.bleCalibration)].filter(Boolean);
+    this.rows.push(...this.keyRows);
+    auth.onChange(() => {
+      this.updatePassword();
+      this.updateKeys();
+    });
     auth.refresh();
 
     append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
-           h('div', { class: 'grid' }, this.hw, this.pw));
+           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys));
     this.update();
   },
 
@@ -2197,6 +2244,84 @@ PAGES.configuration = {
                  }, 'btn btn-danger')];
     }
     append(pw, h('p', {}, text), h('div', { class: 'actions' }, actions), forgot);
+  },
+
+  /** The keys card: where the Home Assistant (API) and Bluetooth keys come from, and new ones. The device never sends
+   *  a key, so a new key is shown once, here, and never again. */
+  updateKeys() {
+    const box = this.keys;
+    if (!box || !box.isConnected) return;
+    const k = auth.keys;
+    box.hidden = !auth.available || (k.api === 'off' && k.ble === 'off' && !this.keyRows.length);
+    while (box.children.length > 1) box.lastChild.remove();
+    const btn = (label, onclick, cls = 'btn btn-small') => h('button', { class: cls, onclick }, label);
+    const part = (title, words, actions) => h('div', { class: 'key-part' },
+      h('div', { class: 'setting-label' }, title), h('p', {}, words),
+      actions.length ? h('div', { class: 'actions' }, actions) : null);
+    if (k.api !== 'off') {
+      const words = { none: 'Not set yet. Home Assistant gives the feeder one when you adopt it, or make one here.',
+                      build: 'From your YAML (api: encryption: key). Change it there.',
+                      device: 'Saved on the feeder. Home Assistant uses it to connect.' }[k.api] || k.api;
+      const actions = k.api === 'build' ? [] : [
+        btn('Generate', () => this.newKey('api', true)), btn('Enter a key', () => this.newKey('api', false)),
+        k.api === 'device' ? btn('Clear', async () => {
+          if (!await confirmDialog({ title: 'Clear the Home Assistant key?', danger: true, ok: 'Clear',
+                                     body: 'Home Assistant disconnects and must adopt the feeder again, which sets a ' +
+                                           'new key. Until then, whoever reaches the feeder first can set one.' })) return;
+          auth.setKey('api', null).then(() => toast('Home Assistant key cleared', 'ok'), toastError);
+        }, 'btn btn-small btn-danger') : null].filter(Boolean);
+      box.appendChild(part('Home Assistant key', words, actions));
+    }
+    if (k.ble !== 'off') {
+      const words = { none: 'Not set: every Bluetooth client is refused until you make one.',
+                      build: 'From your YAML (ble_key). A key made here replaces it.',
+                      device: 'Saved on the feeder.' }[k.ble] || k.ble;
+      box.appendChild(part('Bluetooth key', words, [btn('Generate', () => this.newKey('ble', true)),
+                                                    btn('Enter a key', () => this.newKey('ble', false))]));
+    }
+    for (const r of this.keyRows) box.appendChild(r);
+    box.appendChild(h('p', { class: 'hint' }, 'A key is shown once, when it is made: copy it then. ' +
+      (auth.set ? 'It travels to the feeder masked by the settings password.'
+                : 'With no settings password it crosses your network as it is: set a password first if you do not ' +
+                  'trust everyone on it.')));
+  },
+
+  /** Generate (in this browser) or enter a key, save it on the feeder, and show it once. */
+  async newKey(kind, generate) {
+    const name = kind === 'api' ? 'Home Assistant' : 'Bluetooth';
+    const who = kind === 'api' ? 'Home Assistant disconnects and needs the new key (Settings, Devices, ESPHome).'
+                               : 'Bluetooth clients need the new key; a connected one must authenticate again.';
+    let bytes;
+    if (generate) {
+      if (!await confirmDialog({ title: `Make a new ${name} key?`, ok: 'Make key', body: `It replaces the current one. ${who}` })) return;
+      bytes = crypto.getRandomValues(new Uint8Array(32));
+    } else {
+      const input = h('input', { class: 'input', type: 'text', autocomplete: 'off', spellcheck: 'false' });
+      if (!await formDialog({ title: `Enter a ${name} key`, ok: 'Save',
+                              body: field('Key', input, `32 bytes in base64, as made by openssl rand -base64 32. ${who}`),
+                              validate: () => (keyFromBase64(input.value) ? '' : 'Not a 32-byte base64 key') })) return;
+      bytes = keyFromBase64(input.value);
+    }
+    try {
+      await auth.setKey(kind, bytes);
+    } catch (e) {
+      toastError(e);
+      return;
+    }
+    if (!generate) {
+      toast(`${name} key saved`, 'ok');
+      return;
+    }
+    const text = keyToBase64(bytes);
+    const out = h('input', { class: 'input mono', type: 'text', readonly: true, value: text });
+    const copy = h('button', { class: 'btn btn-small', type: 'button', onclick: () => {
+      out.select();
+      (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error()))
+        .then(() => toast('Copied', 'ok'), () => { document.execCommand('copy'); toast('Copied', 'ok'); });
+    } }, 'Copy');
+    await formDialog({ title: `New ${name} key`, ok: 'Done', cancel: 'Close',
+                       body: [field('Key', out, 'Saved on the feeder. This is the only time it is shown.'),
+                              h('div', { class: 'actions' }, copy)] });
   },
 
   async unlockDialog() {
@@ -2422,6 +2547,14 @@ PAGES.bluetooth = {
     p('Service', () => this.info().service || '');
     p('Time from Bluetooth', () => ({ fallback_only: 'Only when network time is stale', always: 'Always accepted',
                                       off: 'Refused' }[this.info().time] || this.info().time || ''));
+    p('Key', () => ({ none: 'None set: every client is refused', build: 'From the YAML',
+                      device: 'Saved on the feeder' }[this.info().key] || '—'));
+    p('Clients may change', () => {
+      const i = this.info();
+      if (i.guard === undefined) return '—';
+      const may = [i.guard === '1' ? 'safety limits' : '', i.calibration === '1' ? 'calibration' : ''].filter(Boolean);
+      return `Feeding and the schedule${may.length ? ', ' + may.join(' and ') : ''} (Configuration, Keys)`;
+    });
 
     this.activityBox = h('div', { class: 'activity', role: 'log' });
     const activity = card('Activity',

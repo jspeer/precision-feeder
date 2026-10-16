@@ -1,4 +1,5 @@
-// Precision Feeder core: the settings password (DESIGN.md section 10.1).
+// Precision Feeder core: the settings password (DESIGN.md section 10.1), the BLE key saved on the device and the
+// two BLE permissions (section 10).
 //
 // The device stores a salt and the key the browser derived from the password (PBKDF2-HMAC-SHA256), never the
 // password. A protected request carries HMAC-SHA256(key, nonce || message) for a one-time challenge, so neither the
@@ -99,6 +100,63 @@ void FeederCore::clear_password(const char *why) {
   this->auth_wait_ms_ = 0;
   this->hal_save_device(this->dev_);
   this->log_(LogLevel::kWarn, "Settings password cleared (%s)", why);
+}
+
+// ---- BLE key and permissions ----
+
+static bool all_zero(const uint8_t *key) {
+  uint8_t any = 0;
+  for (unsigned i = 0; i < DEVICE_KEY_SIZE; i++)
+    any |= key[i];
+  return any == 0;
+}
+
+void FeederCore::set_build_ble_key(const uint8_t key[DEVICE_KEY_SIZE]) {
+  std::memcpy(this->build_ble_key_, key, DEVICE_KEY_SIZE);
+  this->ble_built_ = true;
+  this->ble_key_serial_++;
+}
+
+KeySource FeederCore::ble_key_source() const {
+  if (!all_zero(this->dev_.ble_key))
+    return KeySource::DEVICE;
+  return all_zero(this->build_ble_key_) ? KeySource::NONE : KeySource::BUILD;
+}
+
+bool FeederCore::ble_key(uint8_t out[DEVICE_KEY_SIZE]) const {
+  switch (this->ble_key_source()) {
+    case KeySource::DEVICE:
+      std::memcpy(out, this->dev_.ble_key, DEVICE_KEY_SIZE);
+      return true;
+    case KeySource::BUILD:
+      std::memcpy(out, this->build_ble_key_, DEVICE_KEY_SIZE);
+      return true;
+    default:
+      std::memset(out, 0, DEVICE_KEY_SIZE);
+      return false;
+  }
+}
+
+Result FeederCore::set_ble_key(const uint8_t key[DEVICE_KEY_SIZE]) {
+  if (!this->ble_built_)
+    return Result::UNSUPPORTED;
+  if (all_zero(key))
+    return Result::INVALID_ARG;
+  if (std::memcmp(key, this->dev_.ble_key, DEVICE_KEY_SIZE) == 0)
+    return Result::OK;
+  std::memcpy(this->dev_.ble_key, key, DEVICE_KEY_SIZE);
+  this->ble_key_serial_++;
+  this->hal_save_device(this->dev_);
+  this->log_(LogLevel::kWarn, "BLE key changed on the device: clients need the new key");
+  return Result::OK;
+}
+
+void FeederCore::set_device_flag_(uint8_t flag, bool on, const char *what) {
+  if (((this->dev_.flags & flag) != 0) == on)
+    return;
+  this->dev_.flags = static_cast<uint8_t>(on ? this->dev_.flags | flag : this->dev_.flags & ~flag);
+  this->hal_save_device(this->dev_);
+  this->log_(LogLevel::kInfo, "BLE may %s change the %s", on ? "now" : "no longer", what);
 }
 
 void FeederCore::boot_button(bool pressed) {

@@ -125,15 +125,47 @@ precision_feeder_ble:
   event_log: gatt_event_log
   auth: gatt_auth
   # The shared secret for protocol 2 authentication. Give the same key to your PLC bridge or client.
+  # Optional (firmware 2.0.0): a key generated or entered in the web app (Configuration, Keys) is saved on the
+  # feeder and wins over this one. Without either, every client is refused until a key is set.
   key: !secret ble_key
   time_policy: ${ble_time_policy}
   network_time_stale_after: ${ble_network_time_stale_after}
+
+# What an authenticated BLE client may change (firmware 2.0.0). Both on by default: the BLE key is an admin
+# credential. Off, those writes are answered NOT_AUTHORIZED with detail 7 (docs/PROTOCOL.md); feeding, the
+# schedule, the clock, hold and Declare Tray Position are never affected. Saved on the feeder, and protected by
+# the settings password in the web app (web_server.yaml).
+#   BLE Can Change Guard Limits   Config keys 1, 2, 5 and 6: minimum gap, gap between portions, daily cap,
+#                                 portions per command
+#   BLE Can Change Calibration    offsets, servo pulse range (Config keys 10, 11), CALIBRATE, JOG, SAVE_CALIBRATION
+switch:
+  - platform: template
+    id: pf_ble_guard
+    name: "BLE Can Change Guard Limits"
+    icon: mdi:shield-lock-outline
+    entity_category: config
+    lambda: return id(feeder).ble_may_change_guard();
+    turn_on_action:
+      - lambda: id(feeder).set_ble_may_change_guard(true);
+    turn_off_action:
+      - lambda: id(feeder).set_ble_may_change_guard(false);
+  - platform: template
+    id: pf_ble_calibration
+    name: "BLE Can Change Calibration"
+    icon: mdi:tune-variant
+    entity_category: config
+    lambda: return id(feeder).ble_may_change_calibration();
+    turn_on_action:
+      - lambda: id(feeder).set_ble_may_change_calibration(true);
+    turn_off_action:
+      - lambda: id(feeder).set_ble_may_change_calibration(false);
 
 # Diagnostics for the web app's Bluetooth page (and Home Assistant, where they start disabled). Nothing here is
 # secret: no key, nonce or tag, and only the last two bytes of the client's address. The activity log itself is
 # served by the web server at /feeder/ble (only when the web_server package is included).
 text_sensor:
-  # Static facts: service UUID, protocol version, authentication, time policy.
+  # Service UUID, protocol version, authentication, time policy, where the key comes from (none, build or device;
+  # never the key itself) and the two permissions above.
   - platform: template
     id: pf_ble_info
     name: "BLE Info"

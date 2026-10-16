@@ -1298,6 +1298,41 @@ static void test_settings_password() {
   }
 }
 
+static void test_ble_settings() {
+  current = "BLE key and permissions";
+  Flash flash;
+  uint8_t key[DEVICE_KEY_SIZE], out[DEVICE_KEY_SIZE];
+  for (unsigned i = 0; i < DEVICE_KEY_SIZE; i++)
+    key[i] = static_cast<uint8_t>(i + 1);
+  {
+    auto f = boot(flash, T0);
+    CHECK(!f->ble_built() && f->ble_key_source() == KeySource::NONE && !f->ble_key(out), "no BLE, no key");
+    CHECK(f->ble_may_change_guard() && f->ble_may_change_calibration(), "both permissions on by default");
+    const uint8_t none[DEVICE_KEY_SIZE] = {};
+    f->set_build_ble_key(none);
+    CHECK(f->ble_built() && f->ble_key_source() == KeySource::NONE, "BLE built with no key");
+    const uint32_t serial = f->ble_key_serial();
+    CHECK(f->set_ble_key(key) == Result::OK && flash.have_device && flash.device_saves == 1, "saved at once");
+    CHECK(f->ble_key_serial() != serial && f->ble_key(out) && std::memcmp(out, key, sizeof(key)) == 0, "in use");
+    CHECK(f->set_ble_key(key) == Result::OK && flash.device_saves == 1, "the same key is not rewritten");
+    f->set_ble_may_change_guard(false);
+    CHECK(!f->ble_may_change_guard() && f->ble_may_change_calibration() && flash.device_saves == 2, "guard off, saved");
+    f->set_ble_may_change_guard(false);
+    CHECK(flash.device_saves == 2, "no change, no write");
+    f->set_ble_may_change_calibration(false);
+    CHECK(!f->ble_may_change_calibration() && flash.device_saves == 3, "calibration off, saved");
+  }
+  {
+    auto f = boot(flash, T0 + 60);
+    CHECK(!f->ble_may_change_guard() && !f->ble_may_change_calibration(), "permissions kept across a restart");
+    CHECK(f->ble_key_source() == KeySource::DEVICE && f->ble_key(out) && std::memcmp(out, key, sizeof(key)) == 0,
+          "key kept across a restart");
+    f->set_ble_may_change_guard(true);
+    CHECK(f->ble_may_change_guard(), "back on");
+    CHECK(f->device().flags == DEVICE_BLE_GUARD, "only the guard bit set");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -1329,6 +1364,7 @@ int main() {
   test_device_record();
   test_pins();
   test_settings_password();
+  test_ble_settings();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

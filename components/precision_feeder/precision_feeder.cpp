@@ -9,7 +9,12 @@
 #ifdef USE_WEBSERVER
 #include "esphome/components/web_server_base/web_server_base.h"
 #endif
+#ifdef USE_API
+#include "esphome/components/api/api_server.h"
+#endif
 
+#include <array>
+#include <cstdio>
 #include <cstring>
 
 #include <esp_random.h>
@@ -51,6 +56,57 @@ void PrecisionFeeder::setup() {
   }
   this->core_start(have_settings ? &settings : nullptr, have_calibration ? &calibration : nullptr,
                    have_state ? &state : nullptr, have_v3 ? &v3 : nullptr, have_device ? &device : nullptr);
+#if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
+  if (this->ota_ != nullptr) {
+    uint8_t random[16];
+    char password[2 * sizeof(random) + 1];
+    esp_fill_random(random, sizeof(random));
+    for (size_t i = 0; i < sizeof(random); i++)
+      std::snprintf(password + 2 * i, 3, "%02x", random[i]);
+    this->ota_->set_auth_password(password);
+    std::memset(password, 0, sizeof(password));
+  }
+#endif
+  this->update_api_key_state_();
+}
+
+bool PrecisionFeeder::api_key_settable() {
+#if defined(USE_API_NOISE) && !defined(USE_API_NOISE_PSK_FROM_YAML)
+  return true;
+#else
+  return false;
+#endif
+}
+
+void PrecisionFeeder::update_api_key_state_() {
+  ApiKey state = ApiKey::OFF;
+#if defined(USE_API_NOISE) && defined(USE_API_NOISE_PSK_FROM_YAML)
+  state = ApiKey::BUILD;
+#elif defined(USE_API_NOISE)
+  if (api::global_api_server != nullptr)
+    state = api::global_api_server->get_noise_ctx().has_psk() ? ApiKey::DEVICE : ApiKey::NONE;
+#endif
+  this->api_key_state_.store(state);
+}
+
+bool PrecisionFeeder::set_api_key(const uint8_t *key) {
+#if defined(USE_API_NOISE) && !defined(USE_API_NOISE_PSK_FROM_YAML)
+  if (api::global_api_server == nullptr)
+    return false;
+  if (key == nullptr) {
+    ESP_LOGW(TAG, "API key cleared from the web app: Home Assistant must provision a new one");
+    return api::global_api_server->clear_noise_psk(true);
+  }
+  noise::psk_t psk;
+  std::memcpy(psk.data(), key, psk.size());
+  ESP_LOGW(TAG, "API key set from the web app: Home Assistant needs the new key");
+  const bool ok = api::global_api_server->save_noise_psk(psk, true);
+  psk.fill(0);
+  return ok;
+#else
+  (void) key;
+  return false;
+#endif
 }
 
 void PrecisionFeeder::apply_pins() {
@@ -256,7 +312,8 @@ class SettingsGuard : public AsyncWebHandler {
       return url == "/feeder/auth";
     if (request->method() != HTTP_POST)
       return false;
-    if (url == "/feeder/auth/password" || url == "/feeder/auth/check")
+    if (url == "/feeder/auth/password" || url == "/feeder/auth/check" || url == "/feeder/keys/api" ||
+        url == "/feeder/keys/ble")
       return true;
     // POST /<domain>/<name>/<action>: protected when "<domain>/<name>" is on the list.
     const size_t action = url.rfind('/');
@@ -272,6 +329,10 @@ class SettingsGuard : public AsyncWebHandler {
     }
     if (url == "/feeder/auth/password") {
       this->change_password_(request);
+      return;
+    }
+    if (url == "/feeder/keys/api" || url == "/feeder/keys/ble") {
+      this->set_key_(request, url);
       return;
     }
     if (url == "/feeder/auth/check") {  // "is this the password?", for the app's Unlock
@@ -295,12 +356,18 @@ class SettingsGuard : public AsyncWebHandler {
     uint8_t nonce[AUTH_NONCE_SIZE];
     Device d;
     uint32_t wait;
+    KeySource ble = KeySource::NONE;
+    bool ble_built;
     {
       LockGuard guard(this->feeder_->password_lock());
       this->feeder_->password_challenge(nonce);
       d = this->feeder_->device();
       wait = this->feeder_->password_wait_ms();
+      ble_built = this->feeder_->ble_built();
+      if (ble_built)
+        ble = this->feeder_->ble_key_source();
     }
+    std::memset(d.ble_key, 0, sizeof(d.ble_key));  // never sent; only where the key comes from
     char nonce_hex[2 * AUTH_NONCE_SIZE + 1], salt_hex[2 * PASSWORD_SALT_SIZE + 1];
     to_hex(nonce, AUTH_NONCE_SIZE, nonce_hex);
     to_hex(d.password_salt, PASSWORD_SALT_SIZE, salt_hex);
@@ -308,7 +375,15 @@ class SettingsGuard : public AsyncWebHandler {
     std::snprintf(head, sizeof(head), "{\"scheme\":%u,\"iterations\":%u,\"salt\":\"%s\",\"nonce\":\"%s\",\"wait\":%u,",
                   static_cast<unsigned>(d.password_scheme), static_cast<unsigned>(PASSWORD_ITERATIONS), salt_hex,
                   nonce_hex, static_cast<unsigned>(wait));
+    static const char *const SOURCES[] = {"none", "build", "device", "off"};
     std::string body = head;
+    // Where each key comes from: none (settable, not set yet), build (the YAML's), device (saved here) or off (this
+    // build cannot have one). Never the keys themselves.
+    body += "\"keys\":{\"api\":\"";
+    body += SOURCES[static_cast<uint8_t>(this->feeder_->api_key_state())];
+    body += "\",\"ble\":\"";
+    body += ble_built ? SOURCES[static_cast<uint8_t>(ble)] : "off";
+    body += "\"},";
     body += "\"protected\":[";
     bool first = true;
     for (const auto &name : this->feeder_->protected_entities()) {
@@ -398,6 +473,65 @@ class SettingsGuard : public AsyncWebHandler {
       }
       std::memset(p, 0, sizeof(*p));
       delete p;
+    });
+    request->send(200, "application/json", "{}");
+  }
+
+  /// POST /feeder/keys/api?key=<hex> or /feeder/keys/ble?key=<hex>: save a 32-byte key, masked like a new
+  /// password key (password_unmask: plain when no settings password is set); /feeder/keys/api with no key clears
+  /// the API key. Signed over the path and the hex. The key is never sent back.
+  void set_key_(AsyncWebServerRequest *request, const std::string &url) {
+    const bool api = url == "/feeder/keys/api";
+    const std::string key_hex = request->arg("key");
+    if (!this->authorised_(request, url + "\n" + key_hex))
+      return;
+    bool possible;
+    {
+      LockGuard guard(this->feeder_->password_lock());
+      possible = api ? PrecisionFeeder::api_key_settable() : this->feeder_->ble_built();
+    }
+    if (!possible) {  // a YAML key (change it there), or no API encryption / no BLE in this build
+      request->send(409, "application/json", "{\"error\":\"build\"}");
+      return;
+    }
+    PrecisionFeeder *feeder = this->feeder_;
+    if (key_hex.empty()) {
+      if (!api) {
+        request->send(400, "application/json", "{\"error\":\"format\"}");
+        return;
+      }
+      feeder->run_on_main_loop([feeder]() { feeder->set_api_key(nullptr); });
+      request->send(200, "application/json", "{}");
+      return;
+    }
+    uint8_t masked[DEVICE_KEY_SIZE], nonce[AUTH_NONCE_SIZE]{};
+    const auto header = request->get_header(AUTH_HEADER);
+    if (header.has_value())
+      from_hex(*header, 0, nonce, AUTH_NONCE_SIZE);  // checked above when a password is set; unused otherwise
+    static_assert(DEVICE_KEY_SIZE == PASSWORD_HASH_SIZE, "keys are masked like a password key");
+    auto *key = new std::array<uint8_t, DEVICE_KEY_SIZE>{};
+    bool ok = key_hex.size() == 2 * DEVICE_KEY_SIZE && from_hex(key_hex, 0, masked, DEVICE_KEY_SIZE);
+    if (ok) {
+      LockGuard guard(this->feeder_->password_lock());
+      this->feeder_->password_unmask(nonce, masked, key->data());
+    }
+    uint8_t any = 0;
+    for (uint8_t b : *key)
+      any |= b;
+    if (!ok || any == 0) {  // malformed, or the all-zero key that anyone could compute with
+      delete key;
+      request->send(400, "application/json", "{\"error\":\"format\"}");
+      return;
+    }
+    feeder->run_on_main_loop([feeder, key, api]() {
+      if (api) {
+        feeder->set_api_key(key->data());
+      } else {
+        LockGuard guard(feeder->password_lock());
+        feeder->set_ble_key(key->data());
+      }
+      key->fill(0);
+      delete key;
     });
     request->send(200, "application/json", "{}");
   }

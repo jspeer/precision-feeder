@@ -65,9 +65,11 @@ not know, do not send commands.**
 
 ## Authentication
 
-The feeder and the client share a secret **key**: 32 random bytes, configured on
-the feeder as `ble_key` in its `secrets.yaml` (base64, as made by
-`openssl rand -base64 32`). The same base64 text goes into the client.
+The feeder and the client share a secret **key**: 32 random bytes, base64 as made by
+`openssl rand -base64 32`. The same base64 text goes into the client. On the feeder
+it is either `ble_key` in its `secrets.yaml`, or (firmware 2.0.0) a key generated or
+entered in its web app and saved on the device, which wins. With no key at all, AUTH
+is always refused with detail 6; an all-zero key is never accepted.
 
 ### 1. Read the challenge
 
@@ -139,6 +141,27 @@ as stale. Match answers on `seq` and opcode.
 | 3 | AUTH refused: wrong proof (wrong key, or an old nonce). The nonce has changed |
 | 4 | AUTH refused: within a second of a failed AUTH |
 | 5 | too short to carry a sequence number and tag |
+| 6 | AUTH refused: no key is set on the feeder (firmware 2.0.0) |
+| 7 | authenticated, but the feeder's owner has turned this setting off for BLE (firmware 2.0.0; see below) |
+
+**Clients must accept detail values they do not know** (show the number, treat the
+write as refused). New values may be added within protocol 2; 6 and 7 were.
+
+### BLE permissions (firmware 2.0.0)
+
+Two settings on the feeder, both on by default, decide what an authenticated client
+may change. Turned off (in the feeder's web app or Home Assistant), these writes are
+answered NOT_AUTHORIZED with detail 7. They still use up their sequence number, and
+an exact retry gets the same answer from the cache.
+
+| Setting | Refused when off |
+|---|---|
+| BLE can change guard limits | Config writes to keys 1, 2, 5 and 6 |
+| BLE can change calibration | Calibration writes; Config writes to keys 10 and 11; CALIBRATE, JOG, SAVE_CALIBRATION |
+
+Queries (reading a Config or Calibration record), feeding, the schedule, the clock,
+hold and SET_POSITION are never refused by them. Info and the protocol version do
+not change.
 
 ### What this protects, and what it does not
 
@@ -157,8 +180,9 @@ as stale. Match answers on `seq` and opcode.
   client that must trust what it reads should pair, and treat the feeder's
   status as informational.
 - **Keep the key secret.** Anyone with it has full control (still within the feed
-  guard). To change it, generate a new one, update `secrets.yaml`, reflash, and
-  update every client.
+  guard, and the two permissions above). To change it, generate a new one in the
+  feeder's web app (firmware 2.0.0; a connected client must authenticate again), or
+  update `secrets.yaml` and reflash, then update every client.
 
 ## Command (write) and Response (notify)
 

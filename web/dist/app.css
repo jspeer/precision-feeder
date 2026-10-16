@@ -288,6 +288,9 @@ a { color: var(--accent); }
 .today-held .today-icon, .today-held .today-status { color: var(--info); }
 .tag { margin-left: 8px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.key-part { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.key-part p { margin: 4px 0 8px; }
+.input.mono { font-family: var(--mono); font-size: 13px; width: 100%; }
 .btn[hidden] { display: none; }
 .choices { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; color: var(--text); }
 .choice { display: flex; gap: 10px; align-items: center; padding: 6px 4px; cursor: pointer; }

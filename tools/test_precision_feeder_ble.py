@@ -85,6 +85,11 @@ class GoldenVectors(unittest.TestCase):
         self.assertTrue(r.ok)
         self.assertEqual(pf.parse_response(b(1, 6, 12, 0)).result_text, "clock from BLE ignored (network time is fresh)")
         self.assertEqual(pf.parse_response(b(1, 6, 99, 0)).result_text, "unknown (99)")
+        # Details 6 and 7 (firmware 2.0.0, still protocol 2), and any later value, are shown, never an error.
+        self.assertIn("no BLE key", pf.parse_response(b(1, 0x0D, 16, 6)).detail_text)
+        self.assertIn("turned off for BLE", pf.parse_response(b(2, 0x81, 16, 7)).detail_text)
+        self.assertEqual(pf.parse_response(b(3, 1, 16, 42)).detail_text, "unknown detail 42")
+        self.assertEqual(pf.parse_response(b(3, 1, 0, 1)).detail_text, "detail 1")
 
     def test_config_and_calibration(self):
         self.assertEqual(pf.config_set(pf.CONFIG_KEYS["daily_cap"], 3), b(0x05, 0x03, 0x00, 0x00, 0x00))

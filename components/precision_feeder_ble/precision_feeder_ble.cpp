@@ -44,8 +44,6 @@ class BleActivityHandler : public AsyncWebHandler {
 
 void PrecisionFeederBle::setup() {
   this->engine_ = new BleEngine(*this->feeder_, *this);  // lives as long as the device runs
-  this->engine_->set_key(this->key_.data());
-  this->key_.fill(0);  // the engine keeps its own copy
   this->engine_->set_time_policy(this->time_policy_);
   this->engine_->set_network_time_stale_ms(this->network_stale_ms_);
   this->engine_->start();
@@ -106,7 +104,11 @@ void PrecisionFeederBle::dump_config() {
     policy = "off";
   ESP_LOGCONFIG(TAG, "Precision Feeder BLE:");
   ESP_LOGCONFIG(TAG, "  Protocol version: %u", proto::PROTOCOL_VERSION);
-  ESP_LOGCONFIG(TAG, "  Authentication: required (shared key set)");
+  static const char *const KEYS[] = {"none set: every AUTH is refused until one is set in the web app",
+                                     "from the build (YAML)", "saved on the device"};
+  ESP_LOGCONFIG(TAG, "  Authentication: required; key: %s", KEYS[static_cast<uint8_t>(this->feeder_->ble_key_source())]);
+  ESP_LOGCONFIG(TAG, "  BLE may change: guard limits %s, calibration %s", YESNO(this->feeder_->ble_may_change_guard()),
+                YESNO(this->feeder_->ble_may_change_calibration()));
   ESP_LOGCONFIG(TAG, "  Time policy: %s (network time counts as fresh for %u h)", policy,
                 (unsigned) (this->network_stale_ms_ / 3600000u));
 }

@@ -49,7 +49,8 @@ struct BleStats {
   uint32_t notify_bytes{0};
   uint32_t auth_ok{0};
   uint32_t auth_failures{0};
-  uint32_t refused{0};  // writes refused as not authorized: no AUTH yet, bad tag, stale sequence number, too short
+  uint32_t refused{0};  // writes refused as not authorized: no AUTH yet, bad tag, stale sequence number, too short,
+                        // or a setting turned off for BLE
   uint32_t invalid{0};  // writes answered INVALID_ARG or UNSUPPORTED
 };
 
@@ -74,9 +75,9 @@ class BleEngine {
   static constexpr uint8_t ACTIVITY_SIZE = 32;
   static constexpr uint16_t DEFAULT_MTU = 23;
 
+  /// The key comes from the feeder (FeederCore::ble_key(): saved on the device, or the build's), read at each AUTH.
   BleEngine(FeederCore &feeder, BleTransport &transport) : feeder_(feeder), transport_(transport) {}
 
-  void set_key(const uint8_t key[crypto::KEY_SIZE]) { this->session_.set_key(key); }
   void set_time_policy(proto::TimePolicy policy) { this->time_policy_ = policy; }
   void set_network_time_stale_ms(uint32_t ms) { this->network_stale_ms_ = ms; }
   proto::TimePolicy time_policy() const { return this->time_policy_; }
@@ -112,7 +113,8 @@ class BleEngine {
   uint8_t activity_count() const { return this->activity_count_; }
   /// Id of the newest activity entry (0 if none); changes whenever an entry is added.
   uint32_t activity_last_id() const { return this->next_activity_id_ - 1; }
-  /// Static facts for diagnostics: "protocol=2;auth=hmac-sha256;time=fallback_only;stale_h=24".
+  /// Facts for diagnostics: "protocol=2;auth=hmac-sha256;time=fallback_only;stale_h=24;key=device;guard=1;
+  /// calibration=1" (key: none, build or device; guard and calibration: the two BLE permissions). Never the key.
   std::string info_text() const;
   /// The session and the counters in one line, "connected=1;auth=1;peer=4A:21;mtu=23;since=12;last=40;conns=1;..."
   /// (times in seconds since boot; only the last two bytes of the address). Under 255 characters.
@@ -162,6 +164,7 @@ class BleEngine {
   uint32_t network_stale_ms_{24u * 3600u * 1000u};
 
   proto::Session session_;
+  uint32_t key_serial_{0};  // FeederCore::ble_key_serial() when the engine last looked
   proto::ReplayCache replay_;
   bool connected_{false};
   uint8_t last_status_[proto::STATUS_SIZE]{};

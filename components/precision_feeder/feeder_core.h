@@ -94,6 +94,9 @@ enum class AuthResult : uint8_t {
   NO_CHALLENGE = 3,  // no challenge outstanding, or it expired or was for another nonce
 };
 
+/// Where a key in use comes from: none set, the build (YAML), or saved on the device.
+enum class KeySource : uint8_t { NONE = 0, BUILD = 1, DEVICE = 2 };
+
 // Pins (firmware 2.0.0, DESIGN.md section 2.1): the ESP32-S3 GPIOs the servo, button and LED may use. Refused: not on
 // the chip (22 to 25), the SPI flash and PSRAM (26 to 32), USB (19, 20) and the strapping pins (0, 3, 45, 46). Warned
 // about but accepted: the octal flash or PSRAM of some modules (33 to 37; for example N8R8) and UART0 (43, 44: the boot
@@ -488,6 +491,29 @@ class FeederCore {
   /// The BOOT button (GPIO0), pressed or released. Held for BOOT_HOLD_MS, it clears the settings password only.
   void boot_button(bool pressed);
 
+  // ---- BLE key and BLE permissions (DESIGN.md section 10) ----
+  // The key a client must prove for AUTH: one saved on the device wins over the build's (the YAML `key:`); with
+  // neither, AUTH is always refused. Like the password calls, the web server's task reaches these through the lock.
+  /// The build's key (all zero: none). Calling this also marks the build as having BLE.
+  void set_build_ble_key(const uint8_t key[DEVICE_KEY_SIZE]);
+  bool ble_built() const { return this->ble_built_; }
+  KeySource ble_key_source() const;
+  /// The key in use; false (and `out` zeroed) when there is none.
+  bool ble_key(uint8_t out[DEVICE_KEY_SIZE]) const;
+  /// Save a key on the device. INVALID_ARG for the all-zero key (anyone could compute with it); UNSUPPORTED in a
+  /// build without BLE. Saved at once; a connected client must authenticate again.
+  Result set_ble_key(const uint8_t key[DEVICE_KEY_SIZE]);
+  /// Changes whenever the key in use changes, so the BLE engine can end a session made with the old one.
+  uint32_t ble_key_serial() const { return this->ble_key_serial_; }
+  /// Whether BLE may change the guard limits (Config keys 1, 2, 5, 6) and the calibration (offsets, pulse range,
+  /// CALIBRATE, JOG, SAVE_CALIBRATION). Both on by default; saved at once.
+  bool ble_may_change_guard() const { return (this->dev_.flags & DEVICE_BLE_GUARD) != 0; }
+  bool ble_may_change_calibration() const { return (this->dev_.flags & DEVICE_BLE_CALIBRATION) != 0; }
+  void set_ble_may_change_guard(bool allowed) { this->set_device_flag_(DEVICE_BLE_GUARD, allowed, "guard limits"); }
+  void set_ble_may_change_calibration(bool allowed) {
+    this->set_device_flag_(DEVICE_BLE_CALIBRATION, allowed, "calibration");
+  }
+
   // ---- feed events ----
   /// Called once for every feed request with its final outcome, accepted or refused.
   void set_feed_listener(std::function<void(const FeedRecord &)> &&listener) { this->feed_listener_ = std::move(listener); }
@@ -601,6 +627,7 @@ class FeederCore {
   void clamp_loaded_();
   void clamp_device_();
   void apply_timezone_();
+  void set_device_flag_(uint8_t flag, bool on, const char *what);
   void timezone_changed_();
   void migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration);
   void save_state_(bool flush);
@@ -732,6 +759,9 @@ class FeederCore {
   uint32_t auth_wait_ms_{0};
   bool boot_pressed_{false};
   bool boot_handled_{false};
+  uint8_t build_ble_key_[DEVICE_KEY_SIZE]{};
+  bool ble_built_{false};
+  uint32_t ble_key_serial_{0};
   uint32_t boot_pressed_ms_{0};  // Home Assistant pushed its timezone over ours: put ours back on the next loop
   uint32_t cfg_dirty_since_{0};
 

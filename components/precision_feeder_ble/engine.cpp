@@ -56,6 +56,7 @@ void BleEngine::start() {
   // Nothing but Info and Auth is readable until a client has authenticated.
   this->clear_reads_();
   this->new_nonce_();
+  this->key_serial_ = this->feeder_.ble_key_serial();
 }
 
 void BleEngine::on_connect() {
@@ -124,9 +125,16 @@ void BleEngine::on_write(uint8_t channel, const uint8_t *data, size_t n) {
 }
 
 void BleEngine::handle_auth_(uint8_t seq, const uint8_t *proof, size_t n) {
-  uint8_t detail = 0;
+  uint8_t detail = proto::AUTH_DETAIL_NO_KEY;
   const bool was_authenticated = this->session_.authenticated();
-  const uint8_t result = this->session_.authenticate(seq, proof, n, this->now_(), detail);
+  uint8_t result = proto::RES_NOT_AUTHORIZED;
+  uint8_t key[crypto::KEY_SIZE];
+  // No key at all: refused outright. Never fall back to an all-zero key, which anyone could compute with.
+  if (this->feeder_.ble_key(key)) {
+    this->session_.set_key(key);
+    result = this->session_.authenticate(seq, proof, n, this->now_(), detail);
+  }
+  std::memset(key, 0, sizeof(key));
   if (result == proto::RES_OK) {
     // The retry cache is NOT cleared here: connect and disconnect already start every session with an empty one,
     // and clearing it on a repeated AUTH would let a retried write execute a second time.
@@ -195,6 +203,7 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
   FeederCore &f = this->feeder_;
   auto res = [](Result r) { return Answer{static_cast<uint8_t>(r), 0}; };
   const Answer invalid{RES_INVALID_ARG, 0};
+  const Answer off{RES_NOT_AUTHORIZED, AUTH_DETAIL_SETTING_OFF};  // "BLE can change calibration" is off
 
   switch (opcode) {
     case OP_FEED: {
@@ -258,12 +267,16 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       return res(f.set_location_e5(get_i32(args), get_i32(args + 4)));
     }
     case OP_CALIBRATE:
+      if (!f.ble_may_change_calibration())
+        return off;
       if (n != 1 || args[0] > 1)
         return invalid;
       f.set_calibration_mode(args[0] == 1);
       return {RES_OK, 0};
 
     case OP_JOG: {
+      if (!f.ble_may_change_calibration())
+        return off;
       if (n != 3)
         return invalid;
       const int16_t delta = get_i16(args + 1);
@@ -272,6 +285,8 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       return res(f.jog_calibration(args[0], delta));
     }
     case OP_SAVE_CALIBRATION:
+      if (!f.ble_may_change_calibration())
+        return off;
       if (n != 0)
         return invalid;
       f.save_calibration();
@@ -477,6 +492,12 @@ BleEngine::Answer BleEngine::handle_config_(const uint8_t *d, size_t n) {
   const uint8_t key = d[0];
   if (n != CONFIG_SET_SIZE || !config_key_known(key))
     return {RES_INVALID_ARG, key};
+  // The owner's two BLE permissions (DESIGN.md section 10). Queries above are never refused.
+  const bool guard = key == CFG_MIN_GAP_S || key == CFG_PORTION_GAP_S || key == CFG_DAILY_CAP ||
+                     key == CFG_MAX_PORTIONS_CMD;
+  const bool pulse = key == CFG_MIN_PULSE_US || key == CFG_MAX_PULSE_US;
+  if ((guard && !f.ble_may_change_guard()) || (pulse && !f.ble_may_change_calibration()))
+    return {RES_NOT_AUTHORIZED, AUTH_DETAIL_SETTING_OFF};
   const int32_t v = get_i32(d + 1);
   Result r = Result::INVALID_ARG;
   switch (key) {  // the setters check the value against the limits in feeder_core.h
@@ -548,6 +569,8 @@ BleEngine::Answer BleEngine::handle_calibration_(const uint8_t *d, size_t n) {
   }
   if (n != CALIBRATION_SET_SIZE)
     return {RES_INVALID_ARG, d[0]};
+  if (!this->feeder_.ble_may_change_calibration())
+    return {RES_NOT_AUTHORIZED, AUTH_DETAIL_SETTING_OFF};
   const uint8_t index = d[0];
   const int16_t tenths = get_i16(d + 1);
   if (index >= POSITIONS || tenths < CAL_OFFSET_LO || tenths > CAL_OFFSET_HI)
@@ -562,6 +585,17 @@ BleEngine::Answer BleEngine::handle_calibration_(const uint8_t *d, size_t n) {
 // ---------------------------------------------------------------------------------------------
 
 void BleEngine::loop(uint32_t now_ms) {
+  if (this->feeder_.ble_key_serial() != this->key_serial_) {
+    // The key changed: a session proven with the old one ends. The client reads the new nonce and authenticates
+    // again, with the new key.
+    this->key_serial_ = this->feeder_.ble_key_serial();
+    if (this->session_.authenticated()) {
+      this->log_(LogLevel::kInfo, "BLE key changed: the client must authenticate again");
+      this->replay_.clear();
+      this->clear_reads_();
+      this->new_nonce_();
+    }
+  }
   if (!this->authorized())
     return;
   if (!this->force_status_ && now_ms - this->last_status_ms_ < STATUS_PERIOD_MS)
@@ -650,6 +684,8 @@ void BleEngine::notify_(uint8_t channel, const uint8_t *data, size_t n) {
 void BleEngine::count_answer_(uint8_t result) {
   if (result == proto::RES_INVALID_ARG || result == proto::RES_UNSUPPORTED)
     this->stats_.invalid++;
+  else if (result == proto::RES_NOT_AUTHORIZED)
+    this->stats_.refused++;  // a setting turned off for BLE
 }
 
 void BleEngine::set_peer(const uint8_t address[6]) {
@@ -731,10 +767,13 @@ std::string BleEngine::info_text() const {
     policy = "always";
   else if (this->time_policy_ == proto::TimePolicy::OFF)
     policy = "off";
-  char buf[96];
-  std::snprintf(buf, sizeof(buf), "protocol=%u;auth=hmac-sha256;time=%s;stale_h=%u",
+  static const char *const KEYS[] = {"none", "build", "device"};
+  char buf[128];
+  std::snprintf(buf, sizeof(buf), "protocol=%u;auth=hmac-sha256;time=%s;stale_h=%u;key=%s;guard=%d;calibration=%d",
                 static_cast<unsigned>(proto::PROTOCOL_VERSION), policy,
-                static_cast<unsigned>(this->network_stale_ms_ / 3600000u));
+                static_cast<unsigned>(this->network_stale_ms_ / 3600000u),
+                KEYS[static_cast<uint8_t>(this->feeder_.ble_key_source())], this->feeder_.ble_may_change_guard() ? 1 : 0,
+                this->feeder_.ble_may_change_calibration() ? 1 : 0);
   return buf;
 }
 

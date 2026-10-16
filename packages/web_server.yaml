@@ -39,7 +39,8 @@ web_server:
 precision_feeder:
   # Changes through the web server that need the settings password, when one is set. "<domain>/<entity name>";
   # tests/test_consistency.py checks each one exists. The guard limits, the calibration (not Declare Tray
-  # Position, which is everyday recovery) and the pins (hardware.yaml, button.yaml, status_led.yaml).
+  # Position, which is everyday recovery), the pins (hardware.yaml, button.yaml, status_led.yaml) and the BLE
+  # permissions (ble_gatt.yaml). The API and BLE keys are set through /feeder/keys/..., always signed.
   protected_entities:
     - number/Minimum Gap Between Feeds
     - number/Gap Between Portions
@@ -55,6 +56,8 @@ precision_feeder:
     - select/Servo Pin
     - select/Button Pin
     - select/LED Pin
+    - switch/BLE Can Change Guard Limits
+    - switch/BLE Can Change Calibration
 
 binary_sensor:
   # The BOOT button, read once the feeder is running: hold it for 10 seconds to clear the settings password.

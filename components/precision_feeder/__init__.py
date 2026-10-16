@@ -9,9 +9,11 @@ import re
 
 import esphome.codegen as cg
 from esphome.components import output, time as time_
+from esphome.components.esphome.ota import ESPHomeOTAComponent
 from esphome.components.esp32.gpio import ESP32InternalGPIOPin
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_OUTPUT, CONF_TIME_ID
+from esphome.const import CONF_ENCRYPTION, CONF_ID, CONF_KEY, CONF_OUTPUT, CONF_PASSWORD, CONF_TIME_ID
+import esphome.final_validate as fv
 
 CODEOWNERS = []
 DEPENDENCIES = []
@@ -37,6 +39,7 @@ CONF_STATUS_LED_ID = "status_led_id"
 CONF_STATUS_LED_OUTPUT_ID = "status_led_output_id"
 CONF_STATUS_LED_PIN = "status_led_pin"
 CONF_PIN_LOADER_ID = "pin_loader_id"
+CONF_OTA_ID = "ota_id"
 
 WebServer = cg.esphome_ns.namespace("web_server").class_("WebServer")
 
@@ -103,6 +106,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Inclusive(CONF_STATUS_LED_ID, "status_led"): cv.use_id(cg.Component),
         cv.Inclusive(CONF_STATUS_LED_OUTPUT_ID, "status_led"): cv.use_id(cg.Component),
         cv.Inclusive(CONF_STATUS_LED_PIN, "status_led"): gpio_number,
+        # An API key provisioned at run time (packages/api_key_on_device.yaml): the ESPHome OTA whose password this
+        # component sets to a random value at every boot, so plaintext OTA is refused (encrypted OTA uses the key).
+        cv.Optional(CONF_OTA_ID): cv.use_id(ESPHomeOTAComponent),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -115,6 +121,25 @@ def _pulse_span(config):
 
 
 CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, _pulse_span)
+
+
+def _final_validate(config):
+    """ota_id only makes sense with a runtime API key and an OTA that compiles its password path."""
+    if CONF_OTA_ID not in config:
+        return config
+    full = fv.full_config.get()
+    api = full.get("api") or {}
+    encryption = api.get(CONF_ENCRYPTION)
+    if encryption is None or CONF_KEY in encryption:
+        raise cv.Invalid(f"{CONF_OTA_ID} needs `api: encryption: {{}}` with no key (the key provisioned at run time)")
+    for ota in full.get("ota") or []:
+        if ota.get(CONF_ID) == config[CONF_OTA_ID]:
+            if ota.get(CONF_PASSWORD) != "" or CONF_ENCRYPTION in ota:
+                raise cv.Invalid(f"{CONF_OTA_ID}: give that ota `password: \"\"` and no `encryption:`")
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate
 
 
 async def to_code(config):
@@ -147,6 +172,9 @@ async def to_code(config):
             light = await cg.get_variable(config[CONF_STATUS_LED_ID])
             led = await cg.get_variable(config[CONF_STATUS_LED_OUTPUT_ID])
             cg.add(var.set_status_led(light, led, config[CONF_STATUS_LED_PIN]))
+    if CONF_OTA_ID in config:
+        cg.add(var.set_ota(await cg.get_variable(config[CONF_OTA_ID])))
+
     loader = cg.new_Pvariable(config[CONF_PIN_LOADER_ID], var)  # does nothing without servo_pin_id
     await cg.register_component(loader, {})
 

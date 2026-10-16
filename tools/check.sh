@@ -2,7 +2,8 @@
 # Run every check this repository has: the host tests (C++ and Python) and, if ESPHome is available, a config
 # validation of each example. The same script runs in CI (.github/workflows/ci.yml) and on your machine.
 #
-#   tools/check.sh              host tests, plus "esphome config" if esphome is on PATH or in .venv
+#   tools/check.sh              host tests, plus "esphome config" if esphome is on PATH or in .venv (both examples,
+#                               and ble.yaml with the api_key_on_device package)
 #   tools/check.sh --compile    also compile the examples (slow; downloads the toolchain the first time)
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
@@ -65,12 +66,17 @@ api_encryption_key: "$(head -c 32 /dev/urandom | base64)"
 ble_key: "$(head -c 32 /dev/urandom | base64)"
 SECRETS
 fi
-for f in basic.yaml ble.yaml; do
+# The BLE example with the API key provisioned on the device (packages/api_key_on_device.yaml), as the prebuilt
+# binaries are built.
+awk '{ print } /^  ble_gatt: !include/ { print "  api_key: !include precision-feeder/packages/api_key_on_device.yaml" }' \
+  examples/ble.yaml > "$CONFIG/ble_key_on_device.yaml"
+grep -q "api_key_on_device" "$CONFIG/ble_key_on_device.yaml"
+for f in basic.yaml ble.yaml ble_key_on_device.yaml; do
   echo "== esphome config examples/$f (as a copy in a config folder)"
   "$ESPHOME" config "$CONFIG/$f" >/dev/null
 done
 if [ "${1:-}" = "--compile" ]; then
-  for f in basic.yaml ble.yaml; do
+  for f in basic.yaml ble.yaml ble_key_on_device.yaml; do
     echo "== esphome compile examples/$f"
     "$ESPHOME" compile "$CONFIG/$f" 2>&1 | tee "$OUT/compile.log" | grep -E "^(RAM|Flash):" || true
     if grep -q "warning:" "$OUT/compile.log"; then

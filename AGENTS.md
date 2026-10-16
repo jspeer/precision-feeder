@@ -55,7 +55,10 @@ substitutions.
   twice.
 - Every BLE write is authenticated (protocol 2: AUTH, then a sequence number and
   tag on each write; docs/PROTOCOL.md). Never add a characteristic or opcode that
-  acts without it, and never let unauthenticated clients read state.
+  acts without it, and never let unauthenticated clients read state. With no key
+  (none in the YAML, none saved on the device) AUTH is refused; never fall back to
+  an all-zero key. The two BLE permissions (guard limits, calibration) refuse with
+  NOT_AUTHORIZED detail 7; feeding is never behind them.
 - Time is never restored from flash. Scheduled feeds wait for a valid clock;
   manual feeds still work.
 - No periodic or automatic reboot. WiFi or API loss must not reboot the device.
@@ -128,7 +131,7 @@ README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
 docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md, WEB_UI.md; plans/ (release plans)
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; feeder_password.cpp
-              settings password; feeder_pins.cpp runtime pins and pin validator; calendar.h and
+              settings password, BLE key and BLE permissions; feeder_pins.cpp runtime pins and pin validator; calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
               and precision_feeder_ble/ (optional BLE protocol: protocol.h and BleEngine in
               engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)

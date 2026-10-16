@@ -157,8 +157,9 @@ test('address kinds', () => {
 
 // ---- the settings password (web/src/auth.js): the same answers as the device (tests/test_core.cpp) ----
 const authSrc = readFileSync(new URL('../web/src/auth.js', import.meta.url), 'utf8');
-const actx = vm.createContext({ TextEncoder });
-vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey };`, actx);
+const actx = vm.createContext({ TextEncoder, atob, btoa });
+vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey,
+                                       keyToBase64, keyFromBase64 };`, actx);
 const A = actx.A;
 
 test('SHA-256 and HMAC-SHA256 (FIPS 180-4, RFC 4231)', () => {
@@ -196,4 +197,14 @@ test('settings password: the device vectors', () => {
   assert.equal(A.toHex(A.maskKey(newKey, key, nonce)), '2e33a9c5afad47f2f7547a0ab2ab9f9ff8f2acea70fc7609bdf3b4903cedea2f');
   assert.equal(A.toHex(A.maskKey(newKey, null, nonce)), A.toHex(newKey), 'no current password: not masked');
   assert.equal(A.authMessage('/switch/Calibration Mode/turn_on'), '/switch/Calibration Mode/turn_on\n');
+});
+
+test('keys: base64 in and out (2.0.0 N4)', () => {
+  const key = Uint8Array.from({ length: 32 }, (_, i) => i);
+  const text = A.keyToBase64(key);
+  assert.equal(text, 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=');
+  assert.equal(A.toHex(A.keyFromBase64(` ${text}\n`)), A.toHex(key), 'spaces around it are ignored');
+  assert.equal(A.keyFromBase64('AAEC'), null, 'too short');
+  assert.equal(A.keyFromBase64('not base64!'), null, 'not base64');
+  assert.equal(A.keyFromBase64(A.keyToBase64(new Uint8Array(32))), null, 'the all-zero key is refused');
 });

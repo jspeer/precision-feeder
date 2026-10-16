@@ -148,7 +148,8 @@ you switch a feature on or off by adding or removing one line.
 | `button` | a physical button: short press feeds (or reloads when empty), long press toggles calibration; Button Pin moves it or turns it off | only if you fitted one |
 | `hardware` | Board (presets: Waveshare ESP32-S3-Zero, ESP32-S3-DevKitC-1) and Servo Pin chosen on the device, Pins In Use, Restart Needed and a Restart button. Pins chosen there win over the YAML and apply at the next restart | **on in both examples**; harmless if you never use it |
 | `time_homeassistant` | Home Assistant as a second clock source | **on in both examples**: keeps the clock right when the internet is down but Home Assistant is up (harmless without Home Assistant). It also uses Home Assistant's timezone unless you pin yours (see the package's comment) |
-| `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](docs/PROTOCOL.md)) | only if a PLC, app or script will talk to it over BLE. Costs about 320 KB of flash and 30 KB of RAM |
+| `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](docs/PROTOCOL.md)), with two switches for what BLE may change (safety limits, calibration) | only if a PLC, app or script will talk to it over BLE. Costs about 320 KB of flash and 30 KB of RAM |
+| `api_key_on_device` | no API key in your YAML: Home Assistant sets one when it adopts the feeder, or you make one in the web app (as the prebuilt binaries will) | optional; add it after `core`. Plaintext OTA is then refused, and OTA works once a key is set |
 | `diagnostics` | free memory and loop time sensors | only for troubleshooting or development |
 | `network_info` | the Wi-Fi network, IP addresses and signal strength | **on in both examples**; leave it out to save a little flash |
 
@@ -208,7 +209,8 @@ packages, where they override what the packages set.
    WiFi name and password, a password for the fallback hotspot, and an API
    key. Make the key with `openssl rand -base64 32`. Keep it: Home Assistant
    asks for it. With the BLE package, also a `ble_key`, made the same way (a
-   different one): your BLE client needs it.
+   different one): your BLE client needs it. (Both can instead be made in the web
+   app, Configuration, Keys: see [Keys](#keys).)
 4. **Your configuration.** Copy `precision-feeder/examples/basic.yaml` (or
    `ble.yaml`) into the config folder as, for example, `precision-feeder.yaml`.
    At least set `timezone` (an IANA name such as `Europe/London`, or a POSIX
@@ -299,7 +301,8 @@ calibration mode; dim cyan hold or reload pause.
 | `ble_name` | `Precision Feeder` | name shown to BLE scanners (BLE package) |
 | `ble_time_policy` | `fallback_only` | whether a clock pushed over BLE is accepted: only when network time is stale (recommended), `always`, or `off` |
 
-The BLE key itself is `ble_key` in `secrets.yaml`, not a substitution.
+The BLE key itself is `ble_key` in `secrets.yaml`, not a substitution. It is optional since 2.0.0: a key made in
+the web app wins over it, and with neither, every BLE client is refused.
 
 **At run time**, from Home Assistant or the web UI (saved on the device): the
 schedule, Active Profile, Hold, Minimum Gap Between Feeds (60 s), Gap Between
@@ -309,10 +312,27 @@ the servo pulse range and calibration offsets, the timezone, and (with the `hard
 pins. Pins change at the next restart; the selects offer only pins the ESP32-S3 can spare (no flash, PSRAM, USB or
 strapping pins), and "none" for a button or LED that is not fitted.
 
+## Keys
+
+The web app's Configuration page has a **Keys** card (firmware 2.0.0):
+
+- **Home Assistant key** (the API encryption key). With the key in your YAML, change it there. With the
+  `api_key_on_device` package the feeder starts with none, and Home Assistant gives it one when you adopt it;
+  you can also generate one, enter your own (to share one key across feeders) or clear it here.
+- **Bluetooth key.** Generate one or enter your own. Saved on the feeder, it wins over `ble_key` in your YAML.
+  With no key at all, every BLE client is refused.
+- **What Bluetooth may change:** the feeding safety limits, and the calibration. Both on by default; turned off,
+  a BLE client is refused those changes (feeding, the schedule and the clock are never affected).
+
+A generated key is shown once, when it is made: copy it then. The feeder never sends a key back. With a settings
+password set, all of this needs it, and a new key travels masked by it; with none, a key set from the app
+crosses your network as it is.
+
 ## The web dashboard password
 
 **Settings password.** Set one in the app (Configuration, "Settings password") and
-changing the feeding safety limits, the calibration or the pins from the app needs it.
+changing the feeding safety limits, the calibration, the pins, the keys or what Bluetooth may change from the app
+needs it.
 Feeding, the schedule, hold, tray reload and location never do, and Home Assistant
 and BLE are not affected. The password itself is never sent: the app proves it
 knows it. Pick a long one, because someone recording your network could try to
@@ -372,7 +392,7 @@ over-fed tank:
 - **Six portions per load.** Schedules that feed several times a day need
   frequent refills; the runway sensors tell you how long a load lasts.
 - **BLE trusts anyone with the key, and does not prove itself to the client.**
-  Writes need the shared `ble_key`; answers are not signed, so a client should
+  Writes need the shared key (`ble_key`, or one made in the web app); answers are not signed, so a client should
   pair (encrypted link) if it must trust what it reads. Leave the BLE package out
   if you do not need it. Details: [PROTOCOL.md](docs/PROTOCOL.md), Authentication.
 - **A few browsers at a time.** The feeder's web server has only a handful of

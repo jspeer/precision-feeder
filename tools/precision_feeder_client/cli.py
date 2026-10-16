@@ -118,7 +118,7 @@ async def _run(args: argparse.Namespace) -> None:
             return
         else:
             raise SystemExit(f"unknown command {cmd}")
-        print(f"{resp.result_text} (detail {resp.detail})")
+        print(f"{resp.result_text} ({resp.detail_text})")
         if not resp.ok:
             raise SystemExit(1)
 

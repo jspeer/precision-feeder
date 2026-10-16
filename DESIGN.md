@@ -423,7 +423,10 @@ never repeats scheduler or guard logic. Each fits Home Assistant's 255-character
   addresses) and `wifi_signal` sensors.
 - With the BLE package, two diagnostic text sensors (disabled by default in Home
   Assistant) and one web endpoint. They never contain the key, a nonce or a tag:
-  - `BLE Info`: `service=<uuid>;protocol=2;auth=hmac-sha256;time=<policy>;stale_h=<h>`.
+  - `BLE Info`: `service=<uuid>;protocol=2;auth=hmac-sha256;time=<policy>;stale_h=<h>;key=<none|build|device>;
+    guard=<0|1>;calibration=<0|1>` (where the key comes from, and the two BLE permissions; firmware 2.0.0).
+  - Two config switches (firmware 2.0.0, section 10): `BLE Can Change Guard Limits` and
+    `BLE Can Change Calibration`.
   - `BLE Session`: `connected;auth;peer;mtu;since;last;conns;wr;wrb;rd;rdb;nt;ntb;authok;
     authfail;refused;invalid`, as `key=value` pairs joined by `;`:
     - connected and authenticated (0 or 1);
@@ -510,11 +513,11 @@ sets at run time, so later milestones fill fields in instead of changing it:
 | Field | Meaning | "Use the build's value" | Milestone |
 |---|---|---|---|
 | `servo_pin`, `button_pin`, `led_pin` | GPIO numbers; `PIN_NONE` for no button or LED (section 2.1) | `PIN_BUILD` | N3 (built) |
-| `flags` | setup done; BLE may change guard limits; BLE may change calibration (both on by default) | | N4, N6 |
+| `flags` | setup done; BLE may change guard limits; BLE may change calibration (both on by default) | | N4 (built: the BLE bits), N6 |
 | `hostname` | device name | empty | N5 |
 | `timezone` | POSIX TZ string | empty | N1 (built) |
 | `ap_password` | fallback access-point password | empty | N5 |
-| `ble_key` | BLE key | all zero (no key set here) | N4 |
+| `ble_key` | BLE key (section 10) | all zero (no key set here) | N4 (built) |
 | `password_scheme`, `password_salt`, `password_hash` | settings password (0: none) | | N2 |
 
 - **The YAML stays in charge until the device is changed.** A fresh record says "use
@@ -524,7 +527,11 @@ sets at run time, so later milestones fill fields in instead of changing it:
 - On load, strings are terminated, unknown flag bits cleared, and a timezone that no
   longer parses is dropped (with a warning) in favour of the build's.
 - The API key and Wi-Fi networks are not in it: ESPHome keeps them in its own
-  preference slots (section 14, item 10).
+  preference slots (section 14, item 10). The API key is set at run time only in a
+  build with `api: encryption: {}` and no `key:` (packages/api_key_on_device.yaml):
+  Home Assistant provisions it on adoption, or the web app generates, takes or
+  clears it (`save_noise_psk()`, `clear_noise_psk()`). A YAML key cannot be changed
+  at run time; ESPHome compiles those calls out.
 
 ## 10. BLE security
 
@@ -539,8 +546,19 @@ static passkey. So link-layer pairing cannot keep a stranger out: they can skip
 pairing and write anyway, and with no screen or keypad pairing is "Just Works".
 
 Hence application-layer authentication, plus link encryption where offered:
-- A shared 32-byte key (`ble_key`, secrets.yaml, required whenever the BLE
-  package is built in).
+- A shared 32-byte key. Since 2.0.0 (N4) a key saved on the device (Device record,
+  set from the web app) wins over the build's (`ble_key`, secrets.yaml, now
+  optional). With neither, AUTH is always refused (NOT_AUTHORIZED detail 6): never
+  an all-zero key, which anyone could compute with (the YAML validator refuses one
+  too). A new key ends an authenticated session at once (new nonce); the client
+  authenticates again with the new key.
+- Two permissions, saved on the device and both on by default (the BLE key is an
+  admin credential): "BLE can change guard limits" (Config keys 1, 2, 5, 6) and "BLE
+  can change calibration" (Calibration writes, Config keys 10 and 11, CALIBRATE,
+  JOG, SAVE_CALIBRATION). Off, those writes are answered NOT_AUTHORIZED with detail 7
+  (still counted for the sequence number and the retry cache). Queries, feeding, the
+  schedule, the clock, hold and SET_POSITION are never refused by them. They are
+  switches (packages/ble_gatt.yaml) protected by the settings password (10.1).
 - Per connection: a random 16-byte nonce (hardware RNG) readable from a new Auth
   characteristic; the client proves the key with AUTH (HMAC-SHA256 over the
   nonce); both derive a session key.
@@ -564,15 +582,17 @@ shared with the Python client).
 
 ### 10.1 Settings password (firmware 2.0.0)
 
-Protects the guard limits and the calibration from changes through the web server.
-None by default. Home Assistant (API key) and BLE (BLE key) are not affected: they
-are already authenticated (and BLE's access gets its own toggles in N4).
+Protects the guard limits, the calibration, the pins and the keys from changes through
+the web server. None by default. Home Assistant (API key) and BLE (BLE key) are not
+affected: they are already authenticated (BLE's access has its own two permissions,
+section 10).
 
 - **What it protects** is the firmware's list, `protected_entities` in
   `packages/web_server.yaml`: Minimum Gap Between Feeds, Gap Between Portions,
   Daily Portion Cap, Portions Counted (24 h), Max Portions Per Command, every
-  calibration entity except Declare Tray Position (everyday recovery), and the
-  pins (Board, Servo Pin, Button Pin, LED Pin; section 2.1). Never the
+  calibration entity except Declare Tray Position (everyday recovery), the
+  pins (Board, Servo Pin, Button Pin, LED Pin; section 2.1) and the two BLE
+  permissions (BLE Can Change Guard Limits, BLE Can Change Calibration). Never the
   schedule, feeding, hold, tray reload, location or timezone.
   `tests/test_consistency.py` checks the list names real entities and covers the
   guard limits and calibration. Later milestones add their settings to it.
@@ -600,6 +620,15 @@ are already authenticated (and BLE's access gets its own toggles in N4).
   remove it, signed with the current one. A new key travels masked:
   key XOR HMAC-SHA256(current key, nonce || "new key"); with no current password
   it travels as it is (it is a derived key, not the password).
+- **Keys (2.0.0 N4):** `POST /feeder/keys/api?key=<hex>` and `/feeder/keys/ble?key=<hex>`
+  save a 32-byte key, masked the same way and signed over the path and the hex;
+  `/feeder/keys/api` with no key clears the API key. 409 when the build cannot (a
+  YAML API key, no API encryption, no BLE), 400 for a malformed or all-zero key.
+  `GET /feeder/auth` reports where each key comes from
+  (`"keys":{"api":"none|build|device|off","ble":...}`), never a key. Keys are made in
+  the browser (`crypto.getRandomValues` works on plain HTTP) and shown there once.
+  With no password set they cross the network as they are (anyone there could set
+  their own anyway); with one, only masked.
 - **Cross-site requests:** the auth header makes browsers ask permission first (a
   CORS preflight), which the web server does not grant, so another website cannot
   make a protected change through a visitor's browser.
@@ -635,7 +664,8 @@ precision-feeder/
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
-                                    feeder_password.cpp (settings password), feeder_pins.cpp
+                                    feeder_password.cpp (settings password, BLE key and
+                                    permissions), feeder_pins.cpp
                                     (runtime pins, ESP32-S3 pin validator), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
                                     parser); precision_feeder.*
@@ -645,7 +675,7 @@ precision-feeder/
                                     precision_feeder_ble.* is the thin ESPHome adapter
   packages/            core, status, controls, schedule_editor, calibration,
                        status_led, web_server, button, hardware, time_homeassistant,
-                       diagnostics, network_info, ble_gatt
+                       diagnostics, network_info, ble_gatt, api_key_on_device
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
   web/                 the web app: src/ (plain JavaScript and CSS, no dependencies), dist/ (built by
                        tools/build_web.py, committed, embedded by packages/web_server.yaml)
@@ -675,7 +705,8 @@ precision-feeder/
 - Hold has no maximum duration, and can last until cancelled (needs no clock).
 - If memory gets tight, turn on PSRAM; it may become a requirement of the
   firmware (2026-10-13). Not enabled until measured on hardware.
-- OTA authenticates with the API key; no OTA password; no web-server OTA.
+- OTA authenticates with the API key; no OTA password; no web-server OTA. (2.0.0 N4: a build with the API key
+  provisioned at run time also sets a random OTA password at every boot, so plaintext OTA is refused; see below.)
 - One-shot feeds are independent of the Scheduler switch (2026-10-14).
 - While the clock is unknown after a reboot, pre-reboot feeds do not count toward
   the daily cap (2026-10-14).
@@ -773,6 +804,22 @@ precision-feeder/
   - The board is worked out from the pins, not saved, so the Device layout is unchanged.
   - Preset pins for the ESP32-S3-DevKitC-1 (GPIO4, GPIO5, LED GPIO38) were chosen in N3,
     not by the owner; to confirm (section 14, item 14).
+- **2.0.0 N4 (2026-10-15):**
+  - BLE key: one saved on the device wins over the YAML's, which becomes optional. No key at
+    all refuses every AUTH (detail 6). No Clear for the BLE key (as planned); a new one replaces it.
+  - The two BLE permissions are switches in ble_gatt.yaml, protected by the settings password;
+    refusals are NOT_AUTHORIZED detail 7. Still protocol 2; the Python client names 6 and 7 and
+    shows any other value by number.
+  - API key at run time is opt-in for YAML builds (packages/api_key_on_device.yaml), so existing
+    YAML users keep their key; the prebuilt binaries (N7) will include it. Generate, enter and
+    clear in the web app, as decided in N1.
+  - Keys are generated in the browser and shown once; the device never sends a key back. They
+    travel masked by the settings password, like a new password key (section 10.1).
+  - With a runtime API key, ESPHome's OTA can only offer encryption (section 14, item 10), so our
+    component sets a random OTA password at each boot (`ota_id`): plaintext OTA is refused, and
+    before a key exists OTA is not possible at all (USB, or the web upload of N7). ESPHome warns
+    about this setup and suggests `provisioning:`; not used (it closes the fallback access point).
+  - Key status is in `GET /feeder/auth` and BLE Info, not new entities.
 
 ## 14. Open items
 
@@ -893,6 +940,12 @@ precision-feeder/
     and LED Pin "none" leaving the drivers unset with no error in the log; the LED and button
     on new pins; and the ESP32-S3-DevKitC-1 preset (GPIO4, GPIO5, LED GPIO38) on a real
     DevKitC-1, chosen without the owner (decisions log, N3).
+15. Keys on the bench (2.0.0 N4): compiled and host-tested only (the BLE build with
+    api_key_on_device compiles at 77.2% of the app slot). Still to see on hardware: Home Assistant
+    adopting a feeder with no key; Generate, enter and Clear for the API key, with Home Assistant
+    reconnecting; plaintext OTA refused and encrypted OTA working once a key is set; a new BLE key
+    ending a connected client's session; the Python client against detail 6 (no key) and 7
+    (permission off).
 
 ## 15. Implementation status (v1.1.0)
 

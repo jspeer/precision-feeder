@@ -10,7 +10,6 @@
 // reviewed by a human, but it may still contain mistakes.
 #pragma once
 
-#include <array>
 #include <string>
 
 #include <esp_gatts_api.h>
@@ -42,7 +41,6 @@ class PrecisionFeederBle : public Component, public BleTransport {
   void set_calibration(Characteristic *c) { this->chars_[proto::CHANNEL_CALIBRATION] = c; }
   void set_event_log(Characteristic *c) { this->chars_[proto::CHANNEL_EVENT_LOG] = c; }
   void set_auth(Characteristic *c) { this->chars_[proto::CHANNEL_AUTH] = c; }
-  void set_key(const std::array<uint8_t, crypto::KEY_SIZE> &key) { this->key_ = key; }
   void set_time_policy(proto::TimePolicy policy) { this->time_policy_ = policy; }
   void set_network_time_stale_ms(uint32_t ms) { this->network_stale_ms_ = ms; }
 
@@ -70,7 +68,6 @@ class PrecisionFeederBle : public Component, public BleTransport {
   PrecisionFeeder *feeder_{nullptr};
   esp32_ble_server::BLEServer *server_{nullptr};
   Characteristic *chars_[proto::CHANNEL_AUTH + 1]{};
-  std::array<uint8_t, crypto::KEY_SIZE> key_{};
   proto::TimePolicy time_policy_{proto::TimePolicy::FALLBACK_ONLY};
   uint32_t network_stale_ms_{24u * 3600u * 1000u};
   BleEngine *engine_{nullptr};  // created in setup(), once the feeder is known

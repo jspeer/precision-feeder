@@ -83,6 +83,8 @@ constexpr uint8_t AUTH_DETAIL_STALE_SEQ = 2;          // sequence number not aft
 constexpr uint8_t AUTH_DETAIL_BAD_PROOF = 3;          // AUTH refused; the nonce has changed, read it again
 constexpr uint8_t AUTH_DETAIL_TOO_SOON = 4;           // AUTH refused: wait a second after a failed attempt
 constexpr uint8_t AUTH_DETAIL_TOO_SHORT = 5;          // the write is too short to carry a sequence number and tag
+constexpr uint8_t AUTH_DETAIL_NO_KEY = 6;             // AUTH refused: no BLE key is set on the feeder
+constexpr uint8_t AUTH_DETAIL_SETTING_OFF = 7;        // authenticated, but this setting is turned off for BLE
 
 constexpr size_t RESPONSE_SIZE = 4;  // seq, opcode, result, detail
 

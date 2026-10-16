@@ -92,20 +92,26 @@ struct Client {
   }
 };
 
-/// A feeder, an engine with a known key, and a client that knows it; connected but not yet authenticated.
+/// A feeder, an engine with a known key (the build's, unless `build_key` is false: no key at all), and a client that
+/// knows it; connected but not yet authenticated.
 struct Rig {
   Flash flash;
   std::unique_ptr<FakeFeeder> feeder;
   FakeTransport transport;
   std::unique_ptr<BleEngine> engine;
   std::unique_ptr<Client> client;
-  explicit Rig(bool clock_valid = true) {
+  explicit Rig(bool clock_valid = true, bool build_key = true) {
     this->feeder = boot(this->flash, T0, clock_valid);
     this->engine = std::make_unique<BleEngine>(*this->feeder, this->transport);
     uint8_t key[crypto::KEY_SIZE];
     for (size_t i = 0; i < sizeof(key); i++)
       key[i] = static_cast<uint8_t>(i * 7 + 3);
-    this->engine->set_key(key);
+    if (build_key) {
+      this->feeder->set_build_ble_key(key);
+    } else {
+      const uint8_t none[DEVICE_KEY_SIZE] = {};
+      this->feeder->set_build_ble_key(none);  // a BLE build with no `key:`, as the prebuilt binaries ship
+    }
     this->feeder->set_feed_listener([this](const FeedRecord &r) {
       this->feeder->records.push_back(r);
       this->engine->on_feed(r);
@@ -123,6 +129,10 @@ struct Rig {
 
 static Bytes u32(uint32_t v) { return {uint8_t(v), uint8_t(v >> 8), uint8_t(v >> 16), uint8_t(v >> 24)}; }
 static Bytes i32(int32_t v) { return u32(static_cast<uint32_t>(v)); }
+static Bytes cat(Bytes a, const Bytes &b) {
+  a.insert(a.end(), b.begin(), b.end());
+  return a;
+}
 
 // ---- tests -------------------------------------------------------------------------------------------
 
@@ -366,7 +376,8 @@ static void test_diagnostics() {
   std::string s = r.engine->session_text();
   CHECK(has(s, "connected=1;auth=0;peer=4A:21;mtu=185;since=1;"), "connected, masked peer, MTU, since");
   CHECK(!has(s, "11:22") && !has(s, "33:44"), "only the last two address bytes");
-  CHECK(r.engine->info_text() == "protocol=2;auth=hmac-sha256;time=fallback_only;stale_h=24", "info");
+  CHECK(r.engine->info_text() == "protocol=2;auth=hmac-sha256;time=fallback_only;stale_h=24;key=build;guard=1;"
+                                 "calibration=1", "info");
 
   // A refused write, a bad AUTH, a good AUTH, a feed, an invalid command, a retry, a record and a read.
   r.client->write(proto::CHANNEL_COMMAND, {9, proto::OP_FEED, 1});  // unsigned: refused
@@ -425,6 +436,102 @@ static void test_diagnostics() {
   CHECK(BleEngine::opcode_name(proto::OP_CALIBRATION_WRITE) == "CALIBRATION_WRITE", "record opcode names");
 }
 
+static void test_keys() {
+  current = "BLE key on the device (2.0.0)";
+  Rig r(true, false);  // no key anywhere
+  CHECK(r.feeder->ble_key_source() == KeySource::NONE, "no key");
+  Bytes resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[2] == proto::RES_NOT_AUTHORIZED && resp[3] == proto::AUTH_DETAIL_NO_KEY, "AUTH refused: no key (6)");
+  std::memset(r.client->key, 0, sizeof(r.client->key));
+  resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[3] == proto::AUTH_DETAIL_NO_KEY && !r.engine->authorized(), "the all-zero key is not a key");
+  CHECK(has(r.engine->info_text(), ";key=none;"), "info: no key");
+
+  uint8_t zero[DEVICE_KEY_SIZE] = {}, key[DEVICE_KEY_SIZE];
+  CHECK(r.feeder->set_ble_key(zero) == Result::INVALID_ARG, "the all-zero key is refused");
+  for (size_t i = 0; i < sizeof(key); i++)
+    key[i] = static_cast<uint8_t>(0xA0 + i);
+  CHECK(r.feeder->set_ble_key(key) == Result::OK && r.feeder->ble_key_source() == KeySource::DEVICE, "key saved");
+  r.advance(10);
+  std::memcpy(r.client->key, key, sizeof(key));
+  resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[2] == proto::RES_OK && r.engine->authorized(), "AUTH with the device's key");
+  CHECK(r.client->command(proto::OP_STOP)[2] == proto::RES_OK, "a signed command works");
+
+  // Changing the key ends the session: the old session key no longer signs anything.
+  const Bytes old_nonce = r.transport.value.at(proto::CHANNEL_AUTH);
+  key[0] ^= 0xFF;
+  r.feeder->set_ble_key(key);
+  r.advance(10);
+  CHECK(!r.engine->authorized() && r.transport.value.at(proto::CHANNEL_AUTH) != old_nonce, "session ended, new nonce");
+  resp = r.client->command(proto::OP_STOP);
+  CHECK(resp[2] == proto::RES_NOT_AUTHORIZED && resp[3] == proto::AUTH_DETAIL_NOT_AUTHENTICATED, "old session refused");
+  resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[3] == proto::AUTH_DETAIL_BAD_PROOF, "the old key is refused");
+  r.advance(1100);  // past the wait after a failed AUTH
+  std::memcpy(r.client->key, key, sizeof(key));
+  resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[2] == proto::RES_OK, "the new key is accepted");
+
+  // A key saved on the device wins over the build's, and survives a restart.
+  Rig b;  // build key i * 7 + 3
+  CHECK(b.feeder->ble_key_source() == KeySource::BUILD, "build key");
+  CHECK(b.feeder->set_ble_key(key) == Result::OK && b.feeder->ble_key_source() == KeySource::DEVICE, "device wins");
+  auto again = boot(b.flash, T0 + 60, true);
+  uint8_t build[DEVICE_KEY_SIZE];
+  for (size_t i = 0; i < sizeof(build); i++)
+    build[i] = static_cast<uint8_t>(i * 7 + 3);
+  again->set_build_ble_key(build);
+  uint8_t in_use[DEVICE_KEY_SIZE];
+  CHECK(again->ble_key(in_use) && std::memcmp(in_use, key, sizeof(key)) == 0, "kept across a restart");
+
+  Flash flash;
+  auto no_ble = boot(flash, T0);  // set_build_ble_key() never called: a build without BLE
+  CHECK(no_ble->set_ble_key(key) == Result::UNSUPPORTED, "no BLE in the build");
+}
+
+static void test_permissions() {
+  current = "BLE permissions (2.0.0)";
+  Rig r;
+  Client &c = *r.client;
+  c.write(proto::CHANNEL_COMMAND, c.auth_bytes());
+  r.feeder->set_ble_may_change_guard(false);
+  r.feeder->set_ble_may_change_calibration(false);
+  CHECK(has(r.engine->info_text(), ";guard=0;calibration=0"), "info shows both off");
+  const uint32_t refused = r.engine->stats().refused;
+
+  Bytes resp = c.record(proto::CHANNEL_CONFIG, cat({proto::CFG_DAILY_CAP}, i32(3)));
+  CHECK(resp[1] == proto::OP_CONFIG_WRITE && resp[2] == proto::RES_NOT_AUTHORIZED &&
+            resp[3] == proto::AUTH_DETAIL_SETTING_OFF, "guard limit refused (7)");
+  for (uint8_t key : {proto::CFG_MIN_GAP_S, proto::CFG_PORTION_GAP_S, proto::CFG_MAX_PORTIONS_CMD})
+    CHECK(c.record(proto::CHANNEL_CONFIG, cat({key}, i32(5)))[3] == proto::AUTH_DETAIL_SETTING_OFF, "each guard key");
+  CHECK(c.record(proto::CHANNEL_CONFIG, cat({proto::CFG_RELOAD_PAUSE_MIN}, i32(5)))[2] == proto::RES_OK,
+        "reload pause is not a guard limit");
+  CHECK(c.record(proto::CHANNEL_CONFIG, {uint8_t(proto::CFG_DAILY_CAP | proto::QUERY_FLAG)})[2] == proto::RES_OK,
+        "queries still answered");
+  CHECK(c.record(proto::CHANNEL_CONFIG, cat({proto::CFG_MIN_PULSE_US}, i32(600)))[3] == proto::AUTH_DETAIL_SETTING_OFF,
+        "pulse range is calibration");
+  CHECK(c.record(proto::CHANNEL_CALIBRATION, {2, 0xF4, 0xFF})[3] == proto::AUTH_DETAIL_SETTING_OFF, "offset refused");
+  CHECK(c.record(proto::CHANNEL_CALIBRATION, {uint8_t(2 | proto::QUERY_FLAG)})[2] == proto::RES_OK, "offset query");
+  for (uint8_t op : {proto::OP_CALIBRATE, proto::OP_JOG, proto::OP_SAVE_CALIBRATION}) {
+    const Bytes args = op == proto::OP_CALIBRATE ? Bytes{1} : op == proto::OP_JOG ? Bytes{1, 5, 0} : Bytes{};
+    resp = c.command(op, args);
+    CHECK(resp[2] == proto::RES_NOT_AUTHORIZED && resp[3] == proto::AUTH_DETAIL_SETTING_OFF, "calibration command");
+  }
+  CHECK(!r.feeder->calibration_mode(), "calibration mode stayed off");
+  CHECK(c.command(proto::OP_SET_POSITION, {0})[2] == proto::RES_OK, "SET_POSITION is everyday recovery");
+  CHECK(c.command(proto::OP_FEED, {1})[2] == proto::RES_OK, "feeding is unaffected");
+  CHECK(r.engine->stats().refused == refused + 9, "counted as refused");
+
+  // A retry of a refused write is answered from the cache, and a re-enabled setting works with the next seq.
+  const Bytes w = c.signed_(proto::CHANNEL_CONFIG, Bytes{c.next(), proto::CFG_DAILY_CAP, 4, 0, 0, 0});
+  CHECK(c.write(proto::CHANNEL_CONFIG, w)[3] == proto::AUTH_DETAIL_SETTING_OFF, "refused");
+  r.feeder->set_ble_may_change_guard(true);
+  CHECK(c.write(proto::CHANNEL_CONFIG, w)[3] == proto::AUTH_DETAIL_SETTING_OFF, "the retry gets the same answer");
+  CHECK(c.record(proto::CHANNEL_CONFIG, cat({proto::CFG_DAILY_CAP}, i32(4)))[2] == proto::RES_OK &&
+            r.feeder->cfg.daily_cap == 4, "allowed again");
+}
+
 int main() {
   test_before_auth();
   test_auth_flow();
@@ -436,6 +543,8 @@ int main() {
   test_ranges();
   test_disconnect();
   test_diagnostics();
+  test_keys();
+  test_permissions();
   if (failures == 0)
     std::printf("All BLE engine tests passed\n");
   return failures == 0 ? 0 : 1;

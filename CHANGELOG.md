@@ -27,6 +27,17 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   and LED Pin, where "none" means not fitted. Pins saved on the device win over the YAML
   and apply at the next restart; only pins the ESP32-S3 can spare are accepted. They are
   protected by the settings password. The Configuration page has a "Board and pins" card.
+- Keys on the device. The web app's Configuration page has a Keys card: generate (shown
+  once) or enter a Bluetooth key, which is saved on the feeder and wins over `ble_key`
+  (now optional); with no key at all, every BLE client is refused. With the new
+  `api_key_on_device` package the Home Assistant key is not in the YAML: Home Assistant
+  sets it on adoption, or the card generates, takes or clears it; OTA then refuses
+  plaintext. All of this needs the settings password when one is set.
+- What BLE may change: two new switches, BLE Can Change Guard Limits and BLE Can Change
+  Calibration (both on; protected by the settings password). Off, those BLE writes are
+  refused with NOT_AUTHORIZED detail 7. A missing key is detail 6. Still protocol 2;
+  the Python client names both and shows unknown details by number. BLE Info also says
+  where the key comes from and shows the two permissions.
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)

@@ -26,6 +26,11 @@
 #ifdef USE_WEBSERVER
 #include "esphome/components/web_server/web_server.h"
 #endif
+#if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
+#include "esphome/components/esphome/ota/ota_esphome.h"
+#endif
+
+#include <atomic>
 
 #include "feeder_core.h"
 
@@ -82,6 +87,23 @@ class PrecisionFeeder : public Component, public FeederCore {
   /// Load the saved pins and give them to the drivers. Runs before any driver's setup().
   void apply_pins();
 
+#if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
+  /// A build whose API key is provisioned at run time (packages/api_key_on_device.yaml): ESPHome's OTA can then only
+  /// offer encryption, so a password nobody knows, made at every boot, keeps plaintext OTA out. Encrypted (Noise)
+  /// OTA clients use the API key and never see it.
+  void set_ota(ESPHomeOTAComponent *ota) { this->ota_ = ota; }
+#endif
+
+  /// The API (Home Assistant) key: where it comes from, as /feeder/auth reports it. OFF: this build cannot have
+  /// one set at run time and has none from the YAML (no API, or no encryption). Updated on the main loop.
+  enum class ApiKey : uint8_t { NONE = 0, BUILD = 1, DEVICE = 2, OFF = 3 };
+  ApiKey api_key_state() const { return this->api_key_state_.load(); }
+  /// True if the API key can be set and cleared at run time (`api: encryption: {}` with no `key:`).
+  static bool api_key_settable();
+  /// Save an API key (activated after about 100 ms; Home Assistant reconnects with it), or clear it with nullptr.
+  /// Main loop only. False if the build cannot or the save failed.
+  bool set_api_key(const uint8_t *key);
+
   /// Wired to the sntp time platform's on_time_sync. ESPHome also fires that trigger once at boot when the clock
   /// is already valid (kept by the RTC across a soft reset); only a real SNTP synchronisation counts as NTP.
   void note_sntp_sync();
@@ -106,6 +128,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   void loop() override {
     LockGuard guard(this->password_lock_);
     this->core_loop();
+    this->update_api_key_state_();
   }
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
@@ -128,7 +151,13 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_log(LogLevel level, const char *message) override;
   void hal_random(uint8_t *out, size_t n) override;
 
+  void update_api_key_state_();
+
   output::FloatOutput *output_{nullptr};
+  std::atomic<ApiKey> api_key_state_{ApiKey::OFF};  // read by the web server's task
+#if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
+  ESPHomeOTAComponent *ota_{nullptr};
+#endif
   esp32::ESP32InternalGPIOPin *servo_pin_{nullptr};
   Component *button_{nullptr};
   esp32::ESP32InternalGPIOPin *button_pin_{nullptr};

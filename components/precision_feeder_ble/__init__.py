@@ -61,6 +61,8 @@ def validate_key(value):
         raise cv.Invalid(f"BLE key is not valid base64: {err}") from err
     if len(raw) != KEY_SIZE:
         raise cv.Invalid(f"BLE key must be {KEY_SIZE} bytes (base64 of 32 random bytes), got {len(raw)}")
+    if not any(raw):
+        raise cv.Invalid("BLE key must not be all zeros: anyone could authenticate with it")
     return value
 
 CONFIG_SCHEMA = cv.Schema(
@@ -76,7 +78,9 @@ CONFIG_SCHEMA = cv.Schema(
         },
         # The shared secret a client must prove it knows before any write is accepted (protocol 2).
         # 32 random bytes, base64: `openssl rand -base64 32`. Keep it in secrets.yaml.
-        cv.Required(CONF_KEY): validate_key,
+        # Optional since 2.0.0: a key generated or entered in the web app is saved on the feeder and wins over
+        # this one. With neither, every AUTH is refused (no BLE client can do anything) until one is set.
+        cv.Optional(CONF_KEY): validate_key,
         # What to do with a clock pushed over BLE (SET_TIME):
         #   fallback_only: accept it only if NTP / Home Assistant has not set the clock recently
         #   always:        accept any plausible value
@@ -106,8 +110,14 @@ async def to_code(config):
         char = await cg.get_variable(config[name])
         cg.add(getattr(var, f"set_{name}")(char))
 
-    key = base64.b64decode(config[CONF_KEY])
-    cg.add(var.set_key(cg.RawExpression("std::array<uint8_t, 32>{" + ", ".join(str(b) for b in key) + "}")))
+    # The build's key lives in FeederCore, next to one saved on the device (all zeros: none).
+    feeder = await cg.get_variable(config[CONF_FEEDER])
+    key = base64.b64decode(config[CONF_KEY]) if CONF_KEY in config else bytes(KEY_SIZE)
+    cg.add(
+        feeder.set_build_ble_key(
+            cg.RawExpression("std::array<uint8_t, 32>{" + ", ".join(str(b) for b in key) + "}.data()")
+        )
+    )
     cg.add(var.set_time_policy(config[CONF_TIME_POLICY]))
     cg.add(var.set_network_time_stale_ms(config[CONF_NTP_STALE].total_milliseconds))
 

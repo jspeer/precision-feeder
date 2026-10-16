@@ -69,6 +69,7 @@ api:
 # (api: encryption: key above), so there is no separate OTA password to manage.
 ota:
   - platform: esphome
+    id: pf_ota                 # api_key_on_device.yaml changes it
     encryption: {}
 
 network:

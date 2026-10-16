@@ -1,0 +1,30 @@
+# Precision Feeder: keep the Home Assistant (API) key on the feeder instead of in your YAML (firmware 2.0.0).
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Include it after core.yaml. The build then carries no API key: the feeder starts without one and Home Assistant
+# gives it one when you adopt it (it is saved in flash), or you generate or enter one in the web app
+# (Configuration, Keys), which can also clear it. This is how the prebuilt binaries ship. You no longer need
+# api_encryption_key in secrets.yaml.
+#
+# Until a key is set, anyone who reaches the feeder first can set one (trust on first use): adopt it promptly.
+# Encrypted OTA uses the key once it is set. ESPHome cannot require encryption for OTA when the key comes at run
+# time, so the feeder gives OTA a random password at every boot that nobody knows: plaintext OTA is refused, and
+# before a key is set OTA is not possible at all (flash over USB instead).
+#
+# Switching an existing feeder to this package: it starts with no key, so Home Assistant must adopt it again (or
+# enter your old key in the web app).
+
+api:
+  encryption:
+    key: !remove
+
+ota:
+  - id: !extend pf_ota
+    encryption: !remove
+    password: ""
+
+precision_feeder:
+  ota_id: pf_ota

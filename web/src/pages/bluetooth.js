@@ -46,6 +46,14 @@ PAGES.bluetooth = {
     p('Service', () => this.info().service || '');
     p('Time from Bluetooth', () => ({ fallback_only: 'Only when network time is stale', always: 'Always accepted',
                                       off: 'Refused' }[this.info().time] || this.info().time || ''));
+    p('Key', () => ({ none: 'None set: every client is refused', build: 'From the YAML',
+                      device: 'Saved on the feeder' }[this.info().key] || '—'));
+    p('Clients may change', () => {
+      const i = this.info();
+      if (i.guard === undefined) return '—';
+      const may = [i.guard === '1' ? 'safety limits' : '', i.calibration === '1' ? 'calibration' : ''].filter(Boolean);
+      return `Feeding and the schedule${may.length ? ', ' + may.join(' and ') : ''} (Configuration, Keys)`;
+    });
 
     this.activityBox = h('div', { class: 'activity', role: 'log' });
     const activity = card('Activity',
