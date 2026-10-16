@@ -146,6 +146,11 @@ Open the feeder's address and the [setup wizard](#setup-wizard) does the rest. I
 | `full` | everything, including the BLE control plane | 78.9% |
 | `no-ble` | everything except BLE | 60.9% |
 
+Moving a feeder from your own YAML build to a binary keeps its settings, calibration, schedule and tray state, if
+you do not erase when flashing. What your YAML held does not come along: set the Wi-Fi network again (the install
+page asks for it), let Home Assistant adopt the feeder again (or make an API key in the web app), and make a new BLE
+key. Checked on the bench from 1.1.0 (docs/BENCH.md).
+
 Both run on any ESP32-S3 with 4 MB of flash or more, with no PSRAM needed; choose the board's pins in the wizard.
 Each comes as `.factory.bin` (first flash, from address 0) and `.ota.bin` (updates). Out of the box they have no
 Wi-Fi network, no keys and the time zone UTC; the name gets the end of the board's MAC address

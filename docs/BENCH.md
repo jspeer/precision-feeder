@@ -435,8 +435,17 @@ build of the same file over ESPHome OTA.
   About 12 s for 1.4 MB.
 - **Stack headroom** (a temporary build logging the web server task's high-water mark): 472 bytes left after a
   protected write, 616 after an upload, 1032 after a refused one.
-- Not finished: a clean repeat of the upgrade with the fixed build from erased 1.1 (the OTA went through, then the
-  network went away before it was checked); the upgrade to the prebuilt binary.
+- **Clean repeat with the fixed build** (erased, 1.1.0, seeded, then the 2.0 YAML build over OTA): every value in
+  the 1.1 snapshot was the same on 2.0 (guard limits, reload pause, refill interval, location, pulse range, both
+  offsets read back through calibration mode, the schedule, the active profile, the tray at slot 1 with 5 left). Only
+  the Wi-Fi network differed: the feeder was moved to a phone hotspot with Improv serial (a script) in between.
+- **Upgrade to the prebuilt binary** (erased, 1.1.0 built for the hotspot, seeded, a minute for ESPHome to write its
+  preferences, then `precision-feeder-full.factory.bin` written at 0x0 without erasing, as the install page does
+  when its erase prompt is declined): it booted as `precision-feeder-add020`, variant `full`, `"setup":false`,
+  `"ap":"open"`. Every setting, offset, the schedule and the tray state were kept. **Not kept, as expected:** the
+  Wi-Fi network (it was in the 1.1 YAML, not in ESPHome's saved slot; the feeder stayed off the network until
+  Improv set it), the API key and the BLE key (both `none`): Home Assistant must adopt it again, and BLE clients are
+  refused until a key is made.
 
 Found and fixed during the run:
 - **Stack overflow on every protected write** (since 2.0.0 N7, possibly marginal before): the web server's task has
