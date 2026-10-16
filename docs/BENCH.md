@@ -522,3 +522,18 @@ the page; the rest of the page was the feeder's own.
 - Harness: opening the S3's USB serial port from this Mac resets the board (USB_UART_CHIP_RESET), even with DTR and
   RTS held low; a tab left open across an upload keeps the old app until reloaded (the app's "feeder was updated"
   banner covers that).
+
+## Firmware 2.0.1 N8 on hardware, part 5: IPv4-only and dual-stack networks (2026-10-16)
+
+The 2.0.1 `full` image on a GL.iNet travel router (the phone's hotspot behind it).
+
+- **Dual stack** (DHCPv4 and a ULA prefix): the feeder had IPv4, link-local and ULA addresses; mDNS announced all
+  three. Over the ULA address: the web app (index and the 57 KB app), `GET /feeder/network`, a plain and a protected
+  write, and a firmware upload (200, restarted into it).
+- **IPv4 only** (IPv6 turned off on the router, LAN included; after a restart): IPv4 and link-local only, NTP synced,
+  no faults; the app, a protected write, mDNS (IPv4 and link-local) and a firmware upload all worked. On the first
+  try the router's "IPv6 off" still advertised its ULA prefix on the LAN; that needed its LAN IPv6 off too.
+- **IPv6 only: not tested.** Turning DHCPv4 off would have cut the test machine off as well. Known outcome for the
+  prebuilt binaries: ESPHome counts Wi-Fi as connected only with an IPv4 address, and the binaries cannot be given a
+  static one (`manual_ip` is build-time), so on an IPv6-only network they never join and open their access point.
+  DESIGN.md section 14, item 20.

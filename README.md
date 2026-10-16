@@ -151,6 +151,9 @@ you do not erase when flashing. What your YAML held does not come along: set the
 page asks for it), let Home Assistant adopt the feeder again (or make an API key in the web app), and make a new BLE
 key. Checked on the bench from 1.1.0 (docs/BENCH.md).
 
+The binaries need an IPv4 address from your network (DHCP): on an IPv6-only network they cannot join (ESPHome needs
+IPv4, and a static address can only be set in a YAML build). Dual-stack and IPv4-only networks are fine.
+
 Both run on any ESP32-S3 with 4 MB of flash or more, with no PSRAM needed; choose the board's pins in the wizard.
 Each comes as `.factory.bin` (first flash, from address 0) and `.ota.bin` (updates). Out of the box they have no
 Wi-Fi network, no keys and the time zone UTC; the name gets the end of the board's MAC address

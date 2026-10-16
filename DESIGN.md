@@ -1122,6 +1122,14 @@ precision-feeder/
     from the install page (ESP Web Tools, then Improv), the open access point and its captive portal, an upload on
     the Firmware page (and a refused one: wrong password, a changed file, a cut connection), the restart waiting
     for a moving tray, and the update check against a published manifest (the first release publishes it). N8.
+    Checked 2026-10-16 (docs/BENCH.md, N8 parts 1 to 5) except the update check against a real published manifest
+    (stubbed in the page instead) and a feeder whose own internet is blocked.
+
+20. IPv6-only networks and the prebuilt binaries (found in 2.0.0 N8). ESPHome 2026.9.1 counts Wi-Fi as connected only
+    with an IPv4 address (item 7), and the YAML workaround, a static IPv4 address (`manual_ip`), is build-time. So a
+    prebuilt binary on an IPv6-only network never joins and falls back to its access point; a YAML build with
+    `manual_ip` still works. Fixing it would need a static IPv4 address set at run time (a Device record field and a
+    call to ESPHome's Wi-Fi before it connects). Documented; not planned yet (2026-10-16).
 
 ## 15. Implementation status (v1.1.0)
 
