@@ -1,0 +1,99 @@
+# Precision Feeder: choose the board and the servo pin at run time, without rebuilding (firmware 2.0.0).
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# The pins in your YAML (servo_pin, button_pin, status_led_pin) are only the starting values. A pin chosen here is
+# saved on the feeder and wins over them; "Build Default" goes back to the YAML's. The button and the LED have their
+# own pin select in their packages (button.yaml, status_led.yaml), where "none" means not fitted.
+#
+# Pins change when the feeder restarts: "Restart Needed" turns on until then, and nothing restarts by itself.
+# Only pins the ESP32-S3 can spare are offered (no flash, PSRAM, USB or strapping pins). Two need care:
+#   GPIO33 to 37  used by the octal flash or PSRAM of some modules (for example the N8R8 DevKitC-1): only on boards
+#                 without it
+#   GPIO43, 44    UART0: the chip prints boot messages there at every reset, so a servo on them may twitch
+# Changing these through the web app needs the settings password, when one is set (web_server.yaml).
+#
+#   Board                  Build Default (the YAML's pins), Waveshare ESP32-S3-Zero (servo GPIO1, button GPIO2,
+#                          LED GPIO21), ESP32-S3-DevKitC-1 (GPIO4, GPIO5, LED GPIO38 on v1.1 boards), or Custom
+#                          (shown when the pins match no preset)
+#   Servo Pin              the servo signal wire
+#   Pins In Use            the pins the drivers started with
+#   Restart Needed         a saved change waits for a restart
+#   Restart                restart the feeder; refused while the tray moves (feeding resumes by itself afterwards)
+
+select:
+  - platform: template
+    id: pf_board
+    name: "Board"
+    icon: mdi:developer-board
+    entity_category: config
+    options: ["Build Default", "Waveshare ESP32-S3-Zero", "ESP32-S3-DevKitC-1", "Custom"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          Board b;
+          if (parse_board(x.str(), b))
+            id(feeder).set_board(b);
+          publish_option(id(pf_board), board_name(id(feeder).board()));
+    update_interval: never
+
+  - platform: template
+    id: pf_servo_pin
+    name: "Servo Pin"
+    icon: mdi:pin
+    entity_category: config
+    # Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["GPIO1", "GPIO2", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+                "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
+                "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
+                "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_pin(PinRole::SERVO, pin);
+          publish_option(id(pf_servo_pin), pin_text(id(feeder).pins_saved().servo));
+    update_interval: never
+
+text_sensor:
+  - platform: template
+    id: pf_pins_in_use
+    name: "Pins In Use"
+    icon: mdi:pin-outline
+    entity_category: diagnostic
+    update_interval: never
+
+binary_sensor:
+  - platform: template
+    id: pf_restart_needed
+    name: "Restart Needed"
+    icon: mdi:restart-alert
+    entity_category: diagnostic
+    lambda: return id(feeder).restart_needed();
+
+button:
+  - platform: template
+    name: "Restart"
+    icon: mdi:restart
+    entity_category: config
+    on_press:
+      - lambda: |-
+          // Not in the middle of a feed: an interrupted move would leave the tray position unknown.
+          if (id(feeder).tray_state() == precision_feeder::TrayState::MOVING) {
+            ESP_LOGW("precision_feeder", "Restart refused: the tray is moving");
+            return;
+          }
+          ESP_LOGI("precision_feeder", "Restarting (Restart button)");
+          App.safe_reboot();
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          publish_option(id(pf_board), board_name(id(feeder).board()));
+          publish_option(id(pf_servo_pin), pin_text(id(feeder).pins_saved().servo));
+          publish_text(id(pf_pins_in_use), id(feeder).pins_text());

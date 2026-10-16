@@ -24,7 +24,8 @@ substitutions:
   friendly_name: Precision Feeder
   # Your timezone: daylight saving and sunrise/sunset events depend on it.
   timezone: America/New_York
-  # Pins default to the Waveshare ESP32-S3-Zero. Change them for another board:
+  # Pins default to the Waveshare ESP32-S3-Zero. Change them for another board here, or on
+  # the device (hardware package: Board and the pin selects), which then wins:
   # servo_pin: GPIO1
   # button_pin: GPIO2
   # NTP is the primary time source. Defaults are the public pool servers; point
@@ -45,6 +46,7 @@ packages:
   schedule_editor: !include precision-feeder/packages/schedule_editor.yaml
   calibration: !include precision-feeder/packages/calibration.yaml
   # Optional.
+  hardware: !include precision-feeder/packages/hardware.yaml                 # board and pins chosen on the device (pins below are then defaults)
   ble_gatt: !include precision-feeder/packages/ble_gatt.yaml                 # BLE GATT control plane (docs/PROTOCOL.md)
   diagnostics: !include precision-feeder/packages/diagnostics.yaml           # free heap and loop time (useful when sizing BLE)
   network_info: !include precision-feeder/packages/network_info.yaml       # Wi-Fi network, addresses and signal

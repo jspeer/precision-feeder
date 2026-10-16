@@ -11,12 +11,16 @@
 #                 unknown after a power cut mid-feed, reload it instead (moves to the
 #                 closed slot, then load it). The original firmware's single-button behaviour.
 #   long press  : (3 s or more) turn calibration mode on or off
+#
+# "Button Pin" moves it, or turns it off ("none": a board without the button), without rebuilding. It is saved on the
+# feeder, wins over button_pin and applies at the next restart (see hardware.yaml).
 
 binary_sensor:
   - platform: gpio
     id: feeder_button
     pin:
       number: ${button_pin}
+      id: pf_button_gpio
       mode:
         input: true
         pullup: true
@@ -32,3 +36,35 @@ binary_sensor:
         max_length: 15s
         then:
           - lambda: id(feeder).set_calibration_mode(!id(feeder).calibration_mode());
+
+select:
+  - platform: template
+    id: pf_button_pin
+    name: "Button Pin"
+    icon: mdi:gesture-tap-button
+    entity_category: config
+    # "none" and every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["none", "GPIO1", "GPIO2", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10",
+                "GPIO11", "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21",
+                "GPIO33", "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41",
+                "GPIO42", "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_pin(PinRole::BUTTON, pin);
+          publish_option(id(pf_button_pin), pin_text(id(feeder).pins_saved().button));
+    update_interval: never
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          publish_option(id(pf_button_pin), pin_text(id(feeder).pins_saved().button));
+
+precision_feeder:
+  # With "none" saved, the button's driver is never started and its pin stays free.
+  button_id: feeder_button
+  button_pin_id: pf_button_gpio

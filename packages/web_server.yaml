@@ -10,10 +10,10 @@
 # what your build includes: leave a package out and its page or section disappears.
 #
 # Settings password (DESIGN.md section 10.1): none by default. Once set in the app (Configuration), changing the
-# guard limits or the calibration through the web server needs it; feeding, the schedule, hold, tray reload and
-# location never do. Home Assistant and BLE are not affected (they have their own keys). The password itself never
-# crosses the network: the browser proves it knows it. Forgotten: hold the BOOT button for 10 seconds while the
-# feeder runs; that clears the password and nothing else.
+# guard limits, the calibration or the pins through the web server needs it; feeding, the schedule, hold, tray
+# reload and location never do. Home Assistant and BLE are not affected (they have their own keys). The password
+# itself never crosses the network: the browser proves it knows it. Forgotten: hold the BOOT button for 10 seconds
+# while the feeder runs; that clears the password and nothing else.
 #
 # To keep visitors out of the app altogether on a shared network, also uncomment `auth` below and add
 # web_username / web_password to your secrets.yaml. That is HTTP authentication over plain HTTP: it keeps casual
@@ -38,8 +38,8 @@ web_server:
 
 precision_feeder:
   # Changes through the web server that need the settings password, when one is set. "<domain>/<entity name>";
-  # tests/test_consistency.py checks each one exists. The guard limits and the calibration (not Declare Tray
-  # Position, which is everyday recovery).
+  # tests/test_consistency.py checks each one exists. The guard limits, the calibration (not Declare Tray
+  # Position, which is everyday recovery) and the pins (hardware.yaml, button.yaml, status_led.yaml).
   protected_entities:
     - number/Minimum Gap Between Feeds
     - number/Gap Between Portions
@@ -51,6 +51,10 @@ precision_feeder:
     - number/Calibration Offset
     - number/Servo Min Pulse
     - number/Servo Max Pulse
+    - select/Board
+    - select/Servo Pin
+    - select/Button Pin
+    - select/LED Pin
 
 binary_sensor:
   # The BOOT button, read once the feeder is running: hold it for 10 seconds to clear the settings password.

@@ -101,6 +101,13 @@ class Entity:
         return d
 
 
+# As feeder_core.h: the pins not in PINS_REFUSED, and the board presets (servo, button, LED).
+PIN_OPTIONS = [f"GPIO{p}" for p in range(49)
+               if p not in (0, 3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 45, 46)]
+BOARD_PRESETS = [("Waveshare ESP32-S3-Zero", ("GPIO1", "GPIO2", "GPIO21")),
+                 ("ESP32-S3-DevKitC-1", ("GPIO4", "GPIO5", "GPIO38"))]
+
+
 class Feeder:
     """The device: its entities and a crude imitation of what the firmware does with them."""
 
@@ -126,6 +133,9 @@ class Feeder:
              "ev": [[1, 1, 30, 1, 0x7F], [1, 0, 720, 1, 0x7F], [1, 2, -60, 1, 0x7F], [0, 0, 720, 1, 0x7F]]},
         ]
         self.oneshots: list[tuple[float, int]] = []
+        self.build_pins = ["GPIO1", "GPIO2", "GPIO21"]  # servo, button, LED: as packages/core.yaml
+        self.saved_pins: list[str | None] = [None, None, None]  # None: the build's
+        self.pins_in_use = list(self.build_pins)
         self.entities: dict[str, Entity] = {}
         self._build(args)
 
@@ -205,6 +215,15 @@ class Feeder:
               max_value=3000, step=1)
             a("number", "Declared Tray Position", 0, icon="mdi:numeric", min_value=0, max_value=6, step=1)
             a("button", "Declare Tray Position")
+        # hardware.yaml, and the pin selects of button.yaml and status_led.yaml
+        a("select", "Board", "Build Default", icon="mdi:developer-board", category=CONFIG,
+          options=["Build Default"] + [name for name, _ in BOARD_PRESETS] + ["Custom"])
+        a("select", "Servo Pin", "GPIO1", icon="mdi:pin", category=CONFIG, options=PIN_OPTIONS)
+        a("select", "Button Pin", "GPIO2", icon="mdi:gesture-tap-button", category=CONFIG, options=["none"] + PIN_OPTIONS)
+        a("select", "LED Pin", "GPIO21", icon="mdi:led-outline", category=CONFIG, options=["none"] + PIN_OPTIONS)
+        a("text_sensor", "Pins In Use", "", icon="mdi:pin-outline", category=DIAGNOSTIC)
+        a("binary_sensor", "Restart Needed", False, icon="mdi:restart-alert", category=DIAGNOSTIC)
+        a("button", "Restart", icon="mdi:restart", category=CONFIG)
         if not args.no_diagnostics:  # diagnostics.yaml (ESPHome's debug sensors)
             a("sensor", "Free Heap", 121344, uom="B")
             a("sensor", "Largest Free Heap Block", 65536, uom="B")
@@ -367,10 +386,22 @@ class Feeder:
         s("text", "Profile Fast Days", self.days_text(p["fast"]))
         s("number", "Event Portions", ev[3])
         s("number", "Profile Every N Days", p["every_n"])
+        pins = self.effective_pins()
+        presets = [name for name, p in BOARD_PRESETS if list(p) == pins]
+        s("select", "Board", "Build Default" if self.saved_pins == [None, None, None] else
+          presets[0] if presets else "Custom")
+        s("select", "Servo Pin", pins[0])
+        s("select", "Button Pin", pins[1])
+        s("select", "LED Pin", pins[2])
+        s("text_sensor", "Pins In Use", "servo {}, button {}, LED {}".format(*self.pins_in_use))
+        s("binary_sensor", "Restart Needed", pins != self.pins_in_use)
         if "switch/Calibration Mode" in self.entities:
             s("switch", "Calibration Mode", self.calibrating)
             s("select", "Calibration Position", str(self.cal_pos))
             s("number", "Calibration Offset", self.offsets[self.cal_pos])
+
+    def effective_pins(self) -> list[str]:
+        return [saved or build for saved, build in zip(self.saved_pins, self.build_pins)]
 
     def log(self, level: str, tag: str, msg: str):
         colour = {"E": "1;31", "W": "0;33", "I": "0;32", "D": "0;36"}.get(level, "0")
@@ -453,6 +484,10 @@ class Feeder:
                 self.hold_until = None
             elif name == "Clear One-shot Feeds":
                 self.oneshots.clear()
+            elif name == "Restart":
+                self.log("I", "precision_feeder", "Restarting (Restart button)")
+                self.pins_in_use = self.effective_pins()
+                self.started = time.monotonic()
             elif name == "Declare Tray Position":
                 self.position, self.unknown = int(self.get("number", "Declared Tray Position")), False
         elif domain == "switch" and action in ("turn_on", "turn_off", "toggle"):
@@ -474,6 +509,22 @@ class Feeder:
                 ev[1] = ("clock", "sunrise", "sunset").index(value)
             elif name == "Calibration Position":
                 self.cal_pos = int(value)
+            elif name == "Board":
+                presets = dict(BOARD_PRESETS)
+                if value == "Build Default":
+                    self.saved_pins = [None, None, None]
+                elif value in presets:
+                    self.saved_pins = list(presets[value])
+            elif name in ("Servo Pin", "Button Pin", "LED Pin"):
+                role = ("Servo Pin", "Button Pin", "LED Pin").index(name)
+                after = self.effective_pins()
+                after[role] = value
+                taken = [p for p in after if p != "none"]
+                if len(taken) != len(set(taken)):
+                    self.log("W", "precision_feeder", f"{value} refused: another part already uses it")
+                else:
+                    self.saved_pins[role] = value
+                    self.log("I", "precision_feeder", f"Pin set to {value}; restart to apply")
             else:
                 self.set("select", name, value)
         elif domain == "number" and action == "set":

@@ -12,6 +12,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
+#include "esphome/components/esp32/gpio.h"
 #include "esphome/components/output/float_output.h"
 #include "esphome/components/time/real_time_clock.h"
 #ifdef USE_TIME_TIMEZONE
@@ -63,6 +64,24 @@ class PrecisionFeeder : public Component, public FeederCore {
   void set_output(output::FloatOutput *output) { this->output_ = output; }
   void set_time(time::RealTimeClock *time) { this->time_ = time; }
 
+  // ---- runtime pins (DESIGN.md section 2.1; set from Python) ----
+  // The drivers read their pin when they start, so PinLoader (below) rewrites them first. "None" for the button or
+  // the LED keeps that driver from starting at all.
+  void set_servo_pin(esp32::ESP32InternalGPIOPin *pin) { this->servo_pin_ = pin; }
+  void set_button(Component *sensor, esp32::ESP32InternalGPIOPin *pin) {
+    this->button_ = sensor;
+    this->button_pin_ = pin;
+  }
+  /// The LED strip driver keeps its pin as a plain number, so the build's pin is passed in too.
+  template<typename L> void set_status_led(Component *light, L *output, uint8_t build_pin) {
+    this->led_light_ = light;
+    this->led_output_ = output;
+    this->led_build_pin_ = build_pin;
+    this->led_set_pin_ = [](Component *o, uint8_t pin) { static_cast<L *>(o)->set_pin(pin); };
+  }
+  /// Load the saved pins and give them to the drivers. Runs before any driver's setup().
+  void apply_pins();
+
   /// Wired to the sntp time platform's on_time_sync. ESPHome also fires that trigger once at boot when the clock
   /// is already valid (kept by the RTC across a soft reset); only a real SNTP synchronisation counts as NTP.
   void note_sntp_sync();
@@ -110,6 +129,13 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_random(uint8_t *out, size_t n) override;
 
   output::FloatOutput *output_{nullptr};
+  esp32::ESP32InternalGPIOPin *servo_pin_{nullptr};
+  Component *button_{nullptr};
+  esp32::ESP32InternalGPIOPin *button_pin_{nullptr};
+  Component *led_light_{nullptr};
+  Component *led_output_{nullptr};
+  uint8_t led_build_pin_{PIN_NONE};
+  void (*led_set_pin_)(Component *output, uint8_t pin){nullptr};
   time::RealTimeClock *time_{nullptr};
   ESPPreferenceObject pref_settings_;
   ESPPreferenceObject pref_calibration_;
@@ -123,6 +149,18 @@ class PrecisionFeeder : public Component, public FeederCore {
 #ifdef USE_TIME_TIMEZONE
   time::ParsedTimezone build_tz_{};  // the timezone in use at boot, before any set on the device
 #endif
+};
+
+/// Applies the saved pins before the drivers start: set up ahead of everything at HARDWARE priority (LEDC, the LED
+/// strip, GPIO binary sensors). The preferences are ready by then (ESPHome opens them before any setup()).
+class PinLoader : public Component {
+ public:
+  explicit PinLoader(PrecisionFeeder *feeder) : feeder_(feeder) {}
+  void setup() override { this->feeder_->apply_pins(); }
+  float get_setup_priority() const override { return setup_priority::BUS; }
+
+ protected:
+  PrecisionFeeder *feeder_;
 };
 
 }  // namespace precision_feeder

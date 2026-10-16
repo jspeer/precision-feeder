@@ -53,6 +53,47 @@ void PrecisionFeeder::setup() {
                    have_state ? &state : nullptr, have_v3 ? &v3 : nullptr, have_device ? &device : nullptr);
 }
 
+void PrecisionFeeder::apply_pins() {
+  if (this->servo_pin_ == nullptr)
+    return;  // a build without runtime pins: every driver keeps its YAML pin
+  const Pins build{this->servo_pin_->get_pin(), this->button_pin_ != nullptr ? this->button_pin_->get_pin() : PIN_NONE,
+                   this->led_output_ != nullptr ? this->led_build_pin_ : PIN_NONE};
+  Device saved{};
+  saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
+  Device loaded;
+  auto pref = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v1"));
+  if (pref.load(&loaded) && loaded.version == DEVICE_VERSION)
+    saved = loaded;
+  std::string problem;
+  Pins use = resolve_pins(saved, build, &problem);
+  const bool has_button = this->button_pin_ != nullptr, has_led = this->led_output_ != nullptr;
+  if (!has_button)
+    use.button = PIN_NONE;  // not in this build, whatever is saved
+  if (!has_led)
+    use.led = PIN_NONE;
+  if (!problem.empty())
+    ESP_LOGW(TAG, "Pins: %s", problem.c_str());
+
+  this->servo_pin_->set_pin(static_cast<gpio_num_t>(use.servo));
+  if (this->button_pin_ != nullptr) {
+    if (use.button == PIN_NONE)
+      this->button_->disable_loop();  // before its setup(): ESPHome then never sets it up, so the pin stays free
+    else
+      this->button_pin_->set_pin(static_cast<gpio_num_t>(use.button));
+  }
+  if (this->led_output_ != nullptr) {
+    if (use.led == PIN_NONE) {
+      this->led_light_->disable_loop();
+      this->led_output_->disable_loop();
+    } else {
+      this->led_set_pin_(this->led_output_, use.led);
+    }
+  }
+  this->set_build_pins(build);
+  this->set_pins_in_use(use, has_button, has_led);
+  ESP_LOGI(TAG, "Pins: %s", this->pins_text().c_str());
+}
+
 void PrecisionFeeder::dump_config() {
   ESP_LOGCONFIG(TAG, "Precision Feeder:");
   ESP_LOGCONFIG(TAG, "  Sweep: %.1f deg, pitch %.1f deg, invert: %s", this->sweep_, this->sweep_ / NUM_POSITIONS,

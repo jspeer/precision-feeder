@@ -51,9 +51,12 @@ else the feeder lists under Faults.
     the feeder's own limits and units;
   - the time zone (a POSIX string; empty means the YAML's, or Home Assistant's);
     Wi-Fi is shown and set in your YAML;
+  - board and pins (with the `hardware` package): a board preset or each pin, saved at
+    once and used after a restart (Restart is offered when one is waiting); only pins
+    the chip can spare are listed, and "none" for a button or LED that is not fitted;
   - the settings password: set, unlock (for this page, until it is reloaded), lock,
-    change or remove. Locked, changes to the safety limits and the calibration are
-    refused with a message saying so.
+    change or remove. Locked, changes to the safety limits, the calibration and the
+    pins are refused with a message saying so.
 - **Maintenance:**
   - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
     and the servo pulse range;

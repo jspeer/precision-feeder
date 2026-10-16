@@ -1074,6 +1074,122 @@ static void test_device_record() {
   }
 }
 
+/// Boot as the adapter does: the saved pins are resolved against the build's before the drivers start.
+static std::unique_ptr<FakeFeeder> boot_with_pins(Flash &flash, const Pins &build, std::string *problem = nullptr,
+                                                  bool has_button = true, bool has_led = true) {
+  auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+  Device saved{};
+  saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
+  if (flash.have_device && flash.device.version == DEVICE_VERSION)
+    saved = flash.device;
+  f->set_build_pins(build);
+  Pins use = resolve_pins(saved, build, problem);
+  if (!has_button)
+    use.button = PIN_NONE;
+  if (!has_led)
+    use.led = PIN_NONE;
+  f->set_pins_in_use(use, has_button, has_led);
+  f->start();
+  f->advance(1500);
+  return f;
+}
+
+static void test_pins() {
+  current = "pins";
+  // The validator: the lists in feeder_core.h, which packages/hardware.yaml repeats (tests/test_consistency.py).
+  CHECK(check_pin(1) == PinCheck::OK && check_pin(21) == PinCheck::OK && check_pin(48) == PinCheck::OK, "free pins");
+  for (uint8_t p : {0, 3, 45, 46})
+    CHECK(check_pin(p) == PinCheck::REFUSED, "strapping pins refused");
+  for (uint8_t p = 26; p <= 32; p++)
+    CHECK(check_pin(p) == PinCheck::REFUSED, "flash and PSRAM pins refused");
+  CHECK(check_pin(19) == PinCheck::REFUSED && check_pin(20) == PinCheck::REFUSED, "USB refused");
+  CHECK(check_pin(22) == PinCheck::REFUSED && check_pin(49) == PinCheck::REFUSED, "pins not on the chip refused");
+  CHECK(check_pin(35) == PinCheck::WARN && check_pin(43) == PinCheck::WARN, "octal PSRAM and UART0 warned");
+  for (uint8_t p = 0; p <= 60; p++)
+    CHECK((check_pin(p) == PinCheck::OK) == (pin_note(p)[0] == '\0'), "every refused or warned pin says why");
+  uint8_t g = 0;
+  CHECK(parse_pin("GPIO5", g) && g == 5 && parse_pin("gpio17", g) && g == 17 && parse_pin("38", g) && g == 38,
+        "pin parsing");
+  CHECK(parse_pin("None", g) && g == PIN_NONE && !parse_pin("GPIO", g) && !parse_pin("GPIO123", g) &&
+            !parse_pin("x1", g),
+        "pin parsing: none, and junk refused");
+  CHECK(pin_text(4) == "GPIO4" && pin_text(PIN_NONE) == "none", "pin text");
+  Board b;
+  CHECK(parse_board("ESP32-S3-DevKitC-1", b) && b == Board::DEVKITC_1 && !parse_board("devkit", b), "board names");
+
+  const Pins build{1, 2, 21};  // the Waveshare ESP32-S3-Zero, as packages/core.yaml
+  Flash flash;
+  {
+    // A build that cannot change its pins (no runtime pins in the YAML) refuses changes.
+    auto f = boot(flash, T0);
+    CHECK(f->set_pin(PinRole::SERVO, 4) == Result::UNSUPPORTED && !f->restart_needed(), "no runtime pins");
+  }
+  {
+    auto f = boot_with_pins(flash, build);
+    CHECK(f->pins_in_use() == build && f->board() == Board::BUILD && !f->restart_needed(), "fresh: the build's pins");
+    CHECK(f->pins_text() == "servo GPIO1, button GPIO2, LED GPIO21", "pins text");
+    CHECK(f->set_pin(PinRole::SERVO, 0) == Result::INVALID_ARG, "strapping pin refused");
+    CHECK(f->set_pin(PinRole::SERVO, PIN_NONE) == Result::INVALID_ARG, "the servo needs a pin");
+    CHECK(f->set_pin(PinRole::SERVO, 21) == Result::INVALID_ARG, "the LED's pin refused for the servo");
+    CHECK(!flash.have_device, "nothing saved by refusals");
+
+    CHECK(f->set_pin(PinRole::BUTTON, PIN_NONE) == Result::OK && flash.device.button_pin == PIN_NONE,
+          "no button: saved at once");
+    CHECK(f->restart_needed() && f->pins_in_use().button == 2, "applies at the next restart");
+    CHECK(f->board() == Board::CUSTOM, "no preset matches");
+    CHECK(f->set_pin(PinRole::LED, 2) == Result::OK, "the button's old pin is free once the button has none");
+    CHECK(f->set_pin(PinRole::SERVO, 35) == Result::OK, "a warned pin is accepted");
+    bool warned = false;
+    for (const auto &l : f->logs)
+      warned |= l.find("GPIO35 for the servo: used by the octal") != std::string::npos;
+    CHECK(warned, "with a warning");
+    const int saves = flash.device_saves;
+    CHECK(f->set_pin(PinRole::SERVO, 35) == Result::OK && flash.device_saves == saves, "the same again: not saved");
+  }
+  {
+    auto f = boot_with_pins(flash, build);
+    CHECK((f->pins_in_use() == Pins{35, PIN_NONE, 2}) && !f->restart_needed(), "the saved pins are used after restart");
+    CHECK(f->status_led_fitted(), "LED fitted");
+    CHECK(f->set_board(Board::DEVKITC_1) == Result::OK && (f->pins_saved() == Pins{4, 5, 38}), "DevKitC-1 preset");
+    CHECK(f->board() == Board::DEVKITC_1 && f->restart_needed(), "the preset is recognised");
+    CHECK(f->set_board(Board::CUSTOM) == Result::OK && f->board() == Board::DEVKITC_1, "Custom changes nothing");
+    CHECK(f->set_pin(PinRole::LED, PIN_NONE) == Result::OK && f->board() == Board::CUSTOM, "then one pin changed");
+  }
+  {
+    auto f = boot_with_pins(flash, build);
+    CHECK(!f->status_led_fitted() && f->pins_text() == "servo GPIO4, button GPIO5, LED none", "no LED");
+    CHECK(f->set_board(Board::BUILD) == Result::OK && flash.device.servo_pin == PIN_BUILD, "back to the build's");
+    CHECK(f->board() == Board::BUILD && f->restart_needed(), "applies at restart");
+    CHECK(f->set_pin(PinRole::SERVO, 2) == Result::INVALID_ARG, "the build's button pin counts as taken");
+  }
+  {
+    // A damaged or hand-made record: a refused pin falls back to the build's; clashing pins all do.
+    flash.device.servo_pin = 27;
+    flash.device.button_pin = 7;
+    flash.device.led_pin = PIN_BUILD;
+    std::string problem;
+    auto f = boot_with_pins(flash, build, &problem);
+    CHECK((f->pins_in_use() == Pins{1, 7, 21}) && problem.find("servo pin GPIO27 not usable") != std::string::npos,
+          "refused saved pin: the build's servo pin");
+    flash.device.servo_pin = 7;
+    problem.clear();
+    auto g = boot_with_pins(flash, build, &problem);
+    CHECK(g->pins_in_use() == build && problem.find("clash") != std::string::npos, "clashing pins: the build's");
+    flash.device.servo_pin = PIN_NONE;
+    auto h = boot_with_pins(flash, build);
+    CHECK(h->pins_in_use().servo == 1, "no servo pin saved: the build's");
+  }
+  {
+    // A build without the button or LED package: those are none, whatever is saved.
+    flash.device.servo_pin = PIN_BUILD;
+    auto f = boot_with_pins(flash, Pins{1, PIN_NONE, PIN_NONE}, nullptr, false, false);
+    CHECK(f->pins_text() == "servo GPIO1, button none, LED none" && !f->status_led_fitted(), "servo only");
+    CHECK(!f->restart_needed(), "a saved button pin is no reason to restart a build without the button");
+    CHECK(f->set_pin(PinRole::BUTTON, 9) == Result::UNSUPPORTED && f->set_pin(PinRole::SERVO, 9) == Result::OK,
+          "only the parts the build has can be changed");
+  }
+}
+
 static std::vector<uint8_t> unhex(const char *h) {
   std::vector<uint8_t> out;
   for (; h[0] && h[1]; h += 2)
@@ -1211,6 +1327,7 @@ int main() {
   test_web_app_data();
   test_tz_parser();
   test_device_record();
+  test_pins();
   test_settings_password();
   if (failures == 0)
     std::printf("All core tests passed\n");

@@ -146,6 +146,34 @@ class Consistency(unittest.TestCase):
             if not name.startswith("Declare"):
                 self.assertIn(name, names, f"calibration entity {name!r} is not protected")
 
+    def test_pin_options(self):
+        """The pin selects offer exactly the GPIOs FeederCore accepts (all but PINS_REFUSED), plus "none" for the
+        button and the LED; the board presets use only accepted pins."""
+        refused = {int(v) for v in re.search(r"PINS_REFUSED\[\] = \{(.*?)\};", CORE_H).group(1).split(",")}
+        gpio_max = self.c["GPIO_MAX"]
+        accepted = [f"GPIO{p}" for p in range(gpio_max + 1) if p not in refused]
+        for package, name, extra in (("hardware", "Servo Pin", []), ("button", "Button Pin", ["none"]),
+                                     ("status_led", "LED Pin", ["none"])):
+            text = (ROOT / f"packages/{package}.yaml").read_text()
+            block = text[text.index(f'name: "{name}"'):]
+            options = re.findall(r'"([^"]+)"', re.search(r"options: \[(.*?)\]", block, re.S).group(1))
+            self.assertEqual(options, extra + accepted, f"{name} options")
+        for servo, button, led in re.findall(r'\{Board::\w+, "[^"]+", \{(\d+), (\d+), (\d+)\}\}', CORE_H):
+            for pin in (servo, button, led):
+                self.assertNotIn(int(pin), refused, "board preset uses a refused pin")
+        hardware = (ROOT / "packages/hardware.yaml").read_text()
+        boards = re.findall(r'"([^"]+)"', re.search(r'name: "Board".*?options: \[(.*?)\]', hardware, re.S).group(1))
+        presets = re.findall(r'\{Board::\w+, "([^"]+)"', CORE_H)
+        self.assertEqual(boards, ["Build Default"] + presets + ["Custom"], "Board options")
+
+    def test_pins_protected(self):
+        spec = importlib.util.spec_from_file_location("mock_device", ROOT / "tools/mock_device.py")
+        mock = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mock)
+        listed = mock.protected_entities()
+        for entry in ("select/Board", "select/Servo Pin", "select/Button Pin", "select/LED Pin"):
+            self.assertIn(entry, listed)
+
     def test_timezone_length(self):
         """The Timezone entity takes as many characters as the device's parser accepts."""
         tz_h = (ROOT / "components/precision_feeder/tz_rules.h").read_text()

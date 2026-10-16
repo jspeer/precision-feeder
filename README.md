@@ -110,13 +110,14 @@ say where the tray is (or reload it). It never guesses.
 | Part | Notes |
 |---|---|
 | The printed feeder | <https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2> |
-| Waveshare ESP32-S3-Zero | the 4 MB flash / 2 MB PSRAM version (ESP32-S3FH4R2). Another ESP32-S3 board works if you change the pins. |
+| Waveshare ESP32-S3-Zero | the 4 MB flash / 2 MB PSRAM version (ESP32-S3FH4R2). Another ESP32-S3 board works if you change the pins (presets for the ESP32-S3-DevKitC-1 in the `hardware` package). |
 | MG90S servo | or the TowerPro SG92R the original was built with (same size and pins) |
 | 5 V supply | for the servo; USB-C or the board's 5 V pad for the board |
 | Capacitor, 470 to 1000 µF | across the servo's power, close to the servo |
 | Push button (optional) | any normally-open button |
 
-**Wiring** (defaults; every pin can be changed, see [Settings](#settings-you-can-change)):
+**Wiring** (defaults; every pin can be changed in your YAML or, with the `hardware` package, on the device; see
+[Settings](#settings-you-can-change)):
 
 | From | To |
 |---|---|
@@ -144,7 +145,8 @@ you switch a feature on or off by adding or removing one line.
 | `calibration` | calibration mode, servo pulse range, per-slot offsets, recovery after a power cut | **always** |
 | `web_server` | the built-in web app at `http://precision-feeder.local`: the whole feeder from a browser or phone, with no Home Assistant and no internet | recommended; no password by default (see [the dashboard password](#the-web-dashboard-password)); leave it out to save memory |
 | `status_led` | colour-coded state on the board's LED | recommended if your board has the LED |
-| `button` | a physical button: short press feeds (or reloads when empty), long press toggles calibration | only if you fitted one |
+| `button` | a physical button: short press feeds (or reloads when empty), long press toggles calibration; Button Pin moves it or turns it off | only if you fitted one |
+| `hardware` | Board (presets: Waveshare ESP32-S3-Zero, ESP32-S3-DevKitC-1) and Servo Pin chosen on the device, Pins In Use, Restart Needed and a Restart button. Pins chosen there win over the YAML and apply at the next restart | **on in both examples**; harmless if you never use it |
 | `time_homeassistant` | Home Assistant as a second clock source | **on in both examples**: keeps the clock right when the internet is down but Home Assistant is up (harmless without Home Assistant). It also uses Home Assistant's timezone unless you pin yours (see the package's comment) |
 | `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](docs/PROTOCOL.md)) | only if a PLC, app or script will talk to it over BLE. Costs about 320 KB of flash and 30 KB of RAM |
 | `diagnostics` | free memory and loop time sensors | only for troubleshooting or development |
@@ -283,9 +285,9 @@ calibration mode; dim cyan hold or reload pause.
 |---|---|---|
 | `name` / `friendly_name` | `precision-feeder` / `Precision Feeder` | device name (network, Home Assistant). Change both if you have more than one feeder. |
 | `timezone` | `America/New_York` | IANA name or POSIX string. Daylight saving and sun times depend on it. |
-| `servo_pin` | `GPIO1` | servo signal |
-| `button_pin` | `GPIO2` | push button (button package) |
-| `status_led_pin` | `GPIO21` | onboard RGB LED (status_led package) |
+| `servo_pin` | `GPIO1` | servo signal (a pin chosen on the device, `hardware` package, wins) |
+| `button_pin` | `GPIO2` | push button (button package; Button Pin on the device wins) |
+| `status_led_pin` | `GPIO21` | onboard RGB LED (status_led package; LED Pin on the device wins) |
 | `ntp_server_1` to `_3` | public pool | point at a local NTP server if there is no internet. Of the defaults, `2.pool.ntp.org` also answers over IPv6 |
 | `enable_ipv6` | `"true"` | IPv6 alongside IPv4: the web app, Home Assistant and mDNS answer on both. `"false"` for IPv4 only |
 | `min_pulse` / `max_pulse` | `544us` / `2400us` | starting servo pulse range. Only used until you calibrate; then the saved values win. An MG90S is closer to 500 / 2500. |
@@ -303,12 +305,14 @@ The BLE key itself is `ble_key` in `secrets.yaml`, not a substitution.
 schedule, Active Profile, Hold, Minimum Gap Between Feeds (60 s), Gap Between
 Portions (5 s), Daily Portion Cap (4), Max Portions Per Command (1), Reload Pause
 (10 min), Refill Interval (3 days, for the runway warning), Latitude, Longitude,
-the servo pulse range and calibration offsets.
+the servo pulse range and calibration offsets, the timezone, and (with the `hardware` package) the board and
+pins. Pins change at the next restart; the selects offer only pins the ESP32-S3 can spare (no flash, PSRAM, USB or
+strapping pins), and "none" for a button or LED that is not fitted.
 
 ## The web dashboard password
 
 **Settings password.** Set one in the app (Configuration, "Settings password") and
-changing the feeding safety limits or the calibration from the app needs it.
+changing the feeding safety limits, the calibration or the pins from the app needs it.
 Feeding, the schedule, hold, tray reload and location never do, and Home Assistant
 and BLE are not affected. The password itself is never sent: the app proves it
 knows it. Pick a long one, because someone recording your network could try to

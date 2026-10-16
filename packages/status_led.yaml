@@ -11,10 +11,14 @@
 #   blue        moving
 #   white       calibration mode
 #   dim cyan    hold or reload pause active
+#
+# "LED Pin" moves it, or turns it off ("none": a board without one), without rebuilding. It is saved on the feeder,
+# wins over status_led_pin and applies at the next restart (see hardware.yaml).
 
 light:
   - platform: esp32_rmt_led_strip
     id: status_led
+    output_id: pf_status_led_strip
     internal: true
     pin: ${status_led_pin}
     num_leds: 1
@@ -27,6 +31,7 @@ interval:
     then:
       - lambda: |-
           static int last = -1;
+          if (!id(feeder).status_led_fitted()) return;  // "none": the LED's driver was never started
           const int code = id(feeder).led_code();
           if (code == last) return;
           last = code;
@@ -45,3 +50,35 @@ interval:
           call.set_brightness(0.25f);
           call.set_transition_length(0);
           call.perform();
+
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          publish_option(id(pf_led_pin), pin_text(id(feeder).pins_saved().led));
+
+select:
+  - platform: template
+    id: pf_led_pin
+    name: "LED Pin"
+    icon: mdi:led-outline
+    entity_category: config
+    # "none" and every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["none", "GPIO1", "GPIO2", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10",
+                "GPIO11", "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21",
+                "GPIO33", "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41",
+                "GPIO42", "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_pin(PinRole::LED, pin);
+          publish_option(id(pf_led_pin), pin_text(id(feeder).pins_saved().led));
+    update_interval: never
+
+precision_feeder:
+  # With "none" saved, the LED's driver is never started and its pin stays free.
+  status_led_id: status_led
+  status_led_output_id: pf_status_led_strip
+  status_led_pin: ${status_led_pin}

@@ -77,6 +77,15 @@ const E = {
   declaredPosition: 'number/Declared Tray Position',
   declarePosition: 'button/Declare Tray Position',
 
+  // packages/hardware.yaml (and the pin selects of button.yaml and status_led.yaml)
+  board: 'select/Board',
+  servoPin: 'select/Servo Pin',
+  buttonPin: 'select/Button Pin',
+  ledPin: 'select/LED Pin',
+  pinsInUse: 'text_sensor/Pins In Use',
+  restartNeeded: 'binary_sensor/Restart Needed',
+  restart: 'button/Restart',
+
   // packages/diagnostics.yaml (ESPHome's debug sensors)
   freeHeap: 'sensor/Free Heap',
   largestBlock: 'sensor/Largest Free Heap Block',

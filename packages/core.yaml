@@ -13,6 +13,8 @@ substitutions:
   fw_version: "2.0.0"
 
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
+  # Starting values only when the hardware package is included: pins chosen there are saved on the feeder and win
+  # (DESIGN.md section 2.1).
   servo_pin: GPIO1             # servo signal wire
   button_pin: GPIO2            # optional push button to GND (button package only)
   status_led_pin: GPIO21       # onboard WS2812 (status LED package only)
@@ -103,7 +105,9 @@ time:
 output:
   - platform: ledc
     id: servo_output
-    pin: ${servo_pin}
+    pin:
+      number: ${servo_pin}
+      id: pf_servo_gpio        # so a pin saved on the feeder can replace it at startup
     frequency: 50Hz
 
 precision_feeder:
@@ -117,3 +121,5 @@ precision_feeder:
   step_time: ${step_time}
   wiggle: ${wiggle}
   detach_delay: ${detach_delay}
+  # The servo pin, replaced at startup by one saved on the feeder (hardware package).
+  servo_pin_id: pf_servo_gpio

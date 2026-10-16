@@ -94,6 +94,52 @@ enum class AuthResult : uint8_t {
   NO_CHALLENGE = 3,  // no challenge outstanding, or it expired or was for another nonce
 };
 
+// Pins (firmware 2.0.0, DESIGN.md section 2.1): the ESP32-S3 GPIOs the servo, button and LED may use. Refused: not on
+// the chip (22 to 25), the SPI flash and PSRAM (26 to 32), USB (19, 20) and the strapping pins (0, 3, 45, 46). Warned
+// about but accepted: the octal flash or PSRAM of some modules (33 to 37; for example N8R8) and UART0 (43, 44: the boot
+// ROM prints on TX at reset). packages/hardware.yaml offers exactly the pins not refused (tests/test_consistency.py).
+constexpr uint8_t GPIO_MAX = 48;
+constexpr uint8_t PINS_REFUSED[] = {0, 3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 45, 46};
+constexpr uint8_t PINS_WARNED[] = {33, 34, 35, 36, 37, 43, 44};
+
+enum class PinCheck : uint8_t { OK = 0, WARN = 1, REFUSED = 2 };
+enum class PinRole : uint8_t { SERVO = 0, BUTTON = 1, LED = 2 };
+
+/// GPIO numbers, or PIN_NONE for no button or no LED.
+struct Pins {
+  uint8_t servo;
+  uint8_t button;
+  uint8_t led;
+  bool operator==(const Pins &o) const { return servo == o.servo && button == o.button && led == o.led; }
+  bool operator!=(const Pins &o) const { return !(*this == o); }
+};
+
+/// Board presets. BUILD: every pin as the build (YAML) sets it. CUSTOM: pins chosen one by one.
+enum class Board : uint8_t { BUILD = 0, WAVESHARE_S3_ZERO = 1, DEVKITC_1 = 2, CUSTOM = 3 };
+struct BoardPreset {
+  Board board;
+  const char *name;  // as the Board select shows it
+  Pins pins;
+};
+// Waveshare ESP32-S3-Zero: the pins this firmware was built and bench-tested on (WS2812 on GPIO21). Espressif
+// ESP32-S3-DevKitC-1: GPIO4 and GPIO5 are free on every module; the RGB LED is GPIO38 on v1.1 boards (v1.0: GPIO48,
+// choose Custom).
+constexpr BoardPreset BOARD_PRESETS[] = {
+    {Board::WAVESHARE_S3_ZERO, "Waveshare ESP32-S3-Zero", {1, 2, 21}},
+    {Board::DEVKITC_1, "ESP32-S3-DevKitC-1", {4, 5, 38}},
+};
+
+/// Whether the servo, button or LED may use this GPIO (see PINS_REFUSED and PINS_WARNED).
+PinCheck check_pin(uint8_t gpio);
+/// Why a pin is refused or warned about ("" for a pin that is fine).
+const char *pin_note(uint8_t gpio);
+/// "GPIO5", or "none".
+std::string pin_text(uint8_t gpio);
+/// Accepts "GPIO5", "5" and "none" (case does not matter). Does not check the pin.
+bool parse_pin(const std::string &text, uint8_t &gpio);
+const char *board_name(Board board);
+bool parse_board(const std::string &text, Board &board);
+
 /// Where a feed request came from.
 // ESPHOME: a feed button of the device itself, pressed in Home Assistant (native API) or the web UI.
 enum class Source : uint8_t { SCHEDULE = 0, ESPHOME = 1, BLE = 2, BUTTON = 3, ONE_SHOT = 4,
@@ -195,6 +241,10 @@ struct Device {
   uint8_t password_salt[PASSWORD_SALT_SIZE];
   uint8_t password_hash[PASSWORD_HASH_SIZE];
 };
+
+/// The pins a Device record asks for, given the build's (PIN_NONE where the build has no button or LED). A saved pin
+/// that is refused falls back to the build's, and so do all three if they clash; `problem` (optional) then says why.
+Pins resolve_pins(const Device &device, const Pins &build, std::string *problem);
 
 namespace legacy {
 /// Settings as saved by firmware 0.3.0 to 0.4.x (version 3, with the calibration inside). Migrated, not discarded.
@@ -387,6 +437,33 @@ class FeederCore {
   Result set_timezone(const std::string &posix);
   /// The timezone set on the device, or "" when the build's (or Home Assistant's) is in use.
   std::string timezone_text() const { return this->dev_.timezone; }
+
+  // ---- pins (DESIGN.md section 2.1) ----
+  // The adapter resolves the saved pins at boot, before the drivers start, and reports what it applied. A change
+  // here is saved at once and applies at the next restart.
+  void set_build_pins(const Pins &pins) { this->build_pins_ = pins; }
+  /// What the adapter applied. A build without the button or LED package has none, whatever is saved.
+  void set_pins_in_use(const Pins &pins, bool has_button = true, bool has_led = true) {
+    this->pins_in_use_ = pins;
+    this->pins_runtime_ = true;
+    this->has_button_ = has_button;
+    this->has_led_ = has_led;
+  }
+  /// The pins the drivers were started with.
+  const Pins &pins_in_use() const { return this->pins_in_use_; }
+  /// The pins the next restart will use.
+  Pins pins_saved() const;
+  bool restart_needed() const { return this->pins_runtime_ && this->pins_saved() != this->pins_in_use_; }
+  /// Choose one pin: a GPIO, PIN_NONE (button and LED only) or PIN_BUILD. INVALID_ARG for a refused pin or one
+  /// another role already uses; UNSUPPORTED when the build cannot change pins.
+  Result set_pin(PinRole role, uint8_t gpio);
+  /// Choose a board preset (all three pins), or BUILD for the build's pins. CUSTOM changes nothing.
+  Result set_board(Board board);
+  /// BUILD while all three pins follow the build, else the preset the saved pins match, else CUSTOM.
+  Board board() const;
+  /// "servo GPIO1, button none, LED GPIO21": the pins in use.
+  std::string pins_text() const;
+  bool status_led_fitted() const { return this->pins_in_use_.led != PIN_NONE; }
 
   // ---- settings password (DESIGN.md section 10.1) ----
   // These are called from the web server's task as well as the main loop: the adapter serialises them with a lock,
@@ -641,6 +718,11 @@ class FeederCore {
   bool was_time_valid_{false};
   bool cfg_dirty_{false};
   Device dev_{};
+  Pins build_pins_{PIN_NONE, PIN_NONE, PIN_NONE};
+  Pins pins_in_use_{PIN_NONE, PIN_NONE, PIN_NONE};
+  bool pins_runtime_{false};  // the adapter applied the saved pins at boot, so changing them means something
+  bool has_button_{true};     // the build has the button package
+  bool has_led_{true};        // the build has the status LED package
   bool tz_reapply_{false};
   uint8_t auth_nonce_[AUTH_NONCE_SIZE]{};
   bool auth_nonce_live_{false};

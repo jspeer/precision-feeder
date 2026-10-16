@@ -85,7 +85,8 @@ a documented protocol.
 
 Pin map (from the board's pin definition,
 <https://docs.waveshare.com/ESP32-S3-Zero>). All pins are YAML substitutions,
-so other builds can move them:
+so other builds can move them; since 2.0.0 they can also be chosen on the device
+(section 2.1), and those win:
 
 | Substitution | Default | Notes |
 |---|---|---|
@@ -99,6 +100,44 @@ power-up, so the servo may twitch once at boot. A 10 kOhm pull-down on the
 signal line prevents that. The board is powered from USB-C or 3.7 to 6 V on
 the 5V pad (800 mA LDO for the 3.3 V rail). Power the servo from a separate or
 adequately rated 5 V path, not the board's 3.3 V LDO.
+
+### 2.1 Runtime pins (firmware 2.0.0)
+
+A prebuilt binary cannot know the board, so the servo, button and LED pins are saved
+in the Device record (section 9.2) and chosen on the device: the `hardware` package
+(Board, Servo Pin, Pins In Use, Restart Needed, Restart), Button Pin in `button.yaml`
+and LED Pin in `status_led.yaml`. The YAML substitutions are the starting values; a
+pin saved on the device wins, and "Build Default" goes back to the YAML's.
+
+- **Applied before the drivers start.** LEDC, the LED strip and the GPIO binary
+  sensor read their pin in `setup()` at HARDWARE priority. `PinLoader`, a small
+  component at BUS priority, loads the Device record first and rewrites their pins
+  (`set_pin()`); the preferences are open before any `setup()`. So a change applies
+  at the **next restart**, and nothing restarts by itself: Restart Needed turns on,
+  and the Restart button (refused while the tray moves) restarts.
+- **"None"** for the button or the LED: their driver components are put in ESPHome's
+  "loop done" state before setup, which ESPHome supports for components that disable
+  themselves early, so they are never set up and the pin stays free. Nothing else
+  calls them: the button's interrupt is only attached in its setup, and the LED is
+  internal and driven only by the status_led interval, which checks
+  `status_led_fitted()` first.
+- **The validator** (`check_pin`, `feeder_core.h`, host-tested), for the ESP32-S3:
+  - refused: not on the chip (22 to 25), the SPI flash and PSRAM (26 to 32), USB
+    (19, 20), strapping pins (0, 3, 45, 46);
+  - accepted with a warning: 33 to 37 (octal flash or PSRAM on some modules, for
+    example N8R8) and 43, 44 (UART0: boot messages at every reset);
+  - two parts on one pin are refused; the servo always needs a pin.
+  The pin selects offer exactly the pins not refused (`tests/test_consistency.py`).
+- **A bad saved record** (a refused pin, or a clash) falls back to the build's pins at
+  boot, with a warning in the log, so a damaged record cannot stop the feeder.
+- **Board presets:** Waveshare ESP32-S3-Zero (servo GPIO1, button GPIO2, LED GPIO21:
+  the bench build), Espressif ESP32-S3-DevKitC-1 (GPIO4, GPIO5, LED GPIO38 as on v1.1
+  boards; v1.0 has it on GPIO48, so Custom). The board is not saved: it is worked out
+  from the pins (all following the build: Build Default; matching a preset: that
+  preset; else Custom). Choosing Custom changes nothing.
+- A part the build does not include (no button or LED package) has no pin, whatever
+  is saved, and its pin cannot be changed.
+- Pins are protected settings (section 10.1). BLE has no access to them.
 
 ## 3. Mechanism and magazine model
 
@@ -356,7 +395,8 @@ immediately and are saved a couple of seconds later, so there is no Save
 button. Event time and days are text entities (`HH:MM` or signed `+03:00`;
 `mon,wed,fri` / `weekdays` / `all`). Config: guard settings, gap between
 portions, latitude, longitude, reload pause, refill interval
-and the timezone (a POSIX string, see section 6). Calibration: mode switch, position
+and the timezone (a POSIX string, see section 6). Hardware (firmware 2.0.0, section 2.1):
+Board, Servo Pin, Button Pin, LED Pin (selects), Pins In Use, Restart Needed, Restart. Calibration: mode switch, position
 select, one offset number, servo min/max pulse (saved, tuned at run time),
 declare-position recovery.
 
@@ -469,7 +509,7 @@ sets at run time, so later milestones fill fields in instead of changing it:
 
 | Field | Meaning | "Use the build's value" | Milestone |
 |---|---|---|---|
-| `servo_pin`, `button_pin`, `led_pin` | GPIO numbers; `PIN_NONE` for no button or LED | `PIN_BUILD` | N3 |
+| `servo_pin`, `button_pin`, `led_pin` | GPIO numbers; `PIN_NONE` for no button or LED (section 2.1) | `PIN_BUILD` | N3 (built) |
 | `flags` | setup done; BLE may change guard limits; BLE may change calibration (both on by default) | | N4, N6 |
 | `hostname` | device name | empty | N5 |
 | `timezone` | POSIX TZ string | empty | N1 (built) |
@@ -530,8 +570,9 @@ are already authenticated (and BLE's access gets its own toggles in N4).
 
 - **What it protects** is the firmware's list, `protected_entities` in
   `packages/web_server.yaml`: Minimum Gap Between Feeds, Gap Between Portions,
-  Daily Portion Cap, Portions Counted (24 h), Max Portions Per Command, and every
-  calibration entity except Declare Tray Position (everyday recovery). Never the
+  Daily Portion Cap, Portions Counted (24 h), Max Portions Per Command, every
+  calibration entity except Declare Tray Position (everyday recovery), and the
+  pins (Board, Servo Pin, Button Pin, LED Pin; section 2.1). Never the
   schedule, feeding, hold, tray reload, location or timezone.
   `tests/test_consistency.py` checks the list names real entities and covers the
   guard limits and calibration. Later milestones add their settings to it.
@@ -594,7 +635,8 @@ precision-feeder/
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
-                                    feeder_password.cpp (settings password), crypto.h,
+                                    feeder_password.cpp (settings password), feeder_pins.cpp
+                                    (runtime pins, ESP32-S3 pin validator), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
                                     parser); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
@@ -602,7 +644,7 @@ precision-feeder/
                                     BleEngine (engine.*: every handler), all host-tested;
                                     precision_feeder_ble.* is the thin ESPHome adapter
   packages/            core, status, controls, schedule_editor, calibration,
-                       status_led, web_server, button, time_homeassistant,
+                       status_led, web_server, button, hardware, time_homeassistant,
                        diagnostics, network_info, ble_gatt
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
   web/                 the web app: src/ (plain JavaScript and CSS, no dependencies), dist/ (built by
@@ -720,6 +762,17 @@ precision-feeder/
     The timezone is not (it is not in the owner's protected list).
   - Each protected change is signed over a one-time challenge (PBKDF2 key,
     HMAC-SHA256); waits after failures double from 1 s to 60 s.
+- **2.0.0 N3 (2026-10-15):**
+  - Runtime pins (section 2.1). This replaces "every pin is a substitution" (AGENTS.md):
+    the substitution is now the starting value and a pin saved on the device wins, as the
+    servo pulse range already did.
+  - Pins apply at the next restart, never by themselves (no automatic reboot). A Restart
+    button, refused while the tray moves, is not a protected setting.
+  - "None" for the button or LED keeps its driver from being set up at all, rather than
+    marking it failed (which would log an error at every boot).
+  - The board is worked out from the pins, not saved, so the Device layout is unchanged.
+  - Preset pins for the ESP32-S3-DevKitC-1 (GPIO4, GPIO5, LED GPIO38) were chosen in N3,
+    not by the owner; to confirm (section 14, item 14).
 
 ## 14. Open items
 
@@ -835,6 +888,11 @@ precision-feeder/
     write) would touch every web-server write; not planned yet (2026-10-15).
 13. BOOT button on the bench: N2 reads GPIO0 after startup for the password reset; that it reads
     cleanly on the Waveshare ESP32-S3-Zero and the DevKitC-1 is still an N0 bench check.
+14. Runtime pins on the bench (2.0.0 N3): compiled and host-tested only. Still to see on
+    hardware: a saved servo pin moving the servo to another GPIO after a restart; Button Pin
+    and LED Pin "none" leaving the drivers unset with no error in the log; the LED and button
+    on new pins; and the ESP32-S3-DevKitC-1 preset (GPIO4, GPIO5, LED GPIO38) on a real
+    DevKitC-1, chosen without the owner (decisions log, N3).
 
 ## 15. Implementation status (v1.1.0)
 

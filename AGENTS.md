@@ -64,7 +64,9 @@ substitutions.
   due; after downtime, a hold or a reload pause they are skipped.
 
 ### Configuration and style
-- Every pin is a substitution with a documented default. No hard-coded GPIOs.
+- Every pin is a substitution with a documented default. No hard-coded GPIOs. Since
+  2.0.0 the substitution is the starting value: a pin saved on the device (Device record,
+  DESIGN.md section 2.1) wins, and only pins `check_pin()` accepts can be saved.
 - Every feature is a package or build option with comments saying what the
   setting does and when to change it. Optional features (BLE, HA time, button,
   web UI) must compile out cleanly.
@@ -93,7 +95,7 @@ substitutions.
   `python3 -m unittest test_precision_feeder_ble` in `tools/`. The C++ and Python
   protocol tests share golden byte vectors; change them together.
 - Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
-  `feeder_schedule.cpp`, `feeder_text.cpp` and `feeder_password.cpp`; the timezone parser is `tz_rules.h`, SHA-256 and
+  `feeder_schedule.cpp`, `feeder_text.cpp`, `feeder_password.cpp` and `feeder_pins.cpp`; the timezone parser is `tz_rules.h`, SHA-256 and
 HMAC are `crypto.h`), which must stay free of
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
@@ -125,7 +127,8 @@ HMAC are `crypto.h`), which must stay free of
 README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
 docs/         PROTOCOL.md, CALIBRATION.md, SCHEDULING.md, BENCH.md, WEB_UI.md; plans/ (release plans)
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
-              scheduler and projection; feeder_text.cpp editor and status texts; calendar.h and
+              scheduler and projection; feeder_text.cpp editor and status texts; feeder_password.cpp
+              settings password; feeder_pins.cpp runtime pins and pin validator; calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
               and precision_feeder_ble/ (optional BLE protocol: protocol.h and BleEngine in
               engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)

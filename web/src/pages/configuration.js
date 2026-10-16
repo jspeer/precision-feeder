@@ -65,14 +65,66 @@ PAGES.configuration = {
     dev.appendChild(h('p', { class: 'hint' }, 'Wi-Fi and the name are set in your YAML configuration. ' +
                                               'Diagnostics shows every address and the live log.'));
 
+    this.hw = this.hardwareCard();
+
     this.pw = card('Settings password');
     this.pw.hidden = true;
     auth.onChange(() => this.updatePassword());
     auth.refresh();
 
     append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
-           h('div', { class: 'grid' }, this.pw));
+           h('div', { class: 'grid' }, this.hw, this.pw));
     this.update();
+  },
+
+  /** Board and pins (packages/hardware.yaml): saved at once, used after a restart. Null without the package. */
+  hardwareCard() {
+    if (!store.has(E.board)) return null;
+    const hw = card('Board and pins', h('p', { class: 'hint' }, 'Where the servo, the button and the LED are wired. ' +
+                    'A change is saved at once and used after the next restart.'));
+    // The board is the device's own select, except that "Custom" is only shown, not chosen: pick the pins instead.
+    const board = h('select', { class: 'input', 'aria-label': 'Board', onchange: () => {
+      if (board.value === 'Custom') {
+        toast('Choose the pins one by one below');
+        board._update(true);
+        return;
+      }
+      api.setAndConfirm(E.board, board.value).catch(err => { toastError(err); board._update(true); });
+    } }, (store.get(E.board).option || []).map(o => h('option', { value: o }, o)));
+    board._update = force => { if (force || document.activeElement !== board) board.value = store.text(E.board); };
+    const boardRow = h('div', { class: 'setting' },
+      h('div', { class: 'setting-text' }, h('div', { class: 'setting-label' }, 'Board'),
+        h('div', { class: 'hint' }, 'Build Default: the pins in your YAML (or the ones the firmware was built with).')),
+      h('div', { class: 'setting-control' }, board));
+    boardRow._update = () => board._update();
+    const pins = [
+      boardRow,
+      setting('Servo pin', 'The servo signal wire.', E.servoPin),
+      setting('Button pin', 'The optional push button; none if your build has no button.', E.buttonPin),
+      setting('LED pin', 'The status LED (WS2812); none if your board has none.', E.ledPin),
+    ].filter(Boolean);
+    this.rows.push(...pins);
+    for (const r of pins) hw.appendChild(r);
+    hw.appendChild(h('p', { class: 'hint' }, 'GPIO33 to 37 are taken by the octal flash or PSRAM on some modules ' +
+                     '(for example the N8R8 DevKitC-1): use them only on boards without. A servo on GPIO43 or 44 may ' +
+                     'twitch at reset, when the chip prints its boot messages there.'));
+    this.timeRows.push(boundRow(hw, 'In use', () => store.text(E.pinsInUse)));
+    if (store.has(E.restart)) {
+      const note = h('p', {}, 'A change is waiting for a restart.');
+      const btn = h('button', { class: 'btn', onclick: async () => {
+        if (!await confirmDialog({ title: 'Restart the feeder?', ok: 'Restart',
+                                   body: 'It is back in a few seconds and carries on feeding by itself. Refused ' +
+                                         'while the tray moves.' })) return;
+        api.press(E.restart).then(() => toast('Restarting', 'ok'), toastError);
+      } }, 'Restart');
+      hw.appendChild(h('div', {}, note, h('div', { class: 'actions' }, btn)));
+      this.timeRows.push(() => {
+        const needed = store.bool(E.restartNeeded) === true;
+        note.hidden = !needed;
+        btn.classList.toggle('btn-primary', needed);
+      });
+    }
+    return hw;
   },
 
   /** The password card: what is protected, and lock, unlock, set, change or remove. */
@@ -81,7 +133,7 @@ PAGES.configuration = {
     if (!pw || !pw.isConnected) return;
     pw.hidden = !auth.available;
     while (pw.children.length > 1) pw.lastChild.remove();
-    const what = 'Changing the feeding safety limits or the calibration from this app';
+    const what = 'Changing the feeding safety limits, the calibration or the pins from this app';
     const btn = (label, onclick, cls = 'btn') => h('button', { class: cls, onclick }, label);
     const run = (p, ok) => p.then(() => ok && toast(ok, 'ok'), toastError);
     const forgot = h('p', { class: 'hint' }, 'Forgotten? Hold the BOOT button on the board for 10 seconds while the ' +

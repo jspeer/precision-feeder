@@ -21,6 +21,12 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   crosses the network: the app proves it knows it for each change. Holding BOOT for 10
   seconds clears it. Home Assistant and BLE are unaffected. New Settings Password sensor.
 - The Configuration page edits the timezone and manages the settings password.
+- Pins without a rebuild: the new `hardware` package (on in both examples) adds Board
+  (Waveshare ESP32-S3-Zero and ESP32-S3-DevKitC-1 presets), Servo Pin, Pins In Use,
+  Restart Needed and a Restart button; the button and status LED packages add Button Pin
+  and LED Pin, where "none" means not fitted. Pins saved on the device win over the YAML
+  and apply at the next restart; only pins the ESP32-S3 can spare are accepted. They are
+  protected by the settings password. The Configuration page has a "Board and pins" card.
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)

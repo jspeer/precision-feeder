@@ -9,6 +9,7 @@ import re
 
 import esphome.codegen as cg
 from esphome.components import output, time as time_
+from esphome.components.esp32.gpio import ESP32InternalGPIOPin
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_OUTPUT, CONF_TIME_ID
 
@@ -18,6 +19,7 @@ AUTO_LOAD = ["output"]
 
 precision_feeder_ns = cg.esphome_ns.namespace("precision_feeder")
 PrecisionFeeder = precision_feeder_ns.class_("PrecisionFeeder", cg.Component)
+PinLoader = precision_feeder_ns.class_("PinLoader", cg.Component)
 
 CONF_SWEEP = "sweep_degrees"
 CONF_MIN_PULSE = "min_pulse_width"
@@ -28,8 +30,25 @@ CONF_WIGGLE = "wiggle"
 CONF_DETACH_DELAY = "detach_delay"
 CONF_WEB_SERVER_ID = "web_server_id"
 CONF_PROTECTED = "protected_entities"
+CONF_SERVO_PIN_ID = "servo_pin_id"
+CONF_BUTTON_ID = "button_id"
+CONF_BUTTON_PIN_ID = "button_pin_id"
+CONF_STATUS_LED_ID = "status_led_id"
+CONF_STATUS_LED_OUTPUT_ID = "status_led_output_id"
+CONF_STATUS_LED_PIN = "status_led_pin"
+CONF_PIN_LOADER_ID = "pin_loader_id"
 
 WebServer = cg.esphome_ns.namespace("web_server").class_("WebServer")
+
+
+def gpio_number(value):
+    """A GPIO number, as 21 or "GPIO21". Not claimed as a pin: the LED's own driver already claims it."""
+    if isinstance(value, str):
+        m = re.fullmatch(r"(?:GPIO)?(\d+)", value.strip(), re.IGNORECASE)
+        if not m:
+            raise cv.Invalid(f"expected a GPIO number such as GPIO21, got {value!r}")
+        value = int(m.group(1))
+    return cv.int_range(min=0, max=48)(value)
 
 
 def protected_entity(value):
@@ -74,6 +93,16 @@ CONFIG_SCHEMA = cv.Schema(
         # password when one is set (DESIGN.md section 10.1). Home Assistant and BLE are not affected.
         cv.OnlyWith(CONF_WEB_SERVER_ID, "web_server"): cv.use_id(WebServer),
         cv.Optional(CONF_PROTECTED, default=[]): cv.ensure_list(protected_entity),
+        # Runtime pins (DESIGN.md section 2.1): the pins of the servo output, the button and the status LED, so the
+        # pins saved on the device can replace the YAML's before those drivers start. Set by the packages (core.yaml,
+        # button.yaml, status_led.yaml); leave them out and every pin stays as the YAML says.
+        cv.GenerateID(CONF_PIN_LOADER_ID): cv.declare_id(PinLoader),
+        cv.Optional(CONF_SERVO_PIN_ID): cv.use_id(ESP32InternalGPIOPin),
+        cv.Inclusive(CONF_BUTTON_ID, "button"): cv.use_id(cg.Component),
+        cv.Inclusive(CONF_BUTTON_PIN_ID, "button"): cv.use_id(ESP32InternalGPIOPin),
+        cv.Inclusive(CONF_STATUS_LED_ID, "status_led"): cv.use_id(cg.Component),
+        cv.Inclusive(CONF_STATUS_LED_OUTPUT_ID, "status_led"): cv.use_id(cg.Component),
+        cv.Inclusive(CONF_STATUS_LED_PIN, "status_led"): gpio_number,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -108,6 +137,18 @@ async def to_code(config):
     cg.add(var.set_step_time(config[CONF_STEP_TIME].total_milliseconds))
     cg.add(var.set_wiggle(config[CONF_WIGGLE]))
     cg.add(var.set_detach_delay(config[CONF_DETACH_DELAY].total_milliseconds))
+
+    if CONF_SERVO_PIN_ID in config:
+        cg.add(var.set_servo_pin(await cg.get_variable(config[CONF_SERVO_PIN_ID])))
+        if CONF_BUTTON_ID in config:
+            sensor = await cg.get_variable(config[CONF_BUTTON_ID])
+            cg.add(var.set_button(sensor, await cg.get_variable(config[CONF_BUTTON_PIN_ID])))
+        if CONF_STATUS_LED_ID in config:
+            light = await cg.get_variable(config[CONF_STATUS_LED_ID])
+            led = await cg.get_variable(config[CONF_STATUS_LED_OUTPUT_ID])
+            cg.add(var.set_status_led(light, led, config[CONF_STATUS_LED_PIN]))
+    loader = cg.new_Pvariable(config[CONF_PIN_LOADER_ID], var)  # does nothing without servo_pin_id
+    await cg.register_component(loader, {})
 
     if CONF_WEB_SERVER_ID in config:
         cg.add(var.set_web_server(await cg.get_variable(config[CONF_WEB_SERVER_ID])))
