@@ -6,10 +6,11 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.0.1: appliance, fixed on the bench (in progress)
+## 2.0.1: appliance, fixed on the bench (2026-10-16)
 
-2.0.0 was never released: the bench (2.0.0 N8, [docs/BENCH.md](docs/BENCH.md)) found two faults in it. 2.0.1 is
-2.0.0 (below) with them fixed.
+The first release of 2.0, "appliance": prebuilt binaries installed from a web page, a setup wizard, settings changed
+at run time, and updates from the web app. 2.0.0 was never released: the bench (2.0.0 N8,
+[docs/BENCH.md](docs/BENCH.md)) found faults in it, fixed here. Its changes are listed under 2.0.0 below.
 
 - New guides: [docs/INSTALL.md](docs/INSTALL.md) (installing the prebuilt firmware, updates, recovery, the binary
   and flash matrix) and [docs/SECURITY.md](docs/SECURITY.md) (the security model).

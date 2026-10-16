@@ -39,9 +39,24 @@ def fw_version() -> str:
 
 
 def release_notes(version: str, changelog: str) -> str:
-    """The CHANGELOG.md section whose heading starts with this version, without the heading."""
-    m = re.search(rf"^## {re.escape(version)}(?=[:\s])[^\n]*\n(.*?)(?=^## |\Z)", changelog, re.M | re.S)
-    return m.group(1).strip() + "\n" if m else ""
+    """The CHANGELOG.md section whose heading starts with this version, without the heading, followed by any
+    sections right after it whose heading says "not released" (their changes reach users in this release), each
+    under its own heading."""
+    sections = re.findall(r"^## ([^\n]*)\n(.*?)(?=^## |\Z)", changelog, re.M | re.S)
+    for i, (heading, body) in enumerate(sections):
+        if re.match(rf"{re.escape(version)}(?=[:\s])", heading):
+            notes = body.strip() + "\n"
+            for later, later_body in sections[i + 1:]:
+                if "not released" not in later:
+                    break
+                notes += f"\n## {later}\n\n{later_body.strip()}\n"
+            return notes
+    return ""
+
+
+def absolute_links(notes: str, version: str) -> str:
+    """CHANGELOG.md links are relative to the repository; on a release page they must point at the tagged files."""
+    return re.sub(r"\]\((?!https?://|#)([^)]+)\)", rf"]({REPO}/blob/v{version}/\1)", notes)
 
 
 def image(path: pathlib.Path) -> dict:
@@ -74,7 +89,8 @@ def make(images: pathlib.Path, site: pathlib.Path, version: str) -> dict:
         (site / f"install-{variant}.json").write_text(json.dumps(install, indent=2) + "\n")
     (site / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copyfile(ROOT / "install" / "index.html", site / "index.html")
-    (site / "release-notes.md").write_text(release_notes(version, (ROOT / "CHANGELOG.md").read_text()))
+    notes = release_notes(version, (ROOT / "CHANGELOG.md").read_text())
+    (site / "release-notes.md").write_text(absolute_links(notes, version))
     return manifest
 
 

@@ -43,6 +43,16 @@ class MakeReleaseTest(unittest.TestCase):
         self.assertEqual(make_release.release_notes("1.1.0", log), "- c\n")
         self.assertEqual(make_release.release_notes("1.1", log), "")
         self.assertEqual(make_release.release_notes("3.0.0", log), "")
+        # An unreleased version's changes come along with the release that ships them.
+        log = ("## 2.0.1: fixed (2026-10-16)\n\n- fix\n\n## 2.0.0: big (not released; see 2.0.1)\n\n- feature\n\n"
+               "## 1.1.0: older\n\n- old\n")
+        self.assertEqual(make_release.release_notes("2.0.1", log),
+                         "- fix\n\n## 2.0.0: big (not released; see 2.0.1)\n\n- feature\n")
+        self.assertEqual(make_release.release_notes("1.1.0", log), "- old\n")
+
+    def test_links(self):
+        self.assertEqual(make_release.absolute_links("see [a](docs/A.md), [b](https://x.y/z), [c](#top)", "9.8.7"),
+                         f"see [a]({make_release.REPO}/blob/v9.8.7/docs/A.md), [b](https://x.y/z), [c](#top)")
 
     def test_version_matches_the_firmware(self):
         self.assertRegex(make_release.fw_version(), r"^\d+\.\d+\.\d+$")
