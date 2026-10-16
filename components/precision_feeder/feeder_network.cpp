@@ -1,0 +1,113 @@
+// Precision Feeder core: the network settings saved on the device (DESIGN.md section 9.3): the name and the fallback
+// access point's password, and the checks for those and for a Wi-Fi network set from the web app. Applying them is
+// the adapter's job (precision_feeder.cpp), at boot, before Wi-Fi starts.
+//
+// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Designed and written with the assistance of an AI (Anthropic's Claude);
+// reviewed by a human, but it may still contain mistakes.
+#include "feeder_internal.h"
+
+#include <cstring>
+
+namespace esphome {
+namespace precision_feeder {
+
+bool check_hostname(const std::string &name, std::string *problem) {
+  auto refuse = [problem](const char *why) {
+    if (problem != nullptr)
+      *problem = why;
+    return false;
+  };
+  if (name.empty())
+    return refuse("empty");
+  if (name.size() > HOSTNAME_SIZE - 1)
+    return refuse("longer than 31 characters");
+  for (char c : name) {
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'))
+      return refuse("only lowercase letters, digits and hyphens");
+  }
+  if (name.front() == '-' || name.back() == '-')
+    return refuse("starts or ends with a hyphen");
+  return true;
+}
+
+bool check_wifi_password(const std::string &password, bool for_wifi) {
+  if (password.empty())
+    return for_wifi;  // an open network; the access point always has a password
+  if (password.size() == WIFI_PASSWORD_MAX) {
+    if (!for_wifi)
+      return false;
+    for (char c : password) {
+      if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+        return false;
+    }
+    return true;
+  }
+  if (password.size() < 8 || password.size() > WIFI_PASSWORD_MAX - 1)
+    return false;
+  for (char c : password) {
+    if (c < 0x20 || c > 0x7e)
+      return false;
+  }
+  return true;
+}
+
+bool check_ssid(const std::string &ssid) {
+  if (ssid.empty() || ssid.size() > WIFI_SSID_MAX)
+    return false;
+  for (char c : ssid) {
+    if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f)
+      return false;
+  }
+  return true;
+}
+
+void FeederCore::set_network_in_use(const std::string &hostname, bool has_ap, const Device &applied) {
+  this->network_runtime_ = true;
+  this->has_ap_ = has_ap;
+  this->hostname_in_use_ = hostname;
+  // What core_start() keeps of the record too: a value it would drop counts as the build's.
+  std::memset(this->boot_hostname_, 0, HOSTNAME_SIZE);
+  std::memset(this->boot_ap_password_, 0, AP_PASSWORD_SIZE);
+  const std::string name(applied.hostname, strnlen(applied.hostname, HOSTNAME_SIZE - 1));
+  const std::string ap(applied.ap_password, strnlen(applied.ap_password, AP_PASSWORD_SIZE - 1));
+  if (check_hostname(name))
+    std::memcpy(this->boot_hostname_, name.data(), name.size());
+  if (check_wifi_password(ap, false))
+    std::memcpy(this->boot_ap_password_, ap.data(), ap.size());
+}
+
+Result FeederCore::set_hostname(const std::string &name) {
+  if (!this->network_runtime_)
+    return Result::UNSUPPORTED;
+  if (!name.empty() && !check_hostname(name))
+    return Result::INVALID_ARG;
+  if (name == this->dev_.hostname)
+    return Result::OK;
+  std::memset(this->dev_.hostname, 0, HOSTNAME_SIZE);
+  std::memcpy(this->dev_.hostname, name.data(), name.size());  // check_hostname() checked the length
+  this->hal_save_device(this->dev_);
+  if (name.empty())
+    this->log_(LogLevel::kInfo, "Name: back to the build's at the next restart");
+  else
+    this->log_(LogLevel::kInfo, "Name set to %s (used after the next restart)", this->dev_.hostname);
+  return Result::OK;
+}
+
+Result FeederCore::set_ap_password(const std::string &password) {
+  if (!this->network_runtime_ || !this->has_ap_)
+    return Result::UNSUPPORTED;
+  if (!password.empty() && !check_wifi_password(password, false))
+    return Result::INVALID_ARG;
+  if (password == this->dev_.ap_password)
+    return Result::OK;
+  std::memset(this->dev_.ap_password, 0, AP_PASSWORD_SIZE);
+  std::memcpy(this->dev_.ap_password, password.data(), password.size());
+  this->hal_save_device(this->dev_);
+  this->log_(LogLevel::kInfo, password.empty() ? "Access-point password: back to the build's at the next restart"
+                                               : "Access-point password changed (used after the next restart)");
+  return Result::OK;
+}
+
+}  // namespace precision_feeder
+}  // namespace esphome

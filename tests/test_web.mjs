@@ -158,7 +158,7 @@ test('address kinds', () => {
 // ---- the settings password (web/src/auth.js): the same answers as the device (tests/test_core.cpp) ----
 const authSrc = readFileSync(new URL('../web/src/auth.js', import.meta.url), 'utf8');
 const actx = vm.createContext({ TextEncoder, atob, btoa });
-vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey,
+vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey, maskText,
                                        keyToBase64, keyFromBase64 };`, actx);
 const A = actx.A;
 
@@ -197,6 +197,15 @@ test('settings password: the device vectors', () => {
   assert.equal(A.toHex(A.maskKey(newKey, key, nonce)), '2e33a9c5afad47f2f7547a0ab2ab9f9ff8f2acea70fc7609bdf3b4903cedea2f');
   assert.equal(A.toHex(A.maskKey(newKey, null, nonce)), A.toHex(newKey), 'no current password: not masked');
   assert.equal(A.authMessage('/switch/Calibration Mode/turn_on'), '/switch/Calibration Mode/turn_on\n');
+});
+
+test('network: secret texts masked as the device unmasks them (2.0.0 N5)', () => {
+  const key = A.fromHex('f353b5100691ea4531a49c82821a088e2083178c2c6954a17a1ec53b3900da25');
+  const nonce = Uint8Array.from({ length: 16 }, (_, i) => 16 + i);
+  const text = 'a wifi password longer than thirty-two bytes';
+  assert.equal(A.toHex(A.maskText(text, key, nonce)),
+               'a8685e68331b4ef6464670da56f92f1fcdcfcab7533f75b6a2a34b3a2eed915476e0934605b6633c2ac93e3d');
+  assert.equal(A.toHex(A.maskText('hello', null, nonce)), A.toHex(A.utf8('hello')), 'no password: not masked');
 });
 
 test('keys: base64 in and out (2.0.0 N4)', () => {

@@ -1204,6 +1204,10 @@ static const char *const PW_TAG = "9b2b5e3df64049cfbdb3b02ebddb43277df22b4cc0fe8
 // "battery staple", salt 20..2f, masked with the key above and nonce 10..1f.
 static const char *const PW_NEW_KEY = "880ec4efdf8f0c832ce0d85cc76b3191b73014a0c3768c3bbd5a14354698425c";
 static const char *const PW_NEW_MASKED = "2e33a9c5afad47f2f7547a0ab2ab9f9ff8f2acea70fc7609bdf3b4903cedea2f";
+// A secret text (a Wi-Fi password) masked with PW_KEY and nonce 10..1f; tests/test_web.mjs has the same vector.
+static const char *const PW_TEXT = "a wifi password longer than thirty-two bytes";
+static const char *const PW_TEXT_MASKED =
+    "a8685e68331b4ef6464670da56f92f1fcdcfcab7533f75b6a2a34b3a2eed915476e0934605b6633c2ac93e3d";
 
 static void test_settings_password() {
   current = "settings password";
@@ -1269,6 +1273,9 @@ static void test_settings_password() {
       n16[i] = static_cast<uint8_t>(16 + i);
     f->password_unmask(n16, masked.data(), out);
     CHECK(std::memcmp(out, new_key.data(), PASSWORD_HASH_SIZE) == 0, "unmasked with the current key");
+    const auto text_masked = unhex(PW_TEXT_MASKED);
+    CHECK(f->password_unmask_text(n16, text_masked.data(), text_masked.size()) == PW_TEXT,
+          "a secret text longer than one block is unmasked too");
   }
   {
     auto f = boot(flash, T0);
@@ -1288,6 +1295,9 @@ static void test_settings_password() {
     uint8_t mask_out[PASSWORD_HASH_SIZE], zero[PASSWORD_HASH_SIZE]{};
     f->password_unmask(nonce, zero, mask_out);
     CHECK(std::memcmp(mask_out, zero, PASSWORD_HASH_SIZE) == 0, "no password: the new key is not masked");
+    const std::string plain = "hello";
+    CHECK(f->password_unmask_text(nonce, reinterpret_cast<const uint8_t *>(plain.data()), plain.size()) == plain,
+          "no password: a secret text is not masked");
   }
   {
     flash.device.password_scheme = 7;  // from a newer firmware
@@ -1333,6 +1343,63 @@ static void test_ble_settings() {
   }
 }
 
+static void test_network() {
+  current = "network";
+  CHECK(check_hostname("precision-feeder") && check_hostname("a") && check_hostname("feeder-2"), "good names");
+  std::string why;
+  CHECK(!check_hostname("", &why) && why == "empty", "empty");
+  CHECK(!check_hostname("Feeder") && !check_hostname("my_feeder") && !check_hostname("feeder.local") &&
+            !check_hostname("-feeder") && !check_hostname("feeder-"),
+        "uppercase, underscore, dot and edge hyphens refused");
+  CHECK(check_hostname(std::string(31, 'a')) && !check_hostname(std::string(32, 'a')), "at most 31 characters");
+  CHECK(check_wifi_password("12345678", false) && !check_wifi_password("1234567", false) &&
+            check_wifi_password(std::string(63, 'x'), false),
+        "access point: 8 to 63 characters");
+  CHECK(!check_wifi_password("", false) && check_wifi_password("", true), "open only for a Wi-Fi network");
+  CHECK(check_wifi_password(std::string(64, 'a'), true) && !check_wifi_password(std::string(64, 'g'), true) &&
+            !check_wifi_password(std::string(64, 'a'), false),
+        "64 hex digits: a raw WPA2 key, for Wi-Fi only");
+  CHECK(!check_wifi_password("caf\xc3\xa9 latte", true) && !check_wifi_password("tab\there!", true),
+        "printable ASCII only");
+  CHECK(check_ssid("Home") && check_ssid(std::string(32, 's')) && !check_ssid("") && !check_ssid(std::string(33, 's')) &&
+            !check_ssid("bad\nssid"),
+        "SSIDs: 1 to 32 bytes, no control characters");
+
+  Flash flash;
+  {
+    auto f = boot(flash, T0);
+    CHECK(f->set_hostname("feeder") == Result::UNSUPPORTED && !flash.have_device, "nothing before the adapter applies");
+    f->set_network_in_use("precision-feeder", false, f->device());
+    CHECK(f->hostname_in_use() == "precision-feeder" && f->hostname_saved().empty() && !f->restart_needed(),
+          "the build's name");
+    CHECK(f->set_hostname("Bad Name") == Result::INVALID_ARG && !flash.have_device, "a bad name is refused");
+    CHECK(f->set_hostname("tank-feeder") == Result::OK && flash.have_device && flash.device_saves == 1, "saved at once");
+    CHECK(f->restart_needed() && f->hostname_in_use() == "precision-feeder", "used after the next restart");
+    CHECK(f->set_hostname("tank-feeder") == Result::OK && flash.device_saves == 1, "the same name is not rewritten");
+    CHECK(f->set_ap_password("12345678") == Result::UNSUPPORTED, "no access point in this build");
+  }
+  {
+    auto f = boot(flash, T0 + 60);
+    CHECK(f->hostname_saved() == "tank-feeder", "kept across a restart");
+    f->set_network_in_use("tank-feeder", true, f->device());
+    CHECK(!f->restart_needed(), "applied: no restart due");
+    CHECK(f->ap_password_source() == KeySource::BUILD, "the access point uses the build's password");
+    CHECK(f->set_ap_password("short") == Result::INVALID_ARG, "too short");
+    CHECK(f->set_ap_password("feed the fish") == Result::OK && f->ap_password_source() == KeySource::DEVICE &&
+              f->restart_needed(),
+          "saved; used after the next restart");
+    CHECK(f->set_ap_password("") == Result::OK && !f->restart_needed(), "back to the build's: nothing to restart for");
+    CHECK(f->set_hostname("") == Result::OK && f->restart_needed(), "back to the build's name at the next restart");
+  }
+  {
+    // A damaged record: a name and a password that are not usable fall back to the build's.
+    std::strcpy(flash.device.hostname, "Bad Name");
+    std::strcpy(flash.device.ap_password, "short");
+    auto f = boot(flash, T0 + 120);
+    CHECK(f->hostname_saved().empty() && f->ap_password_source() == KeySource::BUILD, "dropped on load");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -1365,6 +1432,7 @@ int main() {
   test_pins();
   test_settings_password();
   test_ble_settings();
+  test_network();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

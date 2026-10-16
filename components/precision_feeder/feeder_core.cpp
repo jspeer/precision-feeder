@@ -77,6 +77,14 @@ void FeederCore::clamp_device_() {
   d.timezone[TIMEZONE_SIZE - 1] = '\0';
   d.ap_password[AP_PASSWORD_SIZE - 1] = '\0';
   d.flags &= DEVICE_FLAGS_KNOWN;
+  if (d.hostname[0] != '\0' && !check_hostname(d.hostname)) {
+    this->log_(LogLevel::kWarn, "Saved name not usable, using the build's");
+    std::memset(d.hostname, 0, HOSTNAME_SIZE);
+  }
+  if (d.ap_password[0] != '\0' && !check_wifi_password(d.ap_password, false)) {
+    this->log_(LogLevel::kWarn, "Saved access-point password not usable, using the build's");
+    std::memset(d.ap_password, 0, AP_PASSWORD_SIZE);
+  }
   TzRules tz;
   if (d.timezone[0] != '\0' && !parse_tz(d.timezone, tz)) {
     this->log_(LogLevel::kWarn, "Saved timezone not understood, using the build's");

@@ -1,0 +1,16 @@
+# Precision Feeder: Wi-Fi setup over USB with Improv (optional, firmware 2.0.0).
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# After flashing from a web page (ESP Web Tools), the page asks for your Wi-Fi network and sends it over the USB cable
+# (https://www.improv-wifi.com/). The network is saved on the feeder as if typed in the captive portal or the web app,
+# and the page then offers a link to the feeder. It works over the logger's serial port (the default, USB Serial/JTAG
+# on the ESP32-S3), so leave the logger's hardware_uart and baud_rate as they are.
+#
+# Anyone with the USB cable plugged in can set the network this way: physical access is trusted (DESIGN.md
+# section 10.1). Leave this package out if you never set Wi-Fi over USB; it saves a little flash.
+
+improv_serial:
+  next_url: http://{{ip_address}}/

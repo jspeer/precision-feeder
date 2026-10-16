@@ -33,6 +33,16 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   `api_key_on_device` package the Home Assistant key is not in the YAML: Home Assistant
   sets it on adoption, or the card generates, takes or clears it; OTA then refuses
   plaintext. All of this needs the settings password when one is set.
+- Network settings in the web app: Configuration has a Network card to change the
+  feeder's name (used after the next restart; wins over `name`), join another Wi-Fi
+  network (at once; the access point is the way back if it is wrong) and change the
+  fallback access point's password (after the next restart). Protected by the settings
+  password, with the passwords masked by it; the feeder never sends one back. The access
+  point is now named `<name>-setup` from the name in use.
+- New `name_add_mac_suffix` substitution (off by default): adds the end of the MAC
+  address to the name, so feeders built from one YAML do not clash.
+- New `improv_serial` package (on in both examples): set Wi-Fi over the USB cable from an
+  install page (ESP Web Tools).
 - What BLE may change: two new switches, BLE Can Change Guard Limits and BLE Can Change
   Calibration (both on; protected by the settings password). Off, those BLE writes are
   refused with NOT_AUTHORIZED detail 7. A missing key is detail 6. Still protocol 2;

@@ -11,6 +11,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <string>
 
@@ -142,6 +143,20 @@ std::string pin_text(uint8_t gpio);
 bool parse_pin(const std::string &text, uint8_t &gpio);
 const char *board_name(Board board);
 bool parse_board(const std::string &text, Board &board);
+
+// Network (firmware 2.0.0, DESIGN.md section 9.3): the name, the fallback access point's password and the Wi-Fi network
+// the web app can set. ESPHome keeps the Wi-Fi network in its own preference slot; the other two are in the Device record.
+constexpr unsigned WIFI_SSID_MAX = 32;      // bytes, as 802.11 and ESPHome's saved network allow
+constexpr unsigned WIFI_PASSWORD_MAX = 64;  // 8 to 63 characters, or 64 hex digits (a raw WPA2 key)
+constexpr unsigned SECRET_TEXT_MAX = 64;    // the longest text sent masked (password_unmask_text)
+/// A name for the network: 1 to 31 lowercase letters, digits and hyphens, not starting or ending with a hyphen (a DNS
+/// label, as mDNS and DHCP need). Empty is not a name; `problem` (optional) says why one is refused.
+bool check_hostname(const std::string &name, std::string *problem = nullptr);
+/// A WPA2 password: 8 to 63 printable ASCII characters (the access point's), or for a Wi-Fi network also 64 hex
+/// digits. An open network (empty) is accepted for Wi-Fi only.
+bool check_wifi_password(const std::string &password, bool for_wifi);
+/// An SSID: 1 to 32 bytes, no control characters.
+bool check_ssid(const std::string &ssid);
 
 /// Where a feed request came from.
 // ESPHOME: a feed button of the device itself, pressed in Home Assistant (native API) or the web UI.
@@ -456,7 +471,10 @@ class FeederCore {
   const Pins &pins_in_use() const { return this->pins_in_use_; }
   /// The pins the next restart will use.
   Pins pins_saved() const;
-  bool restart_needed() const { return this->pins_runtime_ && this->pins_saved() != this->pins_in_use_; }
+  /// A saved pin, name or access-point password waits for a restart.
+  bool restart_needed() const {
+    return (this->pins_runtime_ && this->pins_saved() != this->pins_in_use_) || this->network_restart_needed();
+  }
   /// Choose one pin: a GPIO, PIN_NONE (button and LED only) or PIN_BUILD. INVALID_ARG for a refused pin or one
   /// another role already uses; UNSUPPORTED when the build cannot change pins.
   Result set_pin(PinRole role, uint8_t gpio);
@@ -467,6 +485,33 @@ class FeederCore {
   /// "servo GPIO1, button none, LED GPIO21": the pins in use.
   std::string pins_text() const;
   bool status_led_fitted() const { return this->pins_in_use_.led != PIN_NONE; }
+
+  // ---- network (DESIGN.md section 9.3) ----
+  // The adapter applies the saved name and access-point password at boot, before Wi-Fi starts, and reports the name
+  // in use. A change here is saved at once and applies at the next restart. Like the password calls, the web
+  // server's task reaches these through the lock.
+  /// What the adapter applied: the name in use, whether the build has a fallback access point, and the saved record
+  /// it applied (the adapter runs before core_start(), so it passes the record it read itself).
+  void set_network_in_use(const std::string &hostname, bool has_ap, const Device &applied);
+  bool network_built() const { return this->network_runtime_; }
+  bool has_ap() const { return this->has_ap_; }
+  const std::string &hostname_in_use() const { return this->hostname_in_use_; }
+  /// The name saved on the device, or "" for the build's.
+  std::string hostname_saved() const { return this->dev_.hostname; }
+  /// Save a name ("" goes back to the build's). INVALID_ARG for one check_hostname() refuses; UNSUPPORTED before
+  /// the adapter has applied the network settings.
+  Result set_hostname(const std::string &name);
+  /// Where the access-point password comes from: BUILD (the YAML's) or DEVICE (saved here).
+  KeySource ap_password_source() const { return this->dev_.ap_password[0] != '\0' ? KeySource::DEVICE : KeySource::BUILD; }
+  /// The password saved here ("" for the build's), for the adapter at boot only; never sent anywhere.
+  const char *ap_password_saved() const { return this->dev_.ap_password; }
+  /// Save the access point's password ("" goes back to the build's). INVALID_ARG unless 8 to 63 printable
+  /// characters; UNSUPPORTED in a build without an access point.
+  Result set_ap_password(const std::string &password);
+  bool network_restart_needed() const {
+    return this->network_runtime_ && (std::strcmp(this->dev_.hostname, this->boot_hostname_) != 0 ||
+                                      std::strcmp(this->dev_.ap_password, this->boot_ap_password_) != 0);
+  }
 
   // ---- settings password (DESIGN.md section 10.1) ----
   // These are called from the web server's task as well as the main loop: the adapter serialises them with a lock,
@@ -484,6 +529,10 @@ class FeederCore {
   /// is zero. Call after password_check() passed for that nonce.
   void password_unmask(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t masked[PASSWORD_HASH_SIZE],
                        uint8_t key[PASSWORD_HASH_SIZE]) const;
+  /// A secret text (a Wi-Fi or access-point password, up to SECRET_TEXT_MAX bytes) travels masked the same way, by
+  /// HMAC-SHA256(current key, nonce || "new secret 1") || HMAC-SHA256(current key, nonce || "new secret 2"), cut to
+  /// its length; zero without a password. Call after password_check() passed for that nonce.
+  std::string password_unmask_text(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t *masked, size_t n) const;
   /// Store a new password: its salt and the key the browser derived from it. Saved at once.
   void set_password(const uint8_t salt[PASSWORD_SALT_SIZE], const uint8_t key[PASSWORD_HASH_SIZE]);
   /// Remove the settings password. Saved at once.
@@ -750,6 +799,11 @@ class FeederCore {
   bool pins_runtime_{false};  // the adapter applied the saved pins at boot, so changing them means something
   bool has_button_{true};     // the build has the button package
   bool has_led_{true};        // the build has the status LED package
+  bool network_runtime_{false};  // the adapter applied the saved name and access-point password at boot
+  bool has_ap_{false};
+  std::string hostname_in_use_;
+  char boot_hostname_[HOSTNAME_SIZE]{};        // the saved values the adapter applied, to tell when a restart is due
+  char boot_ap_password_[AP_PASSWORD_SIZE]{};
   bool tz_reapply_{false};
   uint8_t auth_nonce_[AUTH_NONCE_SIZE]{};
   bool auth_nonce_live_{false};

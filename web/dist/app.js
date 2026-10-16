@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '2f3b05fb9687';
+const BUILD_ID = '63bd0cb2aeb4';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -595,6 +595,16 @@ function maskKey(newKey, currentKey, nonce) {
   return newKey.map((b, i) => b ^ mask[i]);
 }
 
+/** A secret text (a Wi-Fi or access-point password, up to 64 bytes) travels masked like a key, by two HMAC blocks, as
+ *  FeederCore::password_unmask_text expects (none: unmasked). */
+function maskText(text, currentKey, nonce) {
+  const bytes = utf8(text);
+  if (!currentKey) return bytes;
+  const mask = concatBytes(hmacSha256(currentKey, concatBytes(nonce, utf8('new secret 1'))),
+                           hmacSha256(currentKey, concatBytes(nonce, utf8('new secret 2'))));
+  return bytes.map((b, i) => b ^ mask[i]);
+}
+
 /** A 32-byte key as base64, as ESPHome (api: encryption: key) and the BLE clients write it. */
 function keyToBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
 /** A key typed in: base64 of exactly 32 bytes, not all zero; null otherwise. */
@@ -696,6 +706,54 @@ const auth = {
     if (r.status === 409) throw new Error('This build cannot change that key: it comes from the YAML.');
     if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
     await this.refresh();
+  },
+
+  /** The network settings (DESIGN.md section 9.3): the name in use, saved and the build's, where the access point's
+   *  password comes from (build, device or off), whether Wi-Fi can be set, and whether a restart is due. Null when the
+   *  device does not answer. */
+  network: null,
+  async loadNetwork() {
+    try {
+      const r = await fetch(`${location.origin}/feeder/network`, { cache: 'no-store' });
+      this.network = r.ok ? await r.json() : null;
+    } catch (e) {
+      this.network = null;
+    }
+    this._changed();
+    return this.network;
+  },
+
+  /** Save a network setting: ('name', {name}) ('' for the build's), ('ap', {password}) ('' for the build's) or
+   *  ('wifi', {ssid, password}). Passwords travel masked by the settings password; all are signed with it. */
+  async setNetwork(kind, values) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = `/feeder/network/${kind}`;
+    const secret = text => (text ? toHex(maskText(text, this.set ? this.key : null, c.nonceBytes)) : '');
+    let signed, query;
+    if (kind === 'name') {
+      signed = values.name;
+      query = `name=${encodeURIComponent(values.name)}`;
+    } else if (kind === 'ap') {
+      signed = secret(values.password);
+      query = `password=${signed}`;
+    } else {
+      const ssid = toHex(utf8(values.ssid)), password = secret(values.password);
+      signed = ssid + password;
+      query = `ssid=${ssid}&password=${password}`;
+    }
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, signed)) } : {};
+    let r;
+    try {
+      r = await fetch(`${location.origin}${path}?${query}`, { method: 'POST', headers });
+    } catch (e) {
+      throw new Error('The feeder could not be reached.');
+    }
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    if (r.status === 409) throw new Error('This build cannot change that.');
+    if (r.status === 400) throw new Error('The feeder did not accept that value.');
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+    if (kind !== 'wifi') await this.loadNetwork();
   },
 
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
@@ -2140,8 +2198,7 @@ PAGES.configuration = {
       });
     }
     d('Firmware', () => store.text(E.firmware));
-    dev.appendChild(h('p', { class: 'hint' }, 'Wi-Fi and the name are set in your YAML configuration. ' +
-                                              'Diagnostics shows every address and the live log.'));
+    dev.appendChild(h('p', { class: 'hint' }, 'Diagnostics shows every address and the live log.'));
 
     this.hw = this.hardwareCard();
 
@@ -2149,6 +2206,8 @@ PAGES.configuration = {
     this.pw.hidden = true;
     this.keys = card('Keys');
     this.keys.hidden = true;
+    this.net = card('Network');
+    this.net.hidden = true;
     this.keyRows = [setting('Bluetooth may change the safety limits', 'Minimum gap, gap between portions, daily cap ' +
                             'and portions per command.', E.bleGuard),
                     setting('Bluetooth may change the calibration', 'Offsets, servo pulse range and calibration mode.',
@@ -2157,11 +2216,13 @@ PAGES.configuration = {
     auth.onChange(() => {
       this.updatePassword();
       this.updateKeys();
+      this.updateNetwork();
     });
     auth.refresh();
+    auth.loadNetwork();
 
     append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
-           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys));
+           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net));
     this.update();
   },
 
@@ -2221,7 +2282,7 @@ PAGES.configuration = {
     if (!pw || !pw.isConnected) return;
     pw.hidden = !auth.available;
     while (pw.children.length > 1) pw.lastChild.remove();
-    const what = 'Changing the feeding safety limits, the calibration or the pins from this app';
+    const what = 'Changing the feeding safety limits, the calibration, the pins, the keys or the network from this app';
     const btn = (label, onclick, cls = 'btn') => h('button', { class: cls, onclick }, label);
     const run = (p, ok) => p.then(() => ok && toast(ok, 'ok'), toastError);
     const forgot = h('p', { class: 'hint' }, 'Forgotten? Hold the BOOT button on the board for 10 seconds while the ' +
@@ -2284,6 +2345,102 @@ PAGES.configuration = {
       (auth.set ? 'It travels to the feeder masked by the settings password.'
                 : 'With no settings password it crosses your network as it is: set a password first if you do not ' +
                   'trust everyone on it.')));
+  },
+
+  /** The network card (DESIGN.md section 9.3): the name, the Wi-Fi network and the fallback access point's password.
+   *  The device never sends a password. */
+  updateNetwork() {
+    const box = this.net, n = auth.network;
+    if (!box || !box.isConnected) return;
+    box.hidden = !auth.available || !n;
+    while (box.children.length > 1) box.lastChild.remove();
+    if (!n) return;
+    const btn = (label, onclick, cls = 'btn btn-small') => h('button', { class: cls, onclick }, label);
+    const run = (p, ok) => p.then(() => toast(ok, 'ok'), toastError);
+    const part = (title, words, actions) => h('div', { class: 'key-part' },
+      h('div', { class: 'setting-label' }, title), h('p', {}, words),
+      actions.length ? h('div', { class: 'actions' }, actions) : null);
+
+    const next = n.name_saved || n.name_build;
+    const nameWords = n.name === next ? `${n.name}, ${n.name_saved ? 'set here' : 'from the build'}: the feeder ` +
+                                        `answers at ${n.name}.local.`
+                                      : `${n.name} until the next restart, then ${next} (${next}.local).`;
+    box.appendChild(part('Name', nameWords, [
+      btn('Change', () => this.nameDialog()),
+      n.name_saved ? btn(`Use ${n.name_build}`, () => run(auth.setNetwork('name', { name: '' }),
+                                                           'Saved: used after the next restart')) : null,
+    ].filter(Boolean)));
+
+    if (n.wifi) {
+      box.appendChild(part('Wi-Fi network', 'Join another network. The feeder switches at once; if it cannot join, it ' +
+                           'opens its access point after a minute or two so you can try again.',
+                           [btn('Join a network', () => this.wifiDialog())]));
+    }
+    if (n.ap !== 'off') {
+      box.appendChild(part('Access point password', 'Used by the access point the feeder opens when it cannot join ' +
+                           `Wi-Fi. ${n.ap === 'device' ? 'Set here.' : 'From the build.'}`, [
+        btn('Change', () => this.apDialog()),
+        n.ap === 'device' ? btn('Use the build\'s', () => run(auth.setNetwork('ap', { password: '' }),
+                                                              'Saved: used after the next restart')) : null,
+      ].filter(Boolean)));
+    }
+    if (n.restart) {
+      const restart = store.has(E.restart)
+        ? btn('Restart', async () => {
+          if (!await confirmDialog({ title: 'Restart the feeder?', ok: 'Restart',
+                                     body: 'It is back in a few seconds and carries on feeding by itself. Refused ' +
+                                           'while the tray moves.' })) return;
+          api.press(E.restart).then(() => toast('Restarting', 'ok'), toastError);
+        }, 'btn btn-small btn-primary') : null;
+      box.appendChild(h('div', {}, h('p', {}, 'A change is waiting for a restart.'),
+                        restart ? h('div', { class: 'actions' }, restart) : null));
+    }
+    box.appendChild(h('p', { class: 'hint' }, auth.set
+      ? 'Passwords travel to the feeder masked by the settings password, and are never shown again.'
+      : 'With no settings password, passwords cross your network as they are: set one first if you do not trust ' +
+        'everyone on it.'));
+  },
+
+  async nameDialog() {
+    const n = auth.network || {};
+    const input = h('input', { class: 'input', type: 'text', autocomplete: 'off', spellcheck: 'false',
+                               value: n.name_saved || n.name || '' });
+    const ok = await formDialog({ title: 'Name on the network', ok: 'Save',
+      body: field('Name', input, 'Lowercase letters, digits and hyphens, up to 31. Used after the next restart; Home ' +
+                  'Assistant may need the feeder added again under its new name.'),
+      validate: () => (/^[a-z0-9]([a-z0-9-]{0,29}[a-z0-9])?$/.test(input.value) ? ''
+                       : 'Lowercase letters, digits and hyphens, not at either end, up to 31') });
+    if (ok) auth.setNetwork('name', { name: input.value }).then(() => toast('Saved: used after the next restart', 'ok'),
+                                                                toastError);
+  },
+
+  async wifiDialog() {
+    const ssid = h('input', { class: 'input', type: 'text', autocomplete: 'off', spellcheck: 'false' });
+    const pw = h('input', { class: 'input', type: 'password', autocomplete: 'off' });
+    const ok = await formDialog({ title: 'Join a Wi-Fi network', ok: 'Join',
+      body: [field('Network (SSID)', ssid), field('Password', pw, 'Empty for an open network. This page loses the ' +
+                   'feeder when it switches: find it again on the new network.')],
+      validate: () => {
+        const n = new TextEncoder().encode(ssid.value).length;
+        if (!n || n > 32) return 'The network name is 1 to 32 bytes';
+        const p = pw.value;
+        if (p && !(/^[\x20-\x7e]{8,63}$/.test(p) || /^[0-9a-fA-F]{64}$/.test(p)))
+          return 'A Wi-Fi password is 8 to 63 characters';
+        return '';
+      } });
+    if (ok) auth.setNetwork('wifi', { ssid: ssid.value, password: pw.value })
+      .then(() => toast('Joining the network: the feeder may drop off this page', 'ok'), toastError);
+  },
+
+  async apDialog() {
+    const a = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
+    const b = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
+    const ok = await formDialog({ title: 'Access point password', ok: 'Save',
+      body: [field('New password', a, '8 to 63 characters. Used after the next restart.'), field('Again', b)],
+      validate: () => (!/^[\x20-\x7e]{8,63}$/.test(a.value) ? '8 to 63 characters (letters, digits, symbols)'
+                       : a.value !== b.value ? 'The two do not match' : '') });
+    if (ok) auth.setNetwork('ap', { password: a.value }).then(() => toast('Saved: used after the next restart', 'ok'),
+                                                              toastError);
   },
 
   /** Generate (in this browser) or enter a key, save it on the feeder, and show it once. */

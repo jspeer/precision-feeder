@@ -514,9 +514,9 @@ sets at run time, so later milestones fill fields in instead of changing it:
 |---|---|---|---|
 | `servo_pin`, `button_pin`, `led_pin` | GPIO numbers; `PIN_NONE` for no button or LED (section 2.1) | `PIN_BUILD` | N3 (built) |
 | `flags` | setup done; BLE may change guard limits; BLE may change calibration (both on by default) | | N4 (built: the BLE bits), N6 |
-| `hostname` | device name | empty | N5 |
+| `hostname` | device name (section 9.3) | empty | N5 (built) |
 | `timezone` | POSIX TZ string | empty | N1 (built) |
-| `ap_password` | fallback access-point password | empty | N5 |
+| `ap_password` | fallback access-point password (section 9.3) | empty | N5 (built) |
 | `ble_key` | BLE key (section 10) | all zero (no key set here) | N4 (built) |
 | `password_scheme`, `password_salt`, `password_hash` | settings password (0: none) | | N2 |
 
@@ -532,6 +532,40 @@ sets at run time, so later milestones fill fields in instead of changing it:
   Home Assistant provisions it on adoption, or the web app generates, takes or
   clears it (`save_noise_psk()`, `clear_noise_psk()`). A YAML key cannot be changed
   at run time; ESPHome compiles those calls out.
+
+### 9.3 Network (firmware 2.0.0)
+
+The name, the Wi-Fi network and the fallback access point's password are set in the web app (Configuration,
+Network) through endpoints of the settings guard (section 10.1), not entities: they are protected, and Home
+Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
+
+- **Name** (`Device.hostname`): a DNS label, 1 to 31 lowercase letters, digits and hyphens (`check_hostname()`).
+  ESPHome sets its name once from the YAML (`App.pre_setup()`) with no setter, and Wi-Fi (DHCP host name), mDNS,
+  the API, BLE and the access point read it when they start. So the loader (`PinLoader`, BUS priority, before all
+  of them) replaces it with a saved name through the protected member (`AppName` in precision_feeder.cpp; it stops
+  compiling if ESPHome renames the member). A saved name is used exactly: no MAC suffix. Applies at the next
+  restart (Restart Needed).
+- **MAC suffix:** the `name_add_mac_suffix` substitution (default off; on in the prebuilt binaries, N7), ESPHome's
+  own option.
+- **Access point:** with no `ssid:` in the YAML, the loader names it `<name in use>-setup` (cut to 32 bytes), so a
+  MAC suffix or a saved name tells feeders apart; one set in the YAML stands. A password saved on the device
+  (`Device.ap_password`, 8 to 63 printable characters) replaces the YAML's at the next restart. Empty: the YAML's.
+- **Wi-Fi network:** not in the Device record. Saved with ESPHome's own `save_wifi_sta()`, the slot the captive
+  portal and Improv use, and joined at once. ESPHome keys that slot to the build (config and ESPHome version hash)
+  when the YAML has a network, so a YAML build's own network returns after an update built from a changed YAML; with
+  no network in the YAML (the prebuilt binaries) the key is fixed and the saved network stays. There is no
+  "forget": ESPHome has no call to delete the slot (factory reset, a later milestone, erases it).
+- **Improv serial** (`packages/improv_serial.yaml`, on in both examples): ESP Web Tools sets Wi-Fi over the USB
+  cable after flashing. Physical access is trusted (section 10.1).
+- **Endpoints** (signed like any protected change; section 10.1): `GET /feeder/network` reports the name in use,
+  saved and the build's, where the access-point password comes from (`build`, `device`, `off`), whether Wi-Fi can
+  be set, and whether a restart is due; never a password. `POST /feeder/network/name?name=` (empty: the build's),
+  `/feeder/network/ap?password=<hex>` (empty: the build's) and `/feeder/network/wifi?ssid=<hex>&password=<hex>`.
+  The passwords travel masked by the settings password: the text XOR HMAC-SHA256(key, nonce || "new secret 1")
+  || HMAC-SHA256(key, nonce || "new secret 2"), cut to its length (`password_unmask_text()`, golden vector shared
+  by tests/test_core.cpp and tests/test_web.mjs). 400 for a value FeederCore's checks refuse, 409 when the build
+  has no access point or no Wi-Fi.
+- On load, a saved name or password that no longer passes the checks is dropped (with a warning) for the build's.
 
 ## 10. BLE security
 
@@ -620,6 +654,8 @@ section 10).
   remove it, signed with the current one. A new key travels masked:
   key XOR HMAC-SHA256(current key, nonce || "new key"); with no current password
   it travels as it is (it is a derived key, not the password).
+- **Network (2.0.0 N5):** the name, Wi-Fi network and access-point password endpoints (section 9.3) are
+  always signed when a password is set; the passwords travel masked by it.
 - **Keys (2.0.0 N4):** `POST /feeder/keys/api?key=<hex>` and `/feeder/keys/ble?key=<hex>`
   save a 32-byte key, masked the same way and signed over the path and the hex;
   `/feeder/keys/api` with no key clears the API key. 409 when the build cannot (a
@@ -666,7 +702,8 @@ precision-feeder/
                                     (scheduler, projection), feeder_text.cpp (editor, texts),
                                     feeder_password.cpp (settings password, BLE key and
                                     permissions), feeder_pins.cpp
-                                    (runtime pins, ESP32-S3 pin validator), crypto.h,
+                                    (runtime pins, ESP32-S3 pin validator), feeder_network.cpp
+                                    (name, access-point password, Wi-Fi checks), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
                                     parser); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
@@ -820,6 +857,22 @@ precision-feeder/
     before a key exists OTA is not possible at all (USB, or the web upload of N7). ESPHome warns
     about this setup and suggests `provisioning:`; not used (it closes the fallback access point).
   - Key status is in `GET /feeder/auth` and BLE Info, not new entities.
+- **2.0.0 N5 (2026-10-15):**
+  - The name, the Wi-Fi network and the access-point password are web-app settings (endpoints of the settings
+    guard), not entities, so the REST interface cannot change them unsigned; their status is in
+    `GET /feeder/network` (section 9.3).
+  - The name and the access-point password apply at the next restart, as pins do (no automatic reboot); a Wi-Fi
+    network is joined at once, as the captive portal does, so the access point remains the way back if it is wrong.
+  - A saved name replaces ESPHome's through its protected member, before anything reads it, rather than calling
+    `App.pre_setup()` again (that re-runs `arch_init()`: a second watchdog subscription of the loop task, and in
+    a MAC-suffix build it writes the MAC into the end of the name it is given).
+  - The Wi-Fi network stays in ESPHome's own slot, not the Device record, so the captive portal, Improv and the web
+    app share it. No "forget" until factory reset.
+  - The access point's SSID is made at run time from the name in use (`<name>-setup`) instead of the YAML's
+    `${name}-setup`, so a MAC suffix or a saved name changes it too.
+  - `name_add_mac_suffix` is a substitution, off for YAML builds (an existing feeder keeps its name); the prebuilt
+    binaries turn it on.
+  - Improv serial is on in both examples (and will be in the binaries); BLE Improv is not used.
 
 ## 14. Open items
 
@@ -946,6 +999,13 @@ precision-feeder/
     reconnecting; plaintext OTA refused and encrypted OTA working once a key is set; a new BLE key
     ending a connected client's session; the Python client against detail 6 (no key) and 7
     (permission off).
+
+16. Network on the bench (2.0.0 N5): compiled and host-tested only (the BLE build with Improv compiles at 77.7%
+    of the app slot). Still to see on hardware: a saved name used after a restart for mDNS, DHCP and the access
+    point's SSID (and with `name_add_mac_suffix`); whether Home Assistant reconnects after a rename or needs the
+    feeder added again (the API handshake carries the name); joining another network from the web app, and falling
+    back to the access point when it is wrong; the saved access-point password; Improv with ESP Web Tools (also an
+    N0 check).
 
 ## 15. Implementation status (v1.1.0)
 

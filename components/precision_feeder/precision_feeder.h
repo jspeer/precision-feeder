@@ -29,6 +29,9 @@
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
 #include "esphome/components/esphome/ota/ota_esphome.h"
 #endif
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
 
 #include <atomic>
 
@@ -86,6 +89,16 @@ class PrecisionFeeder : public Component, public FeederCore {
   }
   /// Load the saved pins and give them to the drivers. Runs before any driver's setup().
   void apply_pins();
+  /// Apply the saved name and access-point password (DESIGN.md section 9.3). Runs before Wi-Fi, mDNS, the API and
+  /// BLE start, as they read the name when they do.
+  void apply_network();
+  /// The name the YAML gave (with its MAC suffix, if the build adds one), before any saved on the device.
+  const std::string &hostname_build() const { return this->hostname_build_; }
+  /// True if this build has Wi-Fi, so a network can be saved from the web app.
+  static bool wifi_settable();
+  /// Save a Wi-Fi network in ESPHome's own slot and join it now (the one the captive portal and Improv use). Main
+  /// loop only. False in a build without Wi-Fi.
+  bool set_wifi(const std::string &ssid, const std::string &password);
 
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   /// A build whose API key is provisioned at run time (packages/api_key_on_device.yaml): ESPHome's OTA can then only
@@ -152,6 +165,8 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_random(uint8_t *out, size_t n) override;
 
   void update_api_key_state_();
+  /// The Device record as saved, read before setup() (for the pin and network loaders); defaults if none.
+  static Device load_device_early_();
 
   output::FloatOutput *output_{nullptr};
   std::atomic<ApiKey> api_key_state_{ApiKey::OFF};  // read by the web server's task
@@ -170,6 +185,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   ESPPreferenceObject pref_calibration_;
   ESPPreferenceObject pref_state_;
   ESPPreferenceObject pref_device_;
+  std::string hostname_build_;
   Mutex password_lock_;
 #ifdef USE_WEBSERVER
   web_server::WebServer *web_server_{nullptr};
@@ -180,12 +196,16 @@ class PrecisionFeeder : public Component, public FeederCore {
 #endif
 };
 
-/// Applies the saved pins before the drivers start: set up ahead of everything at HARDWARE priority (LEDC, the LED
-/// strip, GPIO binary sensors). The preferences are ready by then (ESPHome opens them before any setup()).
+/// Applies the saved pins before the drivers start (LEDC, the LED strip, GPIO binary sensors: HARDWARE priority), and
+/// the saved name and access-point password before Wi-Fi starts: set up ahead of everything, at BUS priority. The
+/// preferences are ready by then (ESPHome opens them before any setup()).
 class PinLoader : public Component {
  public:
   explicit PinLoader(PrecisionFeeder *feeder) : feeder_(feeder) {}
-  void setup() override { this->feeder_->apply_pins(); }
+  void setup() override {
+    this->feeder_->apply_pins();
+    this->feeder_->apply_network();
+  }
   float get_setup_priority() const override { return setup_priority::BUS; }
 
  protected:

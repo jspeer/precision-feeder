@@ -50,13 +50,15 @@ else the feeder lists under Faults.
   - the feeding safety limits, reload pause, refill interval and location, each with
     the feeder's own limits and units;
   - the time zone (a POSIX string; empty means the YAML's, or Home Assistant's);
-    Wi-Fi is shown and set in your YAML;
+  - network: the name (used after a restart), joining another Wi-Fi network (at once), and
+    the fallback access point's password (used after a restart). Passwords are never shown
+    or sent back;
   - board and pins (with the `hardware` package): a board preset or each pin, saved at
     once and used after a restart (Restart is offered when one is waiting); only pins
     the chip can spare are listed, and "none" for a button or LED that is not fitted;
   - the settings password: set, unlock (for this page, until it is reloaded), lock,
     change or remove. Locked, changes to the safety limits, the calibration, the
-    pins and the keys are refused with a message saying so;
+    pins, the keys and the network are refused with a message saying so;
   - keys: where the Home Assistant and Bluetooth keys come from (none, your YAML, or
     saved on the feeder); generate one (made in the browser and shown once), enter
     your own, or clear the Home Assistant key, where the build allows it; and the two

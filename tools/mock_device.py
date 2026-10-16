@@ -32,6 +32,7 @@ import json
 import math
 import pathlib
 import queue
+import re
 import socket
 import socketserver
 import threading
@@ -139,6 +140,10 @@ class Feeder:
         # Where the keys come from, as /feeder/auth reports them: like a prebuilt binary, the API key is provisioned
         # at run time (none yet) and BLE has the build's key.
         self.keys = {"api": "none", "ble": "off" if args.no_ble else "build"}
+        # The network settings (DESIGN.md section 9.3), as GET /feeder/network reports them. Never a password.
+        self.network = {"name": "precision-feeder", "name_saved": "", "name_build": "precision-feeder",
+                        "ap": "build", "wifi": True}
+        self.network_boot = ("", "build")  # what the feeder started with: a change waits for a restart
         self.entities: dict[str, Entity] = {}
         self._build(args)
 
@@ -398,7 +403,7 @@ class Feeder:
         s("select", "Button Pin", pins[1])
         s("select", "LED Pin", pins[2])
         s("text_sensor", "Pins In Use", "servo {}, button {}, LED {}".format(*self.pins_in_use))
-        s("binary_sensor", "Restart Needed", pins != self.pins_in_use)
+        s("binary_sensor", "Restart Needed", pins != self.pins_in_use or self.network_restart())
         if "text_sensor/BLE Info" in self.entities:
             s("text_sensor", "BLE Info", "service=02dd1dd9-ba75-4bbc-bdea-306d21010001;protocol=2;auth=hmac-sha256;"
               f"time=fallback_only;stale_h=24;key={self.keys['ble']};"
@@ -408,6 +413,9 @@ class Feeder:
             s("switch", "Calibration Mode", self.calibrating)
             s("select", "Calibration Position", str(self.cal_pos))
             s("number", "Calibration Offset", self.offsets[self.cal_pos])
+
+    def network_restart(self) -> bool:
+        return (self.network["name_saved"], self.network["ap"]) != self.network_boot
 
     def effective_pins(self) -> list[str]:
         return [saved or build for saved, build in zip(self.saved_pins, self.build_pins)]
@@ -496,6 +504,8 @@ class Feeder:
             elif name == "Restart":
                 self.log("I", "precision_feeder", "Restarting (Restart button)")
                 self.pins_in_use = self.effective_pins()
+                self.network_boot = (self.network["name_saved"], self.network["ap"])
+                self.network["name"] = self.network["name_saved"] or self.network["name_build"]
                 self.started = time.monotonic()
             elif name == "Declare Tray Position":
                 self.position, self.unknown = int(self.get("number", "Declared Tray Position")), False
@@ -638,6 +648,13 @@ class SettingsPassword:
         mask = hmac.new(current, nonce + b"new key", hashlib.sha256).digest() if current else bytes(32)
         return bytes(a ^ b for a, b in zip(bytes.fromhex(key_hex), mask))
 
+    def unmask_text(self, nonce: bytes, masked_hex: str) -> str:
+        """A secret text sent masked (FeederCore::password_unmask_text): two HMAC blocks, none without a password."""
+        masked = bytes.fromhex(masked_hex)
+        mask = (hmac.new(self.key, nonce + b"new secret 1", hashlib.sha256).digest() +
+                hmac.new(self.key, nonce + b"new secret 2", hashlib.sha256).digest()) if self.key else bytes(64)
+        return bytes(a ^ b for a, b in zip(masked, mask)).decode("latin-1")
+
     def check(self, header: str | None, message: str) -> bool:
         if self.key is None:
             return True
@@ -709,6 +726,10 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
             if path == "/feeder/auth":
                 with feeder.lock:
                     return self._send(200, json.dumps(password.challenge(feeder.keys)).encode(), "application/json")
+            if path == "/feeder/network":
+                with feeder.lock:
+                    body = dict(feeder.network, restart=feeder.network_restart())
+                return self._send(200, json.dumps(body).encode(), "application/json")
             if path == "/feeder/ble" and hasattr(feeder, "ble_activity"):
                 with feeder.lock:
                     body = json.dumps({"entries": feeder.ble_activity}).encode()
@@ -746,6 +767,8 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                     feeder.keys[kind] = "device" if key else "none"
                     feeder.log("W", "precision_feeder", f"{kind.upper()} key {'set' if key else 'cleared'} from the web app")
                     return self._send(200, b"{}", "application/json")
+                if path.startswith("/feeder/network/"):
+                    return self._send(*self._network(path, params, header, refused))
                 if path == "/feeder/auth/password":
                     ok = password.change(header, params.get("salt", ""), params.get("key", ""))
                     return self._send(200, b"{}", "application/json") if ok else self._send(*refused)
@@ -758,6 +781,42 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                     if feeder.action(parts[0], parts[1], parts[2], params):
                         return self._send(200)
             self._send(404)
+
+        def _network(self, path: str, params: dict, header: str | None, refused: tuple) -> tuple:
+            """POST /feeder/network/name|ap|wifi, as the device's settings guard checks them."""
+            bad = (400, b'{"error":"format"}', "application/json")
+            kind = path.rsplit("/", 1)[1]
+            name, ssid_hex, pw_hex = params.get("name", ""), params.get("ssid", ""), params.get("password", "")
+            nonce = bytes.fromhex(header[:32]) if header else bytes(16)
+            signed = {"name": name, "ap": pw_hex, "wifi": ssid_hex + pw_hex}.get(kind)
+            if signed is None:
+                return 404, b"", "text/plain"
+            if not password.check(header, f"{path}\n{signed}"):
+                return refused
+            try:
+                secret = password.unmask_text(nonce, pw_hex)
+            except ValueError:
+                return bad
+            if kind == "name":
+                if name and not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,29}[a-z0-9])?", name):
+                    return bad
+                feeder.network["name_saved"] = name
+                feeder.log("I", "precision_feeder", f"Name set to {name or 'the build' + chr(39) + 's'} (after a restart)")
+            elif kind == "ap":
+                if secret and not re.fullmatch(r"[\x20-\x7e]{8,63}", secret):
+                    return bad
+                feeder.network["ap"] = "device" if secret else "build"
+                feeder.log("I", "precision_feeder", "Access-point password changed (after a restart)")
+            else:
+                try:
+                    ssid = bytes.fromhex(ssid_hex)
+                except ValueError:
+                    return bad
+                if not 1 <= len(ssid) <= 32 or (secret and not (re.fullmatch(r"[\x20-\x7e]{8,63}", secret) or
+                                                                re.fullmatch(r"[0-9a-fA-F]{64}", secret))):
+                    return bad
+                feeder.log("W", "precision_feeder", "Wi-Fi network set from the web app: joining it now")
+            return 200, b"{}", "application/json"
 
         def _events(self):
             q: queue.Queue = queue.Queue()

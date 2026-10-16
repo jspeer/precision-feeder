@@ -111,6 +111,16 @@ function maskKey(newKey, currentKey, nonce) {
   return newKey.map((b, i) => b ^ mask[i]);
 }
 
+/** A secret text (a Wi-Fi or access-point password, up to 64 bytes) travels masked like a key, by two HMAC blocks, as
+ *  FeederCore::password_unmask_text expects (none: unmasked). */
+function maskText(text, currentKey, nonce) {
+  const bytes = utf8(text);
+  if (!currentKey) return bytes;
+  const mask = concatBytes(hmacSha256(currentKey, concatBytes(nonce, utf8('new secret 1'))),
+                           hmacSha256(currentKey, concatBytes(nonce, utf8('new secret 2'))));
+  return bytes.map((b, i) => b ^ mask[i]);
+}
+
 /** A 32-byte key as base64, as ESPHome (api: encryption: key) and the BLE clients write it. */
 function keyToBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
 /** A key typed in: base64 of exactly 32 bytes, not all zero; null otherwise. */
@@ -212,6 +222,54 @@ const auth = {
     if (r.status === 409) throw new Error('This build cannot change that key: it comes from the YAML.');
     if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
     await this.refresh();
+  },
+
+  /** The network settings (DESIGN.md section 9.3): the name in use, saved and the build's, where the access point's
+   *  password comes from (build, device or off), whether Wi-Fi can be set, and whether a restart is due. Null when the
+   *  device does not answer. */
+  network: null,
+  async loadNetwork() {
+    try {
+      const r = await fetch(`${location.origin}/feeder/network`, { cache: 'no-store' });
+      this.network = r.ok ? await r.json() : null;
+    } catch (e) {
+      this.network = null;
+    }
+    this._changed();
+    return this.network;
+  },
+
+  /** Save a network setting: ('name', {name}) ('' for the build's), ('ap', {password}) ('' for the build's) or
+   *  ('wifi', {ssid, password}). Passwords travel masked by the settings password; all are signed with it. */
+  async setNetwork(kind, values) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = `/feeder/network/${kind}`;
+    const secret = text => (text ? toHex(maskText(text, this.set ? this.key : null, c.nonceBytes)) : '');
+    let signed, query;
+    if (kind === 'name') {
+      signed = values.name;
+      query = `name=${encodeURIComponent(values.name)}`;
+    } else if (kind === 'ap') {
+      signed = secret(values.password);
+      query = `password=${signed}`;
+    } else {
+      const ssid = toHex(utf8(values.ssid)), password = secret(values.password);
+      signed = ssid + password;
+      query = `ssid=${ssid}&password=${password}`;
+    }
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, signed)) } : {};
+    let r;
+    try {
+      r = await fetch(`${location.origin}${path}?${query}`, { method: 'POST', headers });
+    } catch (e) {
+      throw new Error('The feeder could not be reached.');
+    }
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    if (r.status === 409) throw new Error('This build cannot change that.');
+    if (r.status === 400) throw new Error('The feeder did not accept that value.');
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+    if (kind !== 'wifi') await this.loadNetwork();
   },
 
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */

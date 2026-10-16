@@ -20,7 +20,8 @@
 #                          (shown when the pins match no preset)
 #   Servo Pin              the servo signal wire
 #   Pins In Use            the pins the drivers started with
-#   Restart Needed         a saved change waits for a restart
+#   Restart Needed         a saved change waits for a restart (pins, or the name or access-point password set in the
+#                          web app)
 #   Restart                restart the feeder; refused while the tray moves (feeding resumes by itself afterwards)
 
 select:

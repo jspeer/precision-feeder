@@ -13,6 +13,7 @@
 #include "esphome/components/api/api_server.h"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -109,17 +110,94 @@ bool PrecisionFeeder::set_api_key(const uint8_t *key) {
 #endif
 }
 
+Device PrecisionFeeder::load_device_early_() {
+  Device saved{};
+  saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
+  Device loaded;
+  auto pref = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v1"));
+  if (pref.load(&loaded) && loaded.version == DEVICE_VERSION) {
+    saved = loaded;
+    saved.hostname[HOSTNAME_SIZE - 1] = '\0';
+    saved.ap_password[AP_PASSWORD_SIZE - 1] = '\0';
+  }
+  return saved;
+}
+
+// ESPHome sets the name once, from the YAML (App.pre_setup(), before any component starts) and has no setter. A name
+// saved on the device replaces it here, before Wi-Fi (DHCP host name), mDNS, the API, BLE and the access point read it.
+// The derived class only gives access to the protected member (checked against ESPHome 2026.9.1: `StringRef name_`);
+// if ESPHome renames it, this stops compiling rather than misbehaving.
+namespace {
+struct AppName : Application {
+  static void set(const char *name, size_t len) { App.*(&AppName::name_) = StringRef(name, len); }
+};
+}  // namespace
+
+void PrecisionFeeder::apply_network() {
+  const Device saved = load_device_early_();
+  this->hostname_build_ = App.get_name().str();
+  if (saved.hostname[0] != '\0') {
+    if (check_hostname(saved.hostname)) {
+      static char name[HOSTNAME_SIZE];  // App keeps a reference: it must live as long as the device
+      std::memcpy(name, saved.hostname, HOSTNAME_SIZE);
+      AppName::set(name, std::strlen(name));
+    } else {
+      ESP_LOGW(TAG, "Saved name not usable, using the build's");
+    }
+  }
+  bool has_ap = false;
+#if defined(USE_WIFI) && defined(USE_WIFI_AP)
+  auto *wifi = wifi::global_wifi_component;
+  if (wifi != nullptr && wifi->has_ap()) {
+    has_ap = true;
+    wifi::WiFiAP ap = wifi->get_ap();
+    if (ap.get_ssid().empty()) {
+      // No SSID in the YAML: "<name>-setup", so the name in use (MAC suffix included) tells feeders apart.
+      static const char SUFFIX[] = "-setup";
+      const std::string &name = App.get_name().str();
+      ap.set_ssid(name.substr(0, WIFI_SSID_MAX - (sizeof(SUFFIX) - 1)) + SUFFIX);
+    }
+    if (saved.ap_password[0] != '\0' && check_wifi_password(saved.ap_password, false))
+      ap.set_password(saved.ap_password);
+    wifi->set_ap(ap);
+  }
+#endif
+  {
+    LockGuard guard(this->password_lock_);
+    this->set_network_in_use(App.get_name().str(), has_ap, saved);
+  }
+  ESP_LOGI(TAG, "Name: %s (%s)", App.get_name().c_str(),
+           App.get_name().str() == this->hostname_build_ ? "the build's" : "saved on the device");
+}
+
+bool PrecisionFeeder::wifi_settable() {
+#ifdef USE_WIFI
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool PrecisionFeeder::set_wifi(const std::string &ssid, const std::string &password) {
+#ifdef USE_WIFI
+  if (wifi::global_wifi_component == nullptr)
+    return false;
+  ESP_LOGW(TAG, "Wi-Fi network set from the web app: joining it now");
+  wifi::global_wifi_component->save_wifi_sta(ssid, password);
+  return true;
+#else
+  (void) ssid;
+  (void) password;
+  return false;
+#endif
+}
+
 void PrecisionFeeder::apply_pins() {
   if (this->servo_pin_ == nullptr)
     return;  // a build without runtime pins: every driver keeps its YAML pin
   const Pins build{this->servo_pin_->get_pin(), this->button_pin_ != nullptr ? this->button_pin_->get_pin() : PIN_NONE,
                    this->led_output_ != nullptr ? this->led_build_pin_ : PIN_NONE};
-  Device saved{};
-  saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
-  Device loaded;
-  auto pref = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v1"));
-  if (pref.load(&loaded) && loaded.version == DEVICE_VERSION)
-    saved = loaded;
+  const Device saved = load_device_early_();
   std::string problem;
   Pins use = resolve_pins(saved, build, &problem);
   const bool has_button = this->button_pin_ != nullptr, has_led = this->led_output_ != nullptr;
@@ -309,11 +387,12 @@ class SettingsGuard : public AsyncWebHandler {
     char buf[AsyncWebServerRequest::URL_BUF_SIZE];
     const std::string url = request->url_to(buf).str();
     if (request->method() == HTTP_GET)
-      return url == "/feeder/auth";
+      return url == "/feeder/auth" || url == "/feeder/network";
     if (request->method() != HTTP_POST)
       return false;
     if (url == "/feeder/auth/password" || url == "/feeder/auth/check" || url == "/feeder/keys/api" ||
-        url == "/feeder/keys/ble")
+        url == "/feeder/keys/ble" || url == "/feeder/network/name" || url == "/feeder/network/ap" ||
+        url == "/feeder/network/wifi")
       return true;
     // POST /<domain>/<name>/<action>: protected when "<domain>/<name>" is on the list.
     const size_t action = url.rfind('/');
@@ -324,7 +403,14 @@ class SettingsGuard : public AsyncWebHandler {
     char buf[AsyncWebServerRequest::URL_BUF_SIZE];
     const std::string url = request->url_to(buf).str();
     if (request->method() == HTTP_GET) {
-      this->send_challenge_(request);
+      if (url == "/feeder/network")
+        this->send_network_(request);
+      else
+        this->send_challenge_(request);
+      return;
+    }
+    if (url.rfind("/feeder/network/", 0) == 0) {
+      this->set_network_(request, url);
       return;
     }
     if (url == "/feeder/auth/password") {
@@ -533,6 +619,116 @@ class SettingsGuard : public AsyncWebHandler {
       key->fill(0);
       delete key;
     });
+    request->send(200, "application/json", "{}");
+  }
+
+  /// GET /feeder/network: the name in use, the one saved here and the build's, where the access point's password
+  /// comes from, and whether a Wi-Fi network can be saved. Never a password.
+  void send_network_(AsyncWebServerRequest *request) {
+    std::string in_use, saved;
+    bool has_ap, restart;
+    KeySource ap = KeySource::BUILD;
+    {
+      LockGuard guard(this->feeder_->password_lock());
+      in_use = this->feeder_->hostname_in_use();
+      saved = this->feeder_->hostname_saved();
+      has_ap = this->feeder_->has_ap();
+      ap = this->feeder_->ap_password_source();
+      restart = this->feeder_->network_restart_needed();
+    }
+    // Names are checked hostnames (letters, digits, hyphens), so they need no escaping.
+    std::string body = "{\"name\":\"" + in_use + "\",\"name_saved\":\"" + saved + "\",\"name_build\":\"" +
+                       this->feeder_->hostname_build() + "\",\"ap\":\"" +
+                       (has_ap ? (ap == KeySource::DEVICE ? "device" : "build") : "off") + "\",\"wifi\":" +
+                       (PrecisionFeeder::wifi_settable() ? "true" : "false") + ",\"restart\":" +
+                       (restart ? "true" : "false") + "}";
+    request->send(200, "application/json", body.c_str());
+  }
+
+  /// A secret text sent masked, in hex (password_unmask_text), unmasked into `out`; false if malformed or too long.
+  bool secret_arg_(AsyncWebServerRequest *request, const std::string &hex, std::string &out) {
+    if (hex.size() % 2 != 0 || hex.size() > 2 * SECRET_TEXT_MAX)
+      return false;
+    uint8_t masked[SECRET_TEXT_MAX]{}, nonce[AUTH_NONCE_SIZE]{};
+    const size_t n = hex.size() / 2;
+    if (n > 0 && !from_hex(hex, 0, masked, n))
+      return false;
+    const auto header = request->get_header(AUTH_HEADER);
+    if (header.has_value())
+      from_hex(*header, 0, nonce, AUTH_NONCE_SIZE);  // checked already when a password is set; unused otherwise
+    LockGuard guard(this->feeder_->password_lock());
+    out = this->feeder_->password_unmask_text(nonce, masked, n);
+    std::memset(masked, 0, sizeof(masked));
+    return true;
+  }
+
+  /// POST /feeder/network/name?name=<text> (empty: the build's), /feeder/network/ap?password=<hex> (masked; empty:
+  /// the build's) and /feeder/network/wifi?ssid=<hex>&password=<hex> (the password masked). Each is signed over the
+  /// path and its parameters, as they are sent. The name and the access point's password apply at the next restart;
+  /// a Wi-Fi network is joined at once.
+  void set_network_(AsyncWebServerRequest *request, const std::string &url) {
+    const std::string name = request->arg("name"), ssid_hex = request->arg("ssid"),
+                      password_hex = request->arg("password");
+    const std::string signed_part = url == "/feeder/network/name"  ? name
+                                    : url == "/feeder/network/ap" ? password_hex
+                                                                  : ssid_hex + password_hex;
+    if (!this->authorised_(request, url + "\n" + signed_part))
+      return;
+    PrecisionFeeder *feeder = this->feeder_;
+    auto bad = [request]() { request->send(400, "application/json", "{\"error\":\"format\"}"); };
+    if (url == "/feeder/network/name") {
+      if (!name.empty() && !check_hostname(name))
+        return bad();
+      feeder->run_on_main_loop([feeder, name]() {
+        LockGuard guard(feeder->password_lock());
+        feeder->set_hostname(name);
+      });
+    } else if (url == "/feeder/network/ap") {
+      bool has_ap;
+      {
+        LockGuard guard(feeder->password_lock());
+        has_ap = feeder->has_ap();
+      }
+      if (!has_ap) {
+        request->send(409, "application/json", "{\"error\":\"build\"}");
+        return;
+      }
+      auto *password = new std::string;
+      if (!this->secret_arg_(request, password_hex, *password) ||
+          (!password->empty() && !check_wifi_password(*password, false))) {
+        delete password;
+        return bad();
+      }
+      feeder->run_on_main_loop([feeder, password]() {
+        {
+          LockGuard guard(feeder->password_lock());
+          feeder->set_ap_password(*password);
+        }
+        std::fill(password->begin(), password->end(), '\0');
+        delete password;
+      });
+    } else {
+      if (!PrecisionFeeder::wifi_settable()) {
+        request->send(409, "application/json", "{\"error\":\"build\"}");
+        return;
+      }
+      uint8_t ssid_bytes[WIFI_SSID_MAX];
+      const size_t n = ssid_hex.size() / 2;
+      if (ssid_hex.size() % 2 != 0 || n == 0 || n > WIFI_SSID_MAX || !from_hex(ssid_hex, 0, ssid_bytes, n))
+        return bad();
+      const std::string ssid(reinterpret_cast<const char *>(ssid_bytes), n);
+      auto *password = new std::string;
+      if (!check_ssid(ssid) || !this->secret_arg_(request, password_hex, *password) ||
+          !check_wifi_password(*password, true)) {
+        delete password;
+        return bad();
+      }
+      feeder->run_on_main_loop([feeder, ssid, password]() {
+        feeder->set_wifi(ssid, *password);
+        std::fill(password->begin(), password->end(), '\0');
+        delete password;
+      });
+    }
     request->send(200, "application/json", "{}");
   }
 

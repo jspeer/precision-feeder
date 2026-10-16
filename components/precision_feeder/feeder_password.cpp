@@ -81,6 +81,25 @@ void FeederCore::password_unmask(const uint8_t nonce[AUTH_NONCE_SIZE], const uin
     key[i] = masked[i] ^ mask[i];
 }
 
+std::string FeederCore::password_unmask_text(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t *masked,
+                                             size_t n) const {
+  static const char LABELS[2][13] = {"new secret 1", "new secret 2"};
+  static_assert(SECRET_TEXT_MAX == 2 * PASSWORD_HASH_SIZE, "two HMAC blocks cover the longest secret");
+  uint8_t mask[SECRET_TEXT_MAX]{};
+  n = std::min<size_t>(n, SECRET_TEXT_MAX);
+  if (this->password_set()) {
+    for (unsigned b = 0; b < 2; b++)
+      crypto::hmac_sha256(this->dev_.password_hash, PASSWORD_HASH_SIZE, nonce, AUTH_NONCE_SIZE,
+                          reinterpret_cast<const uint8_t *>(LABELS[b]), sizeof(LABELS[b]) - 1, nullptr, 0,
+                          mask + b * PASSWORD_HASH_SIZE);
+  }
+  std::string out(n, '\0');
+  for (size_t i = 0; i < n; i++)
+    out[i] = static_cast<char>(masked[i] ^ mask[i]);
+  std::memset(mask, 0, sizeof(mask));
+  return out;
+}
+
 void FeederCore::set_password(const uint8_t salt[PASSWORD_SALT_SIZE], const uint8_t key[PASSWORD_HASH_SIZE]) {
   const bool had = this->password_set();
   this->dev_.password_scheme = PASSWORD_SCHEME_PBKDF2;

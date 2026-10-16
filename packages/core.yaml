@@ -11,6 +11,10 @@ substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
   fw_version: "2.0.0"
+  # "true" adds the last six hex digits of the board's MAC address to the name (precision-feeder-a1b2c3), so several
+  # feeders built from one YAML (or the prebuilt binaries) do not share a name on the network. A name set on the
+  # feeder (web app, Configuration, Network) wins over both and is used exactly as typed.
+  name_add_mac_suffix: "false"
 
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
   # Starting values only when the hardware package is included: pins chosen there are saved on the feeder and win
@@ -48,6 +52,7 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
+  name_add_mac_suffix: ${name_add_mac_suffix}
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -77,14 +82,17 @@ network:
   # Count Wi-Fi as connected without waiting for an IPv6 address, so IPv4-only networks are unaffected.
   min_ipv6_addr_count: 0
 
+# A network saved on the feeder (web app, captive portal or Improv) replaces this one. ESPHome keys the saved network to
+# the build, so with a network here the YAML's comes back after the next update built from a changed YAML.
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   # No reboot when WiFi is lost, for the same reason.
   reboot_timeout: 0s
-  # If it cannot join your network it opens its own access point so you can fix the settings.
+  # If it cannot join your network it opens its own access point so you can fix the settings. With no `ssid:` here the
+  # feeder names it "<name>-setup" from the name in use. A password set on the feeder (web app) replaces this one at
+  # the next restart.
   ap:
-    ssid: ${name}-setup
     password: !secret fallback_ap_password
 
 captive_portal:

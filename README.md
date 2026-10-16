@@ -152,6 +152,7 @@ you switch a feature on or off by adding or removing one line.
 | `api_key_on_device` | no API key in your YAML: Home Assistant sets one when it adopts the feeder, or you make one in the web app (as the prebuilt binaries will) | optional; add it after `core`. Plaintext OTA is then refused, and OTA works once a key is set |
 | `diagnostics` | free memory and loop time sensors | only for troubleshooting or development |
 | `network_info` | the Wi-Fi network, IP addresses and signal strength | **on in both examples**; leave it out to save a little flash |
+| `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | **on in both examples**; leave it out if you never set Wi-Fi over USB |
 
 **Two ready-made configurations** are in [`examples/`](examples/):
 
@@ -285,7 +286,8 @@ calibration mode; dim cyan hold or reload pause.
 
 | Substitution | Default | What it is |
 |---|---|---|
-| `name` / `friendly_name` | `precision-feeder` / `Precision Feeder` | device name (network, Home Assistant). Change both if you have more than one feeder. |
+| `name` / `friendly_name` | `precision-feeder` / `Precision Feeder` | device name (network, Home Assistant). Change both if you have more than one feeder. A name set in the web app wins (see [Network](#network)). |
+| `name_add_mac_suffix` | `"false"` | `"true"` adds the end of the board's MAC address to the name (`precision-feeder-a1b2c3`), so feeders built from one YAML do not clash |
 | `timezone` | `America/New_York` | IANA name or POSIX string. Daylight saving and sun times depend on it. |
 | `servo_pin` | `GPIO1` | servo signal (a pin chosen on the device, `hardware` package, wins) |
 | `button_pin` | `GPIO2` | push button (button package; Button Pin on the device wins) |
@@ -309,8 +311,26 @@ schedule, Active Profile, Hold, Minimum Gap Between Feeds (60 s), Gap Between
 Portions (5 s), Daily Portion Cap (4), Max Portions Per Command (1), Reload Pause
 (10 min), Refill Interval (3 days, for the runway warning), Latitude, Longitude,
 the servo pulse range and calibration offsets, the timezone, and (with the `hardware` package) the board and
-pins. Pins change at the next restart; the selects offer only pins the ESP32-S3 can spare (no flash, PSRAM, USB or
+pins, and in the web app the name, the Wi-Fi network and the fallback access point's password ([Network](#network)). Pins change at the next restart; the selects offer only pins the ESP32-S3 can spare (no flash, PSRAM, USB or
 strapping pins), and "none" for a button or LED that is not fitted.
+
+## Network
+
+The web app's Configuration page has a **Network** card (firmware 2.0.0). With a settings password set, all of it
+needs the password, and the passwords travel masked by it; with none, they cross your network as they are.
+
+- **Name** on the network (mDNS `<name>.local`, the DHCP host name, the access point's name). Lowercase letters,
+  digits and hyphens, up to 31. Saved on the feeder, it wins over `name` in your YAML (and over a MAC suffix), and is
+  used after the next restart. Home Assistant may need the feeder added again under the new name.
+- **Wi-Fi network.** Join another network: the feeder switches at once. If it cannot join, it opens its access point
+  (below) after a while, so you can fix it there. A network saved this way (or in the captive portal, or over USB with
+  Improv) replaces the one in your YAML; ESPHome keys it to the build, so with a network in your YAML, the YAML's
+  comes back after the next update built from a changed YAML.
+- **Access point password:** the password of the access point the feeder opens when it cannot join Wi-Fi
+  (`<name>-setup`, unless your YAML names it). Saved on the feeder, it wins over `fallback_ap_password` and is used
+  after the next restart.
+
+The feeder never sends a password back.
 
 ## Keys
 
