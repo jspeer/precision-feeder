@@ -46,7 +46,17 @@ class FirmwareUpload {
     FLASH = 5,       // the update partition refused it: too big, a write failed, or not a valid image
     INCOMPLETE = 6,  // fewer bytes arrived than announced
     MISMATCH = 7,    // the bytes are not the image the browser signed
+    NOT_APP = 8,     // not an app image: no app description where every ESP32 app has one (a .factory.bin starts
+                     // with the bootloader; ESPHome's OTA backend accepts it, and only the bootloader refuses it
+                     // at the next boot; found on the bench, 2.0.0 N8)
   };
+
+  /// An ESP32 app image starts with the image magic, and its first segment with the app description, whose magic
+  /// word sits at byte 32 (ESP-IDF's esp_image_header_t, esp_image_segment_header_t, esp_app_desc_t).
+  static constexpr size_t APP_HEADER_SIZE = 36;
+  static bool is_app_image(const uint8_t header[APP_HEADER_SIZE]) {
+    return header[0] == 0xE9 && header[32] == 0x32 && header[33] == 0x54 && header[34] == 0xCD && header[35] == 0xAB;
+  }
 
   /// The first chunk of a new upload. `expected` is the signed SHA-256 (nullptr if the parameter was malformed).
   /// An unfinished upload before it (a dropped connection) is aborted first.
@@ -80,6 +90,12 @@ class FirmwareUpload {
       this->fail_(Status::FLASH);
       return;
     }
+    for (size_t i = 0; i < len && this->received_ + i < APP_HEADER_SIZE; i++)
+      this->header_[this->received_ + i] = data[i];
+    if (this->received_ < APP_HEADER_SIZE && this->received_ + len >= APP_HEADER_SIZE && !is_app_image(this->header_)) {
+      this->fail_(Status::NOT_APP);
+      return;
+    }
     this->sha_.update(data, len);
     if (!this->sink_->write(data, len)) {
       this->fail_(Status::FLASH);
@@ -92,6 +108,10 @@ class FirmwareUpload {
   Status finish() {
     if (this->status_ != Status::RECEIVING)
       return this->status_;
+    if (this->received_ < APP_HEADER_SIZE) {  // too short to be an image at all
+      this->fail_(Status::NOT_APP);
+      return this->status_;
+    }
     if (this->received_ != this->total_) {
       this->fail_(Status::INCOMPLETE);
       return this->status_;
@@ -131,6 +151,7 @@ class FirmwareUpload {
   size_t total_{0};
   size_t received_{0};
   uint8_t expected_[crypto::Sha256::DIGEST_SIZE]{};
+  uint8_t header_[APP_HEADER_SIZE]{};
   crypto::Sha256 sha_;
 };
 

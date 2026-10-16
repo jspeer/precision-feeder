@@ -1467,6 +1467,9 @@ static void test_firmware_upload() {
   std::vector<uint8_t> image(5000);
   for (size_t i = 0; i < image.size(); i++)
     image[i] = static_cast<uint8_t>(i * 7);
+  const uint8_t app_magic[4] = {0x32, 0x54, 0xCD, 0xAB};  // an app image: the image magic, the app description's
+  image[0] = 0xE9;
+  std::memcpy(&image[32], app_magic, 4);
   uint8_t digest[32];
   crypto::sha256(image.data(), image.size(), digest);
   auto send = [&](FirmwareUpload &u, FakeSink &sink, const uint8_t *expected, bool authorised, size_t cut = 0) {
@@ -1515,6 +1518,28 @@ static void test_firmware_upload() {
     FakeSink invalid;
     invalid.fail_end = true;
     CHECK(send(u, invalid, digest, true) == S::FLASH, "not a valid image");
+  }
+  {
+    // A factory image (the bootloader first: no app description at byte 32), signed and whole, is still refused.
+    std::vector<uint8_t> factory = image;
+    factory[32] = 0x50;
+    uint8_t fd[32];
+    crypto::sha256(factory.data(), factory.size(), fd);
+    FirmwareUpload u;
+    FakeSink sink;
+    u.start(fd, factory.size(), true, &sink);
+    u.write(factory.data(), 20);  // the header split across chunks
+    u.write(factory.data() + 20, factory.size() - 20);
+    CHECK(u.finish() == S::NOT_APP && sink.aborted && !sink.ended, "a factory image is refused");
+    FakeSink tiny;
+    u.start(fd, 10, true, &tiny);
+    u.write(factory.data(), 10);
+    CHECK(u.finish() == S::NOT_APP && tiny.aborted, "too short to be an image");
+    FakeSink split;
+    u.start(digest, image.size(), true, &split);
+    for (size_t i = 0; i < image.size(); i += 7)
+      u.write(image.data() + i, std::min<size_t>(7, image.size() - i));
+    CHECK(u.finish() == S::OK && split.data == image, "an app image in tiny chunks");
   }
   {
     // A dropped connection leaves an upload open; the next one aborts it first.

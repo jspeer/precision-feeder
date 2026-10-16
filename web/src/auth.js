@@ -312,6 +312,7 @@ const auth = {
       sha256: 'The file changed on the way; nothing changed. Try again.',
       incomplete: 'The upload was cut off; nothing changed. Try again.',
       flash: 'The feeder refused the image (wrong board, or too big); nothing changed.',
+      image: 'That is not an update image (a .factory.bin is for USB); nothing changed.',
     }[error] || `The feeder answered ${status}; nothing changed.`);
   },
 

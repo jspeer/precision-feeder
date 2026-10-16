@@ -620,8 +620,10 @@ binary's config.
   names it from the manifest (release, variant; a factory image is refused; an unknown file needs a confirmation).
   The feeder streams the body into ESPHome's OTA backend (`ota::make_ota_backend()`, as its own web upload does),
   hashing as it goes (`FirmwareUpload`, firmware_upload.h, host-tested), and only finishes the update if the whole
-  image arrived and its SHA-256 is the signed one; otherwise it aborts and the running firmware stays (422:
-  `sha256`, `incomplete`, `flash`). Then it restarts half a second later, or once the tray stops if it is moving.
+  image arrived, it is an app image (the app description's magic at byte 32: a `.factory.bin` starts with the
+  bootloader, which ESPHome's backend would accept and only the bootloader would refuse at the next boot; found on the
+  bench, N8), and its SHA-256 is the signed one; otherwise it aborts and the running firmware stays (422: `image`,
+  `sha256`, `incomplete`, `flash`). The Firmware page checks for the app description too. Then it restarts half a second later, or once the tray stops if it is moving.
   ESPHome's own `/update` stays off (`ota: false`): it is guarded only by web auth.
 - Flash, measured in N7 (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 78.9%** (1,447,887 bytes),
   **no-BLE 60.9%** (1,116,743 bytes). No 8 MB variant needed.

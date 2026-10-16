@@ -70,6 +70,9 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
 - Fixed on the bench (N8): every protected write through the web server (guard limits, calibration, pins) crashed
   the feeder with a stack overflow in the web server's task, which on a fresh upgrade made ESPHome roll the update
   back. The settings guard no longer keeps its own stack frame while the web server handles the write.
+- Fixed on the bench (N8): the firmware upload accepted a first-flash `.factory.bin` (the bootloader then refused to
+  start it, so the old firmware came back). The feeder and the Firmware page now refuse anything that is not an app
+  image.
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)

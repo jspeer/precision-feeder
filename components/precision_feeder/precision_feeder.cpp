@@ -661,7 +661,7 @@ class SettingsGuard : public AsyncWebHandler {
         request->send(400, "application/json", "{\"error\":\"request\"}");
         return;
       default: {
-        static const char *const ERRORS[] = {"", "", "", "", "", "flash", "incomplete", "sha256"};
+        static const char *const ERRORS[] = {"", "", "", "", "", "flash", "incomplete", "sha256", "image"};
         ESP_LOGW(TAG, "Firmware upload failed (%s); the running firmware stays", ERRORS[static_cast<uint8_t>(status)]);
         char body[48];
         std::snprintf(body, sizeof(body), "{\"error\":\"%s\"}", ERRORS[static_cast<uint8_t>(status)]);

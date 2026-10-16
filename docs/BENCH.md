@@ -472,3 +472,28 @@ The site `tools/make_release.py` makes (install page, manifests, the fixed `full
 - Fixed: the badge stretched across the card; it now sits inline.
 - Harness: the Claude desktop app's browser pane has Web Serial, but its port chooser is drawn outside the page,
   so a person picks the port; only one program can hold the port at a time (close the installer before Improv).
+
+## Firmware 2.0.0 N8 on hardware, part 3: the Firmware page and uploads (2026-10-16)
+
+The feeder from part 2 (`full`, on a phone hotspot), a settings password set for the test; uploads signed by a
+Python client doing what `auth.uploadFirmware` does (PBKDF2 key, HMAC over the path and the SHA-256).
+
+- **Firmware page** (Diagnostics, "Updates and firmware upload"): "2.0.0, full"; the update check said "Couldn't
+  check for updates" with the releases link (nothing published on Pages yet); turning the check off showed "The update
+  check is off" and was remembered in the browser; Upload stayed disabled with no file.
+- **Refused, the running firmware kept:** no auth header (403 `challenge`); a wrong password (403 `refused`, wait 1 s;
+  logged); a file one byte different from the one signed (422 `sha256`, after the whole body); a connection cut after
+  a third (still running; the next upload aborted the open session).
+- **Factory image: accepted at first.** `precision-feeder-full.factory.bin`, signed, answered 200 and the feeder
+  restarted; the bootloader then refused it ("OTA app partition slot 1 is not bootable") and booted the old app, so
+  nothing was lost, but it should never have been taken. ESPHome's OTA backend accepts any image that starts with the
+  image magic, and a factory image starts with the bootloader. Fixed: the feeder now checks for the app description
+  (magic `0xABCD5432` at byte 32) in the first bytes (`FirmwareUpload`, host-tested), and the Firmware page checks
+  the same before uploading. With the fix: 422 `image`, nothing switched.
+- **Good uploads:** the fixed `full` image over the old one (200, restarted into it); then `no-ble` (Firmware Variant
+  `no-ble`, BLE `off`, BLE Info gone) and back to `full`. Every setting and the settings password were kept across
+  both switches. About 10 s per upload over the hotspot.
+- **Restart waits for the tray:** a feed started 8.5 s into a 9.3 s upload. The log shows the feed starting, then
+  "Restarting into the uploaded firmware"; after the restart the tray was at slot 1, loaded, 5 left, no faults (a
+  restart mid-move would have left the position unknown).
+- The test password was removed afterwards.

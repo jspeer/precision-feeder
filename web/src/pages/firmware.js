@@ -75,8 +75,11 @@ PAGES.firmware = {
     if (!file) { setText(this.fileInfo, ''); return; }
     setText(this.fileInfo, 'Checking the file…');
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes[0] !== 0xe9) {
-      setText(this.fileInfo, 'That is not an ESP32 firmware image.');
+    // An app image: the image magic, and the app description's magic at byte 32 (a .factory.bin starts with the
+    // bootloader instead). The feeder checks the same.
+    if (bytes[0] !== 0xe9 || bytes[32] !== 0x32 || bytes[33] !== 0x54 || bytes[34] !== 0xcd || bytes[35] !== 0xab) {
+      setText(this.fileInfo, bytes[0] === 0xe9 ? 'That is a first-flash image (.factory.bin): choose the .ota.bin.'
+                                               : 'That is not an ESP32 firmware image.');
       return;
     }
     this.bytes = bytes;
@@ -86,9 +89,6 @@ PAGES.firmware = {
     let text;
     if (!this.image) {
       text = 'Not a released image: upload it only if you built it yourself.';
-    } else if (this.image.kind === 'factory') {
-      text = 'That is the first-flash image (.factory.bin): choose the .ota.bin instead.';
-      this.bytes = null;
     } else {
       text = `Release ${this.image.version}, ${this.image.variant}: checked against the release.` +
         (variant && variant !== 'yaml' && this.image.variant !== variant ? ` This feeder runs ${variant}.` : '');
