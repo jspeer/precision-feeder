@@ -11,6 +11,10 @@ substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
   fw_version: "2.0.0"
+  # Which build this is, shown as Firmware Variant: "full" or "no-ble" for the prebuilt binaries (firmware/), "yaml"
+  # for a build from your own YAML. The web app's update check (Firmware page) offers the matching prebuilt image only
+  # to a prebuilt binary; a YAML build is updated with ESPHome. Leave it.
+  fw_variant: "yaml"
   # "true" adds the last six hex digits of the board's MAC address to the name (precision-feeder-a1b2c3), so several
   # feeders built from one YAML (or the prebuilt binaries) do not share a name on the network. A name set on the
   # feeder (web app, Configuration, Network) wins over both and is used exactly as typed. With BLE, keep ble_name to 13

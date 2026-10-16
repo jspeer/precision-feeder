@@ -284,6 +284,37 @@ const auth = {
     await this.loadNetwork();
   },
 
+  /** Upload a firmware image (DESIGN.md section 9.5), signed over its SHA-256 (hex), which the device checks again
+   *  before it switches to it. XHR, not fetch, for the upload's progress. Resolves once the device has the image
+   *  checked and restarts into it. */
+  async uploadFirmware(bytes, shaHex, onProgress) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = '/feeder/firmware';
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${location.origin}${path}?sha256=${shaHex}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    if (this.set) xhr.setRequestHeader('X-Feeder-Auth', authHeader(this.key, c.nonceBytes, authMessage(path, shaHex)));
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    const status = await new Promise(resolve => {
+      xhr.onload = () => resolve(xhr.status);
+      xhr.onerror = () => resolve(0);
+      xhr.send(bytes);
+    });
+    if (status === 200) return;
+    if (status === 0) throw new Error('The upload was cut off; the feeder keeps its firmware. Try again.');
+    if (status === 403 || status === 429) {
+      throw await this.refusal({ status, json: async () => JSON.parse(xhr.responseText || '{}') });
+    }
+    let error = '';
+    try { error = JSON.parse(xhr.responseText).error; } catch (e) { /* no body */ }
+    throw new Error({
+      sha256: 'The file changed on the way; nothing changed. Try again.',
+      incomplete: 'The upload was cut off; nothing changed. Try again.',
+      flash: 'The feeder refused the image (wrong board, or too big); nothing changed.',
+    }[error] || `The feeder answered ${status}; nothing changed.`);
+  },
+
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
   async setPassword(password) {
     const c = await this.challenge();

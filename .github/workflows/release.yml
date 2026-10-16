@@ -1,0 +1,83 @@
+# Builds the prebuilt binaries (firmware/full.yaml and firmware/no-ble.yaml) and, for a version tag, publishes them:
+# a GitHub release with the images, and GitHub Pages with the install page, the images it flashes and the web app's
+# update manifest (DESIGN.md section 9.5).
+#
+#   push a tag v<fw_version>   check, build, release and publish (the tag must match fw_version in packages/core.yaml)
+#   run it by hand             check and build only; the images are kept as the run's artifact, nothing is published
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome (the version this project is built with)
+        run: pip install esphome==2026.9.1
+      - name: Cache the toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-esphome-2026.9.1
+      - name: Checks
+        run: tools/check.sh
+      - name: Build both variants
+        run: tools/build_bins.sh images
+      - name: Release files
+        run: |
+          version=$(grep -E '^\s*fw_version:' packages/core.yaml | sed -E 's/.*"(.*)".*/\1/')
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then version="${GITHUB_REF_NAME#v}"; fi
+          python3 tools/make_release.py images site "$version"
+          cat images/*.size.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: precision-feeder-images
+          path: site/
+      - name: Pages artifact
+        if: github.ref_type == 'tag'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the release
+      pages: write      # the install page
+      id-token: write   # required by deploy-pages
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: precision-feeder-images
+          path: site
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Precision Feeder ${GITHUB_REF_NAME#v}" \
+            --notes-file site/release-notes.md --verify-tag site/*.bin site/manifest.json
+      - id: pages
+        uses: actions/deploy-pages@v4

@@ -547,8 +547,8 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   of them) replaces it with a saved name through the protected member (`AppName` in precision_feeder.cpp; it stops
   compiling if ESPHome renames the member). A saved name is used exactly: no MAC suffix. Applies at the next
   restart (Restart Needed).
-- **MAC suffix:** the `name_add_mac_suffix` substitution (default off; on in the prebuilt binaries, N7), ESPHome's
-  own option.
+- **MAC suffix:** the `name_add_mac_suffix` substitution (default off; on in the prebuilt binaries, section 9.5),
+  ESPHome's own option.
 - **Access point:** with no `ssid:` in the YAML, the loader names it `<name in use>-setup` (cut to 32 bytes), so a
   MAC suffix or a saved name tells feeders apart; one set in the YAML stands. A password saved on the device
   (`Device.ap_password`, 8 to 63 printable characters) replaces the YAML's at the next restart. Empty: the YAML's.
@@ -591,6 +591,40 @@ uses Configuration's own controls and saves as it goes; any step, or the rest, c
   app behaves exactly as `timezone:` in the YAML. It writes the Timezone entity; a typed POSIX string still works.
   tests/test_web.mjs checks that every string in the table is in `tests/tz_golden.h`, which the device's parser is
   tested against. About 5 KB gzipped.
+
+### 9.5 Prebuilt binaries and updates (firmware 2.0.0)
+
+GitHub Actions builds two variants from `firmware/full.yaml` (with BLE) and `firmware/no-ble.yaml`
+(`tools/build_bins.sh`), each as a factory image (first flash, from address 0) and an OTA image. They carry nothing
+personal: no Wi-Fi network, no API key (`api_key_on_device`), no BLE key, a UTC timezone, `name_add_mac_suffix` on,
+and every package except none (the button and status LED included; their pins can be "none"). The fallback access
+point is **open** on a clean flash (owner, 2026-10-16); the wizard strongly recommends setting a password, and
+`GET /feeder/network` reports `"ap":"open"` until one is set (`"ap_build_open"` says the build has none, so
+removing a saved one leaves it open). `tools/build_bins.sh --config` (in check.sh) fails if any secret reaches a
+binary's config.
+
+- **Firmware Variant** (status.yaml, `fw_variant` in core.yaml): `full`, `no-ble` or `yaml` (any build from a
+  user's own YAML), fixed at build time.
+- **Release** (`.github/workflows/release.yml`): a tag `v<fw_version>` runs every check, builds both variants, and
+  publishes a GitHub release (images, `manifest.json`, the CHANGELOG section as notes) and GitHub Pages (the
+  install page, `install/index.html`, with ESP Web Tools 10.4.0; the factory images it flashes; `manifest.json`).
+  `tools/make_release.py` refuses a tag that is not `fw_version`. Run by hand, it only builds (an artifact).
+- **`manifest.json`**: `version`, `notes` (the release page), `releases`, and per variant the `factory` and `ota`
+  image's `name`, `size` and `sha256`. Pages serves it with `Access-Control-Allow-Origin: *` (section 14, item 10).
+- **Update check, in the browser** (web app, `#firmware`, linked from Diagnostics): fetches `manifest.json` when
+  the page opens, unless turned off in that browser, and compares it with Firmware Version and Firmware Variant.
+  Up to date, update available (release notes link), "Couldn't check" (releases link), or for a `yaml` build the
+  latest version and "update with ESPHome". The feeder itself never contacts the internet.
+- **Upload** (`POST /feeder/firmware?sha256=<hex>`, the image as the raw body, `application/octet-stream`):
+  a route of the settings guard (section 10.1), signed over the path and the hash. The browser hashes the file and
+  names it from the manifest (release, variant; a factory image is refused; an unknown file needs a confirmation).
+  The feeder streams the body into ESPHome's OTA backend (`ota::make_ota_backend()`, as its own web upload does),
+  hashing as it goes (`FirmwareUpload`, firmware_upload.h, host-tested), and only finishes the update if the whole
+  image arrived and its SHA-256 is the signed one; otherwise it aborts and the running firmware stays (422:
+  `sha256`, `incomplete`, `flash`). Then it restarts half a second later, or once the tray stops if it is moving.
+  ESPHome's own `/update` stays off (`ota: false`): it is guarded only by web auth.
+- Flash, measured in N7 (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 78.9%** (1,447,887 bytes),
+  **no-BLE 60.9%** (1,116,743 bytes). No 8 MB variant needed.
 
 ## 10. BLE security
 
@@ -685,6 +719,8 @@ section 10).
   key XOR HMAC-SHA256(current key, nonce || "new key"); with no current password
   it travels as it is (it is a derived key, not the password).
 - **Setup (2.0.0 N6):** `POST /feeder/setup?done=1|0` (section 9.4), signed over the path and the value.
+- **Firmware (2.0.0 N7):** `POST /feeder/firmware?sha256=<hex>` (section 9.5), signed over the path and the hash;
+  the challenge is checked before the first byte is written, and a refused upload never touches the partition.
 - **Network (2.0.0 N5):** the name, Wi-Fi network and access-point password endpoints (section 9.3) are
   always signed when a password is set; the passwords travel masked by it.
 - **Keys (2.0.0 N4):** `POST /feeder/keys/api?key=<hex>` and `/feeder/keys/ble?key=<hex>`
@@ -736,7 +772,7 @@ precision-feeder/
                                     (runtime pins, ESP32-S3 pin validator), feeder_network.cpp
                                     (name, access-point password, Wi-Fi checks), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
-                                    parser); precision_feeder.*
+                                    parser), firmware_upload.h (the checked upload); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
   components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
                                     BleEngine (engine.*: every handler), all host-tested;
@@ -745,6 +781,9 @@ precision-feeder/
                        status_led, web_server, button, hardware, time_homeassistant,
                        diagnostics, network_info, ble_gatt, api_key_on_device
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
+  firmware/            full.yaml, no-ble.yaml: the prebuilt binaries (built by tools/build_bins.sh)
+  install/             index.html: the install page (ESP Web Tools), published with each release
+  .github/workflows/   ci.yml (tools/check.sh), release.yml (binaries, GitHub release, Pages)
   web/                 the web app: src/ (plain JavaScript and CSS, no dependencies), dist/ (built by
                        tools/build_web.py, committed, embedded by packages/web_server.yaml)
   tests/               host-side C++ tests (core, logic, protocol, BLE engine); test_consistency.py;
@@ -752,6 +791,7 @@ precision-feeder/
                        tools/gen_tz_golden.py)
   tools/               Python reference client: precision_feeder_ble.py (entry point) and
                        precision_feeder_client/ (protocol, client, selftest, cli); check.sh;
+                       build_bins.sh and make_release.py (the prebuilt binaries and their manifests);
                        mock_device.py (a fake device for building the web app)
 ```
 
@@ -774,7 +814,9 @@ precision-feeder/
 - If memory gets tight, turn on PSRAM; it may become a requirement of the
   firmware (2026-10-13). Not enabled until measured on hardware.
 - OTA authenticates with the API key; no OTA password; no web-server OTA. (2.0.0 N4: a build with the API key
-  provisioned at run time also sets a random OTA password at every boot, so plaintext OTA is refused; see below.)
+  provisioned at run time also sets a random OTA password at every boot, so plaintext OTA is refused; see below.
+  2.0.0 N7 adds an upload in the web app, signed with the settings password and checked on the device, section 9.5;
+  ESPHome's own web-server OTA stays off.)
 - One-shot feeds are independent of the Scheduler switch (2026-10-14).
 - While the clock is unknown after a reboot, pre-reboot feeds do not count toward
   the daily cap (2026-10-14).
@@ -913,6 +955,23 @@ precision-feeder/
   - Location is typed in: the browser's geolocation needs HTTPS, which the feeder does not serve.
   - Wi-Fi in the wizard is "join another network" (section 9.3): to reach the wizard the feeder is already on a
     network (set by the captive portal or Improv).
+- **2.0.0 N7 (2026-10-16):**
+  - 2.0.0 merged to main (N1 to N6); N7 onward is built on main, as it needs GitHub Actions and Pages.
+  - **The prebuilt binaries' access point is open on a clean flash** (owner), reversing the plan's "documented
+    default password". The wizard strongly recommends setting one. Anyone in range can join the open access point
+    while it is up (no Wi-Fi yet, or Wi-Fi lost) and reach the captive portal and the web app, as on any feeder
+    with no settings password.
+  - Releases: a `v*` tag builds and publishes; a manual run only builds (owner). Pages is deployed by the workflow
+    (source "GitHub Actions", no gh-pages branch); it holds the latest release only.
+  - **Reverses "no web-server OTA"** (section 13, 1.x): the web app uploads firmware through a handler of ours
+    behind the settings password and checks the SHA-256 on the device; ESPHome's own `/update` stays off.
+  - The upload is signed over the image's SHA-256, so a challenge answers for one image only; the device checks the
+    bytes against it before switching.
+  - The update check is the browser's (as planned); the manifest has only the latest release.
+  - The web app's size budget is 64 KB gzipped (was about 60 KB in the 1.1.0 plan): the Firmware page put it
+    100 bytes over, and the binaries have about 380 KB of flash to spare.
+  - The bins' BLE name is "Feeder" (with the MAC suffix, "Feeder-a1b2c3"): ESPHome refuses more than 13 characters
+    before the suffix.
 
 ## 14. Open items
 
@@ -1014,7 +1073,8 @@ precision-feeder/
       (1,400,991 bytes) and **58.3% without** (1,070,315 bytes); the 1.1.0 examples use 75.7%
       and 57.5%. So those ESPHome pieces cost only 12 to 15 KB, and about 430 KB is left in the
       BLE build for 2.0's own code (settings, TZ parser, password, upload handler, wizard). Both
-      variants fit 4 MB; no 8 MB variant is needed on current numbers. Measured again in N7.
+      variants fit 4 MB; no 8 MB variant is needed on current numbers. Measured again in N7: 78.9% and 60.9%
+      (section 9.5).
 11. Roadmap after 2.0.0 (owner, 2026-10-15), not planned in detail yet:
     - 2.1.x: more 3D-printed feeder models driven by a servo (other trays and geometries).
     - 2.2.x (maybe; needs hardware to test): auger-style feeders, which portion by motor time or steps, not tray
@@ -1050,6 +1110,11 @@ precision-feeder/
 18. One settings-password challenge is shared by every client (section 10.1). Rare in practice (two people saving
     protected settings within the same second), and the app recovers on the next try. A per-client challenge would
     need a small table of outstanding nonces; not planned yet (2026-10-16).
+
+19. Prebuilt binaries on the bench (2.0.0 N7): built and compiled only (section 9.5). Still to see: a first flash
+    from the install page (ESP Web Tools, then Improv), the open access point and its captive portal, an upload on
+    the Firmware page (and a refused one: wrong password, a changed file, a cut connection), the restart waiting
+    for a moving tray, and the update check against a published manifest (the first release publishes it). N8.
 
 ## 15. Implementation status (v1.1.0)
 

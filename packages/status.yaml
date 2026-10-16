@@ -124,6 +124,14 @@ text_sensor:
     entity_category: diagnostic
     update_interval: never
 
+  # full or no-ble (prebuilt binaries) or yaml (built from your own YAML): fw_variant in core.yaml.
+  - platform: template
+    id: pf_firmware_variant
+    name: "Firmware Variant"
+    icon: mdi:package-variant
+    entity_category: diagnostic
+    update_interval: never
+
   # Today's feeds in time order, each fed / skipped / due / next / later / held, for example
   # "08:30 x1 fed; 17:30 x1 next". Worked out by the same code that runs the schedule.
   - platform: template
@@ -192,6 +200,7 @@ interval:
           publish_text(id(pf_faults), f->faults_text());
           publish_text(id(pf_time_source), f->time_source_text());
           publish_text(id(pf_firmware), "${fw_version}");
+          publish_text(id(pf_firmware_variant), "${fw_variant}");
           publish_text(id(pf_todays_feeds), f->todays_feeds_text());
           publish_text(id(pf_feed_guard), f->feed_guard_text());
           publish_text(id(pf_device_time), f->device_time_text());

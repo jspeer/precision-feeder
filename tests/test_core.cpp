@@ -1,6 +1,7 @@
 // Host-side tests for the feeder logic (components/precision_feeder/feeder_core.*), with a simulated clock.
 // Build and run:
 //   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp -o /tmp/test_core && /tmp/test_core
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "feeder_core.h"
+#include "firmware_upload.h"
 
 using namespace esphome::precision_feeder;
 
@@ -1439,6 +1441,95 @@ static void test_setup_flag() {
   }
 }
 
+// A sink that records what reached the "partition".
+struct FakeSink : UpdateSink {
+  std::vector<uint8_t> data;
+  size_t limit = 1 << 20;
+  bool began = false, ended = false, aborted = false, fail_write = false, fail_end = false;
+  bool begin(size_t size) override {
+    began = true;
+    data.clear();
+    return size <= limit;
+  }
+  bool write(const uint8_t *d, size_t n) override {
+    if (fail_write)
+      return false;
+    data.insert(data.end(), d, d + n);
+    return true;
+  }
+  bool end() override { return ended = !fail_end; }
+  void abort() override { aborted = true; }
+};
+
+static void test_firmware_upload() {
+  current = "firmware upload";
+  using S = FirmwareUpload::Status;
+  std::vector<uint8_t> image(5000);
+  for (size_t i = 0; i < image.size(); i++)
+    image[i] = static_cast<uint8_t>(i * 7);
+  uint8_t digest[32];
+  crypto::sha256(image.data(), image.size(), digest);
+  auto send = [&](FirmwareUpload &u, FakeSink &sink, const uint8_t *expected, bool authorised, size_t cut = 0) {
+    u.start(expected, image.size(), authorised, &sink);
+    const size_t n = image.size() - cut;
+    for (size_t i = 0; i < n; i += 1460)
+      u.write(image.data() + i, std::min<size_t>(1460, n - i));
+    return u.finish();
+  };
+  {
+    FirmwareUpload u;
+    FakeSink sink;
+    CHECK(send(u, sink, digest, true) == S::OK && sink.ended && sink.data == image, "a signed, whole image is written");
+  }
+  {
+    FirmwareUpload u;
+    FakeSink sink;
+    CHECK(send(u, sink, digest, false) == S::REFUSED && !sink.began, "not authorised: the partition is not touched");
+  }
+  {
+    FirmwareUpload u;
+    FakeSink sink;
+    uint8_t other[32];
+    std::memcpy(other, digest, 32);
+    other[31] ^= 1;
+    CHECK(send(u, sink, other, true) == S::MISMATCH && sink.aborted && !sink.ended, "another image: aborted");
+  }
+  {
+    FirmwareUpload u;
+    FakeSink sink;
+    CHECK(send(u, sink, nullptr, true) == S::BAD_REQUEST && !sink.began, "no hash: refused");
+  }
+  {
+    FirmwareUpload u;
+    FakeSink sink;
+    CHECK(send(u, sink, digest, true, 100) == S::INCOMPLETE && sink.aborted && !sink.ended, "cut short: aborted");
+  }
+  {
+    FirmwareUpload u;
+    FakeSink sink;
+    sink.limit = 100;
+    CHECK(send(u, sink, digest, true) == S::FLASH && sink.data.empty(), "too big for the partition");
+    FakeSink bad;
+    bad.fail_write = true;
+    CHECK(send(u, bad, digest, true) == S::FLASH && bad.aborted, "a write fails: aborted");
+    FakeSink invalid;
+    invalid.fail_end = true;
+    CHECK(send(u, invalid, digest, true) == S::FLASH, "not a valid image");
+  }
+  {
+    // A dropped connection leaves an upload open; the next one aborts it first.
+    FirmwareUpload u;
+    FakeSink first, second;
+    u.start(digest, image.size(), true, &first);
+    u.write(image.data(), 1000);
+    CHECK(send(u, second, digest, true) == S::OK && first.aborted && second.data == image, "a new upload aborts the old");
+    FakeSink third;
+    u.start(digest, image.size(), true, &third);
+    u.no_body();
+    CHECK(third.aborted && u.status() == S::BAD_REQUEST, "no body: aborted");
+  }
+}
+
 int main() {
   test_feed_motion();
   test_guard();
@@ -1473,6 +1564,7 @@ int main() {
   test_ble_settings();
   test_network();
   test_setup_flag();
+  test_firmware_upload();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

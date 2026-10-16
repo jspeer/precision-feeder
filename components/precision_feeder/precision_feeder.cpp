@@ -12,6 +12,10 @@
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #endif
+#if defined(USE_WEBSERVER) && defined(USE_OTA)
+#include "esphome/components/ota/ota_backend_factory.h"
+#include "firmware_upload.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -72,6 +76,19 @@ void PrecisionFeeder::setup() {
   }
 #endif
   this->update_api_key_state_();
+}
+
+void PrecisionFeeder::restart_if_due_() {
+  const uint32_t at = this->restart_at_.load();
+  if (at == 0 || static_cast<int32_t>(millis() - at) < 0)
+    return;
+  // Not in the middle of a feed: an interrupted move would leave the tray position unknown. Feeding goes on until
+  // the tray stops; the image waits in the update partition.
+  if (this->tray_state() == TrayState::MOVING)
+    return;
+  this->restart_at_.store(0);
+  ESP_LOGI(TAG, "Restarting into the uploaded firmware");
+  App.safe_reboot();
 }
 
 bool PrecisionFeeder::api_key_settable() {
@@ -160,6 +177,7 @@ void PrecisionFeeder::apply_network() {
       const std::string &name = App.get_name().str();
       ap.set_ssid(name.substr(0, WIFI_SSID_MAX - (sizeof(SUFFIX) - 1)) + SUFFIX);
     }
+    this->ap_build_open_ = ap.get_password().empty();  // the prebuilt binaries: open on a clean flash
     if (saved.ap_password[0] != '\0' && check_wifi_password(saved.ap_password, false))
       ap.set_password(saved.ap_password);
     wifi->set_ap(ap);
@@ -390,6 +408,36 @@ static bool from_hex(const std::string &text, size_t offset, uint8_t *out, size_
   return true;
 }
 
+#ifdef USE_OTA
+/// The firmware upload's sink (firmware_upload.h) over ESPHome's own OTA backend, the one its OTA and web upload use.
+class OtaSink : public UpdateSink {
+ public:
+  bool begin(size_t size) override {
+    this->backend_ = ota::make_ota_backend();
+    if (this->backend_ && this->backend_->begin(size) == ota::OTA_RESPONSE_OK)
+      return true;
+    this->backend_.reset();
+    return false;
+  }
+  bool write(const uint8_t *data, size_t len) override {
+    return this->backend_->write(const_cast<uint8_t *>(data), len) == ota::OTA_RESPONSE_OK;
+  }
+  bool end() override {
+    const bool ok = this->backend_->end() == ota::OTA_RESPONSE_OK;
+    this->backend_.reset();
+    return ok;
+  }
+  void abort() override {
+    if (this->backend_)
+      this->backend_->abort();
+    this->backend_.reset();
+  }
+
+ protected:
+  ota::OTABackendPtr backend_{nullptr};
+};
+#endif
+
 class SettingsGuard : public AsyncWebHandler {
  public:
   explicit SettingsGuard(PrecisionFeeder *feeder) : feeder_(feeder) {}
@@ -405,6 +453,10 @@ class SettingsGuard : public AsyncWebHandler {
         url == "/feeder/keys/ble" || url == "/feeder/network/name" || url == "/feeder/network/ap" ||
         url == "/feeder/network/wifi" || url == "/feeder/setup")
       return true;
+#ifdef USE_OTA
+    if (url == "/feeder/firmware")
+      return true;
+#endif
     // POST /<domain>/<name>/<action>: protected when "<domain>/<name>" is on the list.
     const size_t action = url.rfind('/');
     return action != std::string::npos && action > 0 && this->feeder_->is_protected(url.substr(1, action - 1));
@@ -424,6 +476,12 @@ class SettingsGuard : public AsyncWebHandler {
       this->set_setup_(request);
       return;
     }
+#ifdef USE_OTA
+    if (url == "/feeder/firmware") {
+      this->finish_firmware_(request);
+      return;
+    }
+#endif
     if (url.rfind("/feeder/network/", 0) == 0) {
       this->set_network_(request, url);
       return;
@@ -497,37 +555,109 @@ class SettingsGuard : public AsyncWebHandler {
     request->send(200, "application/json", body.c_str());
   }
 
-  /// Check the auth header against `message`; on failure answer the request and return false.
-  bool authorised_(AsyncWebServerRequest *request, const std::string &message) {
+  /// Check the auth header against `message`. Answers nothing.
+  AuthResult check_auth_(AsyncWebServerRequest *request, const std::string &message, uint32_t &wait) {
     uint8_t nonce[AUTH_NONCE_SIZE]{}, tag[AUTH_TAG_SIZE]{};
     const auto header = request->get_header(AUTH_HEADER);
     const bool parsed = header.has_value() && header->size() == 2 * (AUTH_NONCE_SIZE + AUTH_TAG_SIZE) &&
                         from_hex(*header, 0, nonce, AUTH_NONCE_SIZE) &&
                         from_hex(*header, 2 * AUTH_NONCE_SIZE, tag, AUTH_TAG_SIZE);
-    uint32_t wait = 0;
+    wait = 0;
     AuthResult result;
     {
       LockGuard guard(this->feeder_->password_lock());
       if (!this->feeder_->password_set())
-        return true;
+        return AuthResult::OK;
       result = parsed ? this->feeder_->password_check(nonce, tag, message, wait) : AuthResult::NO_CHALLENGE;
     }
-    if (result == AuthResult::OK)
-      return true;
+    if (result == AuthResult::REFUSED)
+      ESP_LOGW(TAG, "Settings password refused for %s", message.substr(0, message.find('\n')).c_str());
+    return result;
+  }
+
+  /// Answer a request the settings password refused: 403, or 429 inside the wait after a failure.
+  static void send_refusal_(AsyncWebServerRequest *request, AuthResult result, uint32_t wait) {
     static const char *const ERRORS[] = {"", "refused", "wait", "challenge"};
     char body[64];
     std::snprintf(body, sizeof(body), "{\"error\":\"%s\",\"wait\":%u}", ERRORS[static_cast<uint8_t>(result)],
                   static_cast<unsigned>(wait));
-    if (result == AuthResult::REFUSED)
-      ESP_LOGW(TAG, "Settings password refused for %s", message.substr(0, message.find('\n')).c_str());
     // ESPHome's ESP-IDF request (2026.9.1) knows only 200, 204, 400, 401, 404, 409 and 422 and sends anything else as
     // 500 (found on the bench), so these two go straight to ESP-IDF, which takes any status line.
     httpd_req_t *raw = *request;
     httpd_resp_set_status(raw, result == AuthResult::WAIT ? "429 Too Many Requests" : "403 Forbidden");
     httpd_resp_set_type(raw, "application/json");
     httpd_resp_send(raw, body, HTTPD_RESP_USE_STRLEN);
+  }
+
+  /// Check the auth header against `message`; on failure answer the request and return false.
+  bool authorised_(AsyncWebServerRequest *request, const std::string &message) {
+    uint32_t wait;
+    const AuthResult result = this->check_auth_(request, message, wait);
+    if (result == AuthResult::OK)
+      return true;
+    send_refusal_(request, result, wait);
     return false;
   }
+
+#ifdef USE_OTA
+  // ---- Firmware upload (DESIGN.md section 9.5) ----
+  // POST /feeder/firmware?sha256=<hex>, the image as the raw body (Content-Type application/octet-stream), signed
+  // over the path and the hash as sent. The web server hands the body over in chunks before handleRequest().
+
+ public:
+  void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) override {
+    char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    if (request->url_to(buf).str() != "/feeder/firmware")
+      return;
+    if (index == 0) {
+      this->body_seen_ = true;
+      const std::string sha = request->hasParam("sha256") ? request->arg("sha256") : std::string();
+      uint8_t expected[crypto::Sha256::DIGEST_SIZE];
+      const bool parsed = sha.size() == 2 * sizeof(expected) && from_hex(sha, 0, expected, sizeof(expected));
+      this->auth_ = this->check_auth_(request, "/feeder/firmware\n" + sha, this->auth_wait_);
+      this->upload_.start(parsed ? expected : nullptr, total, this->auth_ == AuthResult::OK, &this->sink_);
+      if (this->upload_.status() == FirmwareUpload::Status::RECEIVING)
+        ESP_LOGI(TAG, "Firmware upload started (%u bytes)", static_cast<unsigned>(total));
+    }
+    this->upload_.write(data, len);
+  }
+
+ protected:
+  void finish_firmware_(AsyncWebServerRequest *request) {
+    using S = FirmwareUpload::Status;
+    if (!this->body_seen_)
+      this->upload_.no_body();
+    this->body_seen_ = false;
+    const S status = this->upload_.finish();
+    switch (status) {
+      case S::OK:
+        ESP_LOGI(TAG, "Firmware upload checked (SHA-256 matches); restarting into it");
+        request->send(200, "application/json", "{\"restart\":true}");
+        this->feeder_->restart_after_upload();
+        return;
+      case S::REFUSED:
+        send_refusal_(request, this->auth_, this->auth_wait_);
+        return;
+      case S::BAD_REQUEST:
+        request->send(400, "application/json", "{\"error\":\"request\"}");
+        return;
+      default: {
+        static const char *const ERRORS[] = {"", "", "", "", "", "flash", "incomplete", "sha256"};
+        ESP_LOGW(TAG, "Firmware upload failed (%s); the running firmware stays", ERRORS[static_cast<uint8_t>(status)]);
+        char body[48];
+        std::snprintf(body, sizeof(body), "{\"error\":\"%s\"}", ERRORS[static_cast<uint8_t>(status)]);
+        request->send(422, "application/json", body);
+        return;
+      }
+    }
+  }
+
+  OtaSink sink_;
+  FirmwareUpload upload_;
+  AuthResult auth_{AuthResult::OK};
+  uint32_t auth_wait_{0};
+  bool body_seen_{false};
+#endif
 
   /// POST /feeder/auth/password?salt=<hex>&key=<hex>: set or change it (key masked, see password_unmask), or clear
   /// it (no key). Needs the current password when one is set.
@@ -647,7 +777,8 @@ class SettingsGuard : public AsyncWebHandler {
   void send_network_(AsyncWebServerRequest *request) {
     std::string in_use, saved;
     bool has_ap, restart, setup;
-    KeySource ap = KeySource::BUILD;
+    KeySource ap = KeySource::BUILD;  // "ap" below: device (saved here), build (the YAML's), open (the build has none:
+                                      // the prebuilt binaries) or off (no access point)
     {
       LockGuard guard(this->feeder_->password_lock());
       in_use = this->feeder_->hostname_in_use();
@@ -660,7 +791,9 @@ class SettingsGuard : public AsyncWebHandler {
     // Names are checked hostnames (letters, digits, hyphens), so they need no escaping.
     std::string body = "{\"name\":\"" + in_use + "\",\"name_saved\":\"" + saved + "\",\"name_build\":\"" +
                        this->feeder_->hostname_build() + "\",\"ap\":\"" +
-                       (has_ap ? (ap == KeySource::DEVICE ? "device" : "build") : "off") + "\",\"wifi\":" +
+                       (has_ap ? (ap == KeySource::DEVICE ? "device" : this->feeder_->ap_build_open() ? "open" : "build")
+                               : "off") +
+                       "\",\"ap_build_open\":" + (this->feeder_->ap_build_open() ? "true" : "false") + ",\"wifi\":" +
                        (PrecisionFeeder::wifi_settable() ? "true" : "false") + ",\"restart\":" +
                        (restart ? "true" : "false") + ",\"setup\":" + (setup ? "true" : "false") + "}";
     request->send(200, "application/json", body.c_str());

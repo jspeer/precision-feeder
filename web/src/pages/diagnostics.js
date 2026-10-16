@@ -32,6 +32,9 @@ PAGES.diagnostics = {
         .filter(Boolean).join(', ');
     });
     this.sysUpdaters = this.updaters.slice();
+    if (store.has(E.firmware)) {
+      sys.appendChild(h('div', { class: 'actions' }, h('a', { class: 'btn', href: '#firmware' }, 'Updates and firmware upload')));
+    }
 
     // Network (network_info package)
     const net = store.has(E.wifiNetwork) || store.has(E.ipAddress1) ? card('Network') : null;

@@ -13,7 +13,8 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8');
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
-  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots, addressKind };`, ctx);
+  formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots, addressKind, compareVersions,
+  updateState, identifyImage };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -239,4 +240,25 @@ test('time zones: every rule the app can send is one the device parser is tested
     .matchAll(/^\s*\{"([^"]+)"/gm)].map(m => m[1]));
   const missing = T.TZ_RULES.filter(r => !golden.has(r));
   assert.deepEqual([...missing], [], 'regenerate both with ESPHome\'s Python: tools/gen_tz_golden.py, gen_tz_zones.py');
+});
+
+test('firmware versions and the update check', () => {
+  assert.ok(P.compareVersions('2.0.0', '1.1.0') > 0);
+  assert.ok(P.compareVersions('2.0.0', '2.0.1') < 0);
+  assert.equal(P.compareVersions('2.0', '2.0.0'), 0);
+  assert.equal(P.compareVersions('2.0.0-dev', '2.0.0'), 0);
+  assert.ok(P.compareVersions('2.10.0', '2.9.9') > 0);
+  const m = { version: '2.1.0', variants: {
+    full: { ota: { sha256: 'aa' }, factory: { sha256: 'bb' } }, 'no-ble': { ota: { sha256: 'cc' } } } };
+  assert.deepEqual(plain(P.updateState(m, '2.0.0', 'full')), { state: 'update', latest: '2.1.0' });
+  assert.deepEqual(plain(P.updateState(m, '2.1.0', 'no-ble')), { state: 'current', latest: '2.1.0' });
+  assert.deepEqual(plain(P.updateState(m, '2.2.0', 'full')), { state: 'current', latest: '2.1.0' });
+  assert.equal(P.updateState(m, '2.0.0', 'yaml').state, 'yaml');
+  assert.equal(P.updateState(m, '2.0.0', '').state, 'yaml');
+  assert.equal(P.updateState(m, '2.0.0', 'other').state, 'unknown');
+  assert.equal(P.updateState(null, '2.0.0', 'full').state, 'unknown');
+  assert.deepEqual(plain(P.identifyImage(m, 'aa')), { variant: 'full', kind: 'ota', version: '2.1.0' });
+  assert.deepEqual(plain(P.identifyImage(m, 'bb')), { variant: 'full', kind: 'factory', version: '2.1.0' });
+  assert.equal(P.identifyImage(m, 'dd'), null);
+  assert.equal(P.identifyImage(null, 'aa'), null);
 });

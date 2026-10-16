@@ -106,9 +106,11 @@ PAGES.setup = {
       out.push(h('div', { class: 'key-part' }, h('div', { class: 'setting-label' }, 'Access point password'),
         h('p', {}, 'When the feeder cannot join Wi-Fi it opens its own access point. ' +
                    (n.ap === 'device' ? 'Its password is set here.'
-                                      : 'It still has the password it was built with: change it, especially on a ' +
-                                        'prebuilt binary, where that password is published.')),
-        h('div', { class: 'actions' }, btn('Change the password', () => cfg.apDialog(), n.ap !== 'device'))));
+                    : n.ap === 'open' ? 'It has no password, so anyone in range could join it and change this ' +
+                                        'feeder\'s settings. Setting one is strongly recommended.'
+                                      : 'It still has the password it was built with: change it.')),
+        n.ap === 'open' ? h('p', { class: 'pill pill-warn', role: 'note' }, 'Strongly recommended') : null,
+        h('div', { class: 'actions' }, btn(n.ap === 'open' ? 'Set a password' : 'Change the password', () => cfg.apDialog(), n.ap !== 'device'))));
     }
     return out;
   },

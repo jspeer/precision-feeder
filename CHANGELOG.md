@@ -58,6 +58,15 @@ Prebuilt binaries set up in a browser ([docs/plans/2.0.0-appliance.md](docs/plan
   refused with NOT_AUTHORIZED detail 7. A missing key is detail 6. Still protocol 2;
   the Python client names both and shows unknown details by number. BLE Info also says
   where the key comes from and shows the two permissions.
+- Prebuilt binaries: `full` (with BLE) and `no-ble`, built by GitHub Actions from
+  `firmware/` for each release tag, with an install page on GitHub Pages (ESP Web Tools,
+  then Wi-Fi over USB). They carry nothing personal; the fallback access point has no
+  password until one is set (the setup wizard strongly recommends it).
+- Firmware updates in the web app (Diagnostics, Updates and firmware upload): the browser
+  checks GitHub Pages for a newer release (can be turned off), and uploads an image after
+  checking it against the release. The upload is signed with the settings password and the
+  feeder checks the image's SHA-256 before switching, then restarts once the tray is still.
+- New Firmware Variant sensor: `full`, `no-ble` or `yaml` (built from your own YAML).
 - CI: the BLE session text buffer is sized for GCC's format checks (no behaviour change).
 
 ## 1.1.0: local first (2026-10-15)

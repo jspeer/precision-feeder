@@ -11,6 +11,8 @@ const TABS = [
   { id: 'diagnostics', title: 'Diagnostics', short: 'Diag', icon: 'activity', shown: () => true },
   // Not in the tab bar: opened by itself on a feeder that is not set up yet, and from Configuration.
   { id: 'setup', title: 'Setup', hidden: true, shown: () => store.has(E.dailyCap) },
+  // Not in the tab bar either: linked from Diagnostics (2.0.0 N7).
+  { id: 'firmware', title: 'Firmware', hidden: true, shown: () => store.has(E.firmware) },
 ];
 // The initial list of entities arrives in a burst; it has settled once nothing new has come for this long.
 const SETTLE_MS = 700;

@@ -43,8 +43,9 @@ from being over-fed.
 - [How the feeder works](#how-the-feeder-works)
 - [Features](#features)
 - [What you need](#what-you-need)
+- [Prebuilt binaries](#prebuilt-binaries) (install from a browser) and [updates](#updates)
 - [Choosing your build: packages](#choosing-your-build-packages)
-- [Setting it up](#setting-it-up)
+- [Setting it up](#setting-it-up) (building your own)
 - [Everyday use](#everyday-use)
 - [Settings you can change](#settings-you-can-change)
 - [The web dashboard password](#the-web-dashboard-password)
@@ -102,8 +103,10 @@ say where the tray is (or reload it). It never guesses.
   authenticated with a shared key, so a stranger in Bluetooth range cannot
   control it. Documented byte for byte in [docs/PROTOCOL.md](docs/PROTOCOL.md),
   with a Python reference client.
-- **Secure updates.** OTA updates are encrypted with the API key; the web
-  server's own upload page is turned off.
+- **Secure updates.** OTA updates are encrypted with the API key. From 2.0.0 the web
+  app can also upload a release: it checks the file against the release, the upload is
+  signed with the settings password, and the feeder checks the file again before it
+  switches. ESPHome's own upload page stays off.
 
 ## What you need
 
@@ -129,6 +132,35 @@ say where the tray is (or reload it). It never guesses.
 
 If the servo twitches when the board powers up, add a 10 kΩ resistor from the
 signal wire to GND. (It did not on the bench build.)
+
+## Prebuilt binaries
+
+From firmware 2.0.0 you need not build anything: flash a release from the install page,
+**<https://jspeer.github.io/precision-feeder/>** (published with the first 2.0.0 release), in Chrome or Edge on a
+computer. Plug the board in over USB, choose a variant, and the page then asks for your Wi-Fi network (Improv).
+Open the feeder's address and the [setup wizard](#setup-wizard) does the rest. Images are also on the
+[releases page](https://github.com/jspeer/precision-feeder/releases).
+
+| Variant | What it has | Flash (app slot, 4 MB board) |
+|---|---|---|
+| `full` | everything, including the BLE control plane | 78.9% |
+| `no-ble` | everything except BLE | 60.9% |
+
+Both run on any ESP32-S3 with 4 MB of flash or more, with no PSRAM needed; choose the board's pins in the wizard.
+Each comes as `.factory.bin` (first flash, from address 0) and `.ota.bin` (updates). Out of the box they have no
+Wi-Fi network, no keys and the time zone UTC; the name gets the end of the board's MAC address
+(`precision-feeder-a1b2c3`), and the BLE name is `Feeder-a1b2c3`. If the feeder cannot join Wi-Fi it opens an access
+point, `precision-feeder-a1b2c3-setup`, **with no password**: anyone in range can join it while it is up. Set one
+in the wizard (Network); it is strongly recommended.
+
+### Updates
+
+The web app's Diagnostics page links to **Updates and firmware upload**. Opening it, your browser (not the feeder)
+asks GitHub Pages for the latest release and says whether one is newer, with its release notes; the check can be
+turned off there. To update, download the variant's `.ota.bin` from the releases page and choose it on that page:
+the browser checks it against the release, uploads it (with the settings password, if one is set), and the feeder
+checks it again, then restarts into it once the tray is still. Settings and calibration are kept. A feeder built
+from your own YAML (Firmware Variant `yaml`) is updated with ESPHome as before.
 
 ## Choosing your build: packages
 
@@ -335,7 +367,7 @@ needs the password, and the passwords travel masked by it; with none, they cross
   comes back after the next update built from a changed YAML.
 - **Access point password:** the password of the access point the feeder opens when it cannot join Wi-Fi
   (`<name>-setup`, unless your YAML names it). Saved on the feeder, it wins over `fallback_ap_password` and is used
-  after the next restart.
+  after the next restart. The prebuilt binaries have none until you set one here.
 
 The feeder never sends a password back.
 
@@ -454,9 +486,12 @@ components/precision_feeder/      the logic (tray, guard, scheduler, sun maths),
 components/precision_feeder_ble/  the BLE protocol (only compiled when the BLE package is used)
 packages/                         the feature packages described above
 examples/                         basic.yaml, ble.yaml, secrets.example.yaml
+firmware/                         the prebuilt binaries' configurations (full.yaml, no-ble.yaml)
+install/                          the install page, published with each release
 tests/                            host-side C++ tests for the logic and the protocol
 tools/                            Python BLE reference client (precision_feeder_client/; its protocol
-                                  module is pure Python for reuse), tests, and check.sh
+                                  module is pure Python for reuse), tests, check.sh, and the release
+                                  tools (build_bins.sh, make_release.py)
 docs/                             the guides above
 ```
 

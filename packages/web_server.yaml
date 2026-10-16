@@ -29,8 +29,10 @@ web_server:
   css_url: ""
   js_include: ../web/dist/app.js
   css_include: ../web/dist/app.css
-  # No firmware upload from the browser: updates go through the encrypted ESPHome OTA
-  # (see `ota:` in core.yaml). The web server's /update page would accept an image in plaintext.
+  # ESPHome's own /update page stays off: it is guarded only by `auth` and checks nothing. The web app's Firmware page
+  # uploads through the feeder's own handler instead (POST /feeder/firmware, firmware 2.0.0): signed with the settings
+  # password when one is set, and the image's SHA-256 checked on the feeder before it switches (DESIGN.md section
+  # 9.5). The encrypted ESPHome OTA (`ota:` in core.yaml) works as before.
   ota: false
   # auth:
   #   username: !secret web_username

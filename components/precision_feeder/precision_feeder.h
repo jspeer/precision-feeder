@@ -94,6 +94,8 @@ class PrecisionFeeder : public Component, public FeederCore {
   void apply_network();
   /// The name the YAML gave (with its MAC suffix, if the build adds one), before any saved on the device.
   const std::string &hostname_build() const { return this->hostname_build_; }
+  /// The build's access point has no password (the prebuilt binaries, on a clean flash). Set before Wi-Fi starts.
+  bool ap_build_open() const { return this->ap_build_open_; }
   /// True if this build has Wi-Fi, so a network can be saved from the web app.
   static bool wifi_settable();
   /// Save a Wi-Fi network in ESPHome's own slot and join it now (the one the captive portal and Improv use). Main
@@ -134,6 +136,9 @@ class PrecisionFeeder : public Component, public FeederCore {
 #endif
   /// The settings-password calls of FeederCore run on the web server's task too: they go through this lock.
   Mutex &password_lock() { return this->password_lock_; }
+  /// A firmware image was written and checked (POST /feeder/firmware): restart into it half a second from now (so the
+  /// answer gets out), or once the tray stops if it is moving. Safe to call from the web server's task.
+  void restart_after_upload() { this->restart_at_.store((millis() + 500) | 1); }
   /// Run `f` on the main loop (safe to call from the web server's task).
   void run_on_main_loop(std::function<void()> &&f) { this->defer(std::move(f)); }
 
@@ -142,6 +147,7 @@ class PrecisionFeeder : public Component, public FeederCore {
     LockGuard guard(this->password_lock_);
     this->core_loop();
     this->update_api_key_state_();
+    this->restart_if_due_();
   }
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
@@ -165,11 +171,13 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_random(uint8_t *out, size_t n) override;
 
   void update_api_key_state_();
+  void restart_if_due_();
   /// The Device record as saved, read before setup() (for the pin and network loaders); defaults if none.
   static Device load_device_early_();
 
   output::FloatOutput *output_{nullptr};
   std::atomic<ApiKey> api_key_state_{ApiKey::OFF};  // read by the web server's task
+  std::atomic<uint32_t> restart_at_{0};               // millis() of a restart after a firmware upload; 0: none
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   ESPHomeOTAComponent *ota_{nullptr};
 #endif
@@ -186,6 +194,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   ESPPreferenceObject pref_state_;
   ESPPreferenceObject pref_device_;
   std::string hostname_build_;
+  bool ap_build_open_{false};
   Mutex password_lock_;
 #ifdef USE_WEBSERVER
   web_server::WebServer *web_server_{nullptr};

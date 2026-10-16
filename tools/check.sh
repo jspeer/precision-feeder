@@ -3,7 +3,7 @@
 # validation of each example. The same script runs in CI (.github/workflows/ci.yml) and on your machine.
 #
 #   tools/check.sh              host tests, plus "esphome config" if esphome is on PATH or in .venv (both examples,
-#                               and ble.yaml with the api_key_on_device package)
+#                               ble.yaml with the api_key_on_device package, and the prebuilt binaries' firmware/)
 #   tools/check.sh --compile    also compile the examples (slow; downloads the toolchain the first time)
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
@@ -29,7 +29,7 @@ echo "== C++ host tests"
 "$OUT/test_ble_engine"
 
 echo "== Python tests (client, and limits consistency)"
-(cd tools && python3 -m unittest -q test_precision_feeder_ble)
+(cd tools && python3 -m unittest -q test_precision_feeder_ble test_make_release)
 python3 -m unittest -q tests/test_consistency.py
 
 echo "== Web app (web/dist built from web/src, parser tests)"
@@ -86,4 +86,6 @@ if [ "${1:-}" = "--compile" ]; then
     fi
   done
 fi
+# The prebuilt binaries' configs (firmware/), and that no secret reaches them.
+tools/build_bins.sh --config
 echo "== all checks passed"

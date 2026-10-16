@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  Precision Feeder: the install page (GitHub Pages). Flashes a prebuilt binary from the browser with ESP Web Tools,
+  then sets Wi-Fi over the same USB cable (Improv). tools/make_release.py copies it next to the release's manifests.
+
+  Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+  Designed and written with the assistance of an AI (Anthropic's Claude);
+  reviewed by a human, but it may still contain mistakes.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Precision Feeder Installer</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+  :root { --bg: #f6f7f9; --surface: #fff; --text: #1b1f24; --muted: #5b6470; --border: #d9dde3; --accent: #0b6bcb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111418; --surface: #1a1f25; --text: #e7eaee; --muted: #9aa4b0; --border: #2c333b; --accent: #5aa7f2; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .version { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 16px 0; }
+  h2 { font-size: 1.1rem; margin: 0 0 8px; }
+  p, li { color: var(--muted); }
+  a { color: var(--accent); }
+  esp-web-install-button { display: block; margin-top: 12px; }
+  .unsupported { color: var(--text); }
+  code { font-size: .9em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Precision Feeder</h1>
+  <p class="version" id="version">Firmware for the Precision Feeder Rev2 on an ESP32-S3 board.</p>
+
+  <section>
+    <h2>Install</h2>
+    <p>Plug the board in with a USB cable that carries data, then choose a variant. Chrome or Edge on a computer is
+      needed (Web Serial). After flashing, the installer asks for your Wi-Fi network.</p>
+    <h2>With Bluetooth</h2>
+    <p>Everything, plus the Bluetooth control plane for a PLC or a phone app.</p>
+    <esp-web-install-button manifest="install-full.json">
+      <span slot="unsupported" class="unsupported">This browser cannot flash: use Chrome or Edge on a computer.</span>
+      <span slot="not-allowed" class="unsupported">Open this page over HTTPS to flash.</span>
+    </esp-web-install-button>
+    <h2 style="margin-top:16px">Without Bluetooth</h2>
+    <p>Wi-Fi, the web app and Home Assistant only. Smaller, and leaves more memory free.</p>
+    <esp-web-install-button manifest="install-no-ble.json"></esp-web-install-button>
+  </section>
+
+  <section>
+    <h2>After installing</h2>
+    <ul>
+      <li>Open the feeder's address (the installer links to it) to run the setup wizard: name, time zone, board and
+        pins, keys, then calibration.</li>
+      <li>No Wi-Fi yet? The feeder opens its own access point, <code>precision-feeder-xxxxxx-setup</code>, with no
+        password. Join it and the setup page opens. Set an access point password in the wizard.</li>
+      <li>Home Assistant finds the feeder and gives it its key when you adopt it.</li>
+      <li>Later updates: the web app's Diagnostics, "Updates and firmware upload". Your settings and calibration
+        are kept.</li>
+    </ul>
+  </section>
+
+  <p><a href="https://github.com/jspeer/precision-feeder">Source, documentation and releases</a> · Public domain
+    (The Unlicense) · Inspired by FlyingGyroscope's PrecisionFeederRev2 · Written with the assistance of an AI
+    (Anthropic's Claude).</p>
+</main>
+<script>
+  fetch('manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => {
+    document.getElementById('version').textContent = `Firmware ${m.version} for the Precision Feeder Rev2 on an ESP32-S3 board.`;
+  }).catch(() => {});
+</script>
+</body>
+</html>

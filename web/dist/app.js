@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '2537aee19d42';
+const BUILD_ID = '2752a5c7cf3e';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -30,6 +30,7 @@ const E = {
   faults: 'text_sensor/Faults',
   timeSource: 'text_sensor/Time Source',
   firmware: 'text_sensor/Firmware Version',
+  firmwareVariant: 'text_sensor/Firmware Variant',
   todaysFeeds: "text_sensor/Today's Feeds",
   feedGuard: 'text_sensor/Feed Guard',
   deviceTime: 'text_sensor/Device Time',
@@ -316,6 +317,41 @@ function addressKind(addr) {
   if (/^fe[89ab]/.test(a)) return 'IPv6 link-local';
   if (/^f[cd]/.test(a)) return 'IPv6 private';
   return 'IPv6';
+}
+
+/** Compare two "major.minor.revision" versions: negative if a is older, 0 if the same, positive if newer. Missing
+ *  parts count as 0; anything after a number in a part ("2.0.0-dev") is ignored. */
+function compareVersions(a, b) {
+  const parts = v => String(v || '').split('.').map(p => parseInt(p, 10) || 0);
+  const x = parts(a), y = parts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/** The update check (DESIGN.md section 9.5): the release manifest against the feeder's Firmware Version and
+ *  Firmware Variant. {state: 'current' | 'update' | 'yaml' | 'unknown', latest}. 'yaml': built from its own YAML,
+ *  updated with ESPHome; 'unknown': the manifest has no image for this variant. */
+function updateState(manifest, version, variant) {
+  const latest = manifest && manifest.version;
+  if (!latest) return { state: 'unknown', latest: '' };
+  if (variant === 'yaml' || !variant) return { state: 'yaml', latest };
+  if (!manifest.variants || !manifest.variants[variant]) return { state: 'unknown', latest };
+  return { state: compareVersions(latest, version) > 0 ? 'update' : 'current', latest };
+}
+
+/** Which released image a file is, by its SHA-256 (hex): {variant, kind: 'ota' | 'factory', version}, or null. */
+function identifyImage(manifest, sha256hex) {
+  const variants = (manifest && manifest.variants) || {};
+  for (const variant of Object.keys(variants)) {
+    for (const kind of ['ota', 'factory']) {
+      const image = variants[variant][kind];
+      if (image && String(image.sha256).toLowerCase() === sha256hex) return { variant, kind, version: manifest.version };
+    }
+  }
+  return null;
 }
 
 // ---- tz_zones.js ----
@@ -791,6 +827,37 @@ const auth = {
     if (r.status === 403 || r.status === 429) throw await this.refusal(r);
     if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
     await this.loadNetwork();
+  },
+
+  /** Upload a firmware image (DESIGN.md section 9.5), signed over its SHA-256 (hex), which the device checks again
+   *  before it switches to it. XHR, not fetch, for the upload's progress. Resolves once the device has the image
+   *  checked and restarts into it. */
+  async uploadFirmware(bytes, shaHex, onProgress) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = '/feeder/firmware';
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${location.origin}${path}?sha256=${shaHex}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    if (this.set) xhr.setRequestHeader('X-Feeder-Auth', authHeader(this.key, c.nonceBytes, authMessage(path, shaHex)));
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    const status = await new Promise(resolve => {
+      xhr.onload = () => resolve(xhr.status);
+      xhr.onerror = () => resolve(0);
+      xhr.send(bytes);
+    });
+    if (status === 200) return;
+    if (status === 0) throw new Error('The upload was cut off; the feeder keeps its firmware. Try again.');
+    if (status === 403 || status === 429) {
+      throw await this.refusal({ status, json: async () => JSON.parse(xhr.responseText || '{}') });
+    }
+    let error = '';
+    try { error = JSON.parse(xhr.responseText).error; } catch (e) { /* no body */ }
+    throw new Error({
+      sha256: 'The file changed on the way; nothing changed. Try again.',
+      incomplete: 'The upload was cut off; nothing changed. Try again.',
+      flash: 'The feeder refused the image (wrong board, or too big); nothing changed.',
+    }[error] || `The feeder answered ${status}; nothing changed.`);
   },
 
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */
@@ -2453,9 +2520,10 @@ PAGES.configuration = {
     }
     if (n.ap !== 'off') {
       box.appendChild(part('Access point password', 'Used by the access point the feeder opens when it cannot join ' +
-                           `Wi-Fi. ${n.ap === 'device' ? 'Set here.' : 'From the build.'}`, [
-        btn('Change', () => this.apDialog()),
-        n.ap === 'device' ? btn('Use the build\'s', () => run(auth.setNetwork('ap', { password: '' }),
+                           `Wi-Fi. ${n.ap === 'device' ? 'Set here.' : n.ap === 'open' ? 'None: anyone in range can ' +
+                           'join it. Set one.' : 'From the build.'}`, [
+        btn(n.ap === 'open' ? 'Set' : 'Change', () => this.apDialog(), n.ap === 'open' ? 'btn btn-small btn-primary' : undefined),
+        n.ap === 'device' ? btn(n.ap_build_open ? 'Remove' : 'Use the build\'s', () => run(auth.setNetwork('ap', { password: '' }),
                                                               'Saved: used after the next restart')) : null,
       ].filter(Boolean)));
     }
@@ -2937,6 +3005,9 @@ PAGES.diagnostics = {
         .filter(Boolean).join(', ');
     });
     this.sysUpdaters = this.updaters.slice();
+    if (store.has(E.firmware)) {
+      sys.appendChild(h('div', { class: 'actions' }, h('a', { class: 'btn', href: '#firmware' }, 'Updates and firmware upload')));
+    }
 
     // Network (network_info package)
     const net = store.has(E.wifiNetwork) || store.has(E.ipAddress1) ? card('Network') : null;
@@ -3243,9 +3314,11 @@ PAGES.setup = {
       out.push(h('div', { class: 'key-part' }, h('div', { class: 'setting-label' }, 'Access point password'),
         h('p', {}, 'When the feeder cannot join Wi-Fi it opens its own access point. ' +
                    (n.ap === 'device' ? 'Its password is set here.'
-                                      : 'It still has the password it was built with: change it, especially on a ' +
-                                        'prebuilt binary, where that password is published.')),
-        h('div', { class: 'actions' }, btn('Change the password', () => cfg.apDialog(), n.ap !== 'device'))));
+                    : n.ap === 'open' ? 'It has no password, so anyone in range could join it and change this ' +
+                                        'feeder\'s settings. Setting one is strongly recommended.'
+                                      : 'It still has the password it was built with: change it.')),
+        n.ap === 'open' ? h('p', { class: 'pill pill-warn', role: 'note' }, 'Strongly recommended') : null,
+        h('div', { class: 'actions' }, btn(n.ap === 'open' ? 'Set a password' : 'Change the password', () => cfg.apDialog(), n.ap !== 'device'))));
     }
     return out;
   },
@@ -3324,6 +3397,128 @@ PAGES.setup = {
   },
 };
 
+// ---- pages/firmware.js ----
+// Firmware (2.0.0 N7, DESIGN.md section 9.5): the update check and the upload. Not a tab: #firmware, linked from
+// Diagnostics. The check is the browser's, not the feeder's: it reads the release manifest from GitHub Pages when this
+// page opens (unless turned off here), so a feeder with no internet access loses nothing. The upload is signed with
+// the settings password, over the image's SHA-256, which the feeder checks again before it switches.
+
+const MANIFEST_URL = 'https://jspeer.github.io/precision-feeder/manifest.json';
+const RELEASES_URL = 'https://github.com/jspeer/precision-feeder/releases';
+const CHECK_PREF = 'pf.updateCheck';  // 'off' turns the check off in this browser
+
+function updateCheckOn() {
+  try { return localStorage.getItem(CHECK_PREF) !== 'off'; } catch (e) { return true; }
+}
+
+PAGES.firmware = {
+  mount(root) {
+    this.manifest = null;
+    this.checkEl = h('div', { 'aria-live': 'polite' });
+    const toggle = h('input', { type: 'checkbox', checked: updateCheckOn(), onchange: () => {
+      try { localStorage.setItem(CHECK_PREF, toggle.checked ? 'on' : 'off'); } catch (e) { /* not kept */ }
+      this.check();
+    } });
+    this.installed = row('Installed', '');
+    this.fileEl = h('input', { type: 'file', accept: '.bin', onchange: () => this.choose() });
+    this.fileInfo = h('p', { class: 'hint', 'aria-live': 'polite' });
+    this.uploadBtn = h('button', { class: 'btn btn-primary', disabled: true, onclick: () => this.upload() }, 'Upload and restart');
+    this.progress = h('progress', { max: 1, value: 0, hidden: true });
+    append(root,
+      card('Updates', this.installed.row, this.checkEl,
+        h('label', { class: 'check' }, toggle, ' Check for updates when this page opens (this browser only)')),
+      card('Upload firmware',
+        h('p', { class: 'hint' }, 'Choose the .ota.bin for this feeder\'s variant. The feeder checks it, then ' +
+          'restarts into it. Settings and calibration are kept.'),
+        this.fileEl, this.fileInfo, this.progress, h('div', { class: 'actions' }, this.uploadBtn)));
+    this.update();
+    this.check();
+  },
+
+  update() {
+    const variant = store.text(E.firmwareVariant);
+    setText(this.installed.value, [store.text(E.firmware) || 'unknown', variant].filter(Boolean).join(', '));
+  },
+
+  async check() {
+    const link = text => h('a', { href: RELEASES_URL, target: '_blank', rel: 'noopener' }, text);
+    if (!updateCheckOn()) {
+      this.show(h('p', { class: 'hint' }, 'The update check is off. ', link('Releases')));
+      return;
+    }
+    this.show(h('p', { class: 'hint' }, 'Checking…'));
+    try {
+      const r = await fetch(MANIFEST_URL, { cache: 'no-store' });
+      this.manifest = r.ok ? await r.json() : null;
+    } catch (e) {
+      this.manifest = null;
+    }
+    const u = updateState(this.manifest, store.text(E.firmware), store.text(E.firmwareVariant));
+    const notes = this.manifest && this.manifest.notes;
+    if (!this.manifest) this.show(h('p', {}, 'Couldn\'t check for updates. ', link('Releases')));
+    else if (u.state === 'update') {
+      this.show(h('p', {}, h('strong', {}, `Version ${u.latest} is available. `),
+        notes ? h('a', { href: notes, target: '_blank', rel: 'noopener' }, 'Release notes') : link('Releases')));
+    } else if (u.state === 'current') this.show(h('p', {}, `Up to date (latest release ${u.latest}).`));
+    else if (u.state === 'yaml') {
+      this.show(h('p', {}, `Latest release ${u.latest}. Built from your own YAML: update with ESPHome.`));
+    } else this.show(h('p', {}, `Latest release ${u.latest}. `, link('Releases')));
+    if (this.bytes) this.choose();  // name the chosen file now that the manifest is known
+  },
+
+  show(node) { clear(this.checkEl); this.checkEl.appendChild(node); },
+
+  async choose() {
+    const file = this.fileEl.files[0];
+    this.bytes = null;
+    this.uploadBtn.disabled = true;
+    if (!file) { setText(this.fileInfo, ''); return; }
+    setText(this.fileInfo, 'Checking the file…');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes[0] !== 0xe9) {
+      setText(this.fileInfo, 'That is not an ESP32 firmware image.');
+      return;
+    }
+    this.bytes = bytes;
+    this.sha = toHex(sha256(bytes));
+    this.image = identifyImage(this.manifest, this.sha);
+    const variant = store.text(E.firmwareVariant);
+    let text;
+    if (!this.image) {
+      text = 'Not a released image: upload it only if you built it yourself.';
+    } else if (this.image.kind === 'factory') {
+      text = 'That is the first-flash image (.factory.bin): choose the .ota.bin instead.';
+      this.bytes = null;
+    } else {
+      text = `Release ${this.image.version}, ${this.image.variant}: checked against the release.` +
+        (variant && variant !== 'yaml' && this.image.variant !== variant ? ` This feeder runs ${variant}.` : '');
+    }
+    setText(this.fileInfo, text);
+    this.uploadBtn.disabled = !this.bytes;
+  },
+
+  async upload() {
+    const variant = store.text(E.firmwareVariant);
+    const warn = !this.image ? 'Not a released image. A wrong one can stop the feeder starting (recover over USB).'
+      : this.image.variant !== variant ? `This feeder runs ${variant || 'another build'}; this image is ` +
+                                         `${this.image.variant}.` : '';
+    const ok = await confirmDialog({ title: 'Upload firmware?', danger: !!warn, ok: 'Upload',
+      body: `${warn ? warn + ' ' : ''}The feeder restarts into it when the upload ends.` });
+    if (!ok) return;
+    this.uploadBtn.disabled = true;
+    this.progress.hidden = false;
+    try {
+      await auth.uploadFirmware(this.bytes, this.sha, p => { this.progress.value = p; });
+      toast('Uploaded. The feeder is restarting…', 'ok', 8000);
+      setText(this.fileInfo, 'Uploaded: the feeder restarts into it and this page reconnects.');
+    } catch (e) {
+      toastError(e);
+      this.uploadBtn.disabled = false;
+    }
+    this.progress.hidden = true;
+  },
+};
+
 // ---- app.js ----
 // The shell: header, banner, tabs and routing, then start the connection. Tabs appear only for what this build
 // contains (the entities each needs) and only once its page exists; nothing is configured in the app itself.
@@ -3338,6 +3533,8 @@ const TABS = [
   { id: 'diagnostics', title: 'Diagnostics', short: 'Diag', icon: 'activity', shown: () => true },
   // Not in the tab bar: opened by itself on a feeder that is not set up yet, and from Configuration.
   { id: 'setup', title: 'Setup', hidden: true, shown: () => store.has(E.dailyCap) },
+  // Not in the tab bar either: linked from Diagnostics (2.0.0 N7).
+  { id: 'firmware', title: 'Firmware', hidden: true, shown: () => store.has(E.firmware) },
 ];
 // The initial list of entities arrives in a burst; it has settled once nothing new has come for this long.
 const SETTLE_MS = 700;

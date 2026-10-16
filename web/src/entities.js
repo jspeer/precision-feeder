@@ -22,6 +22,7 @@ const E = {
   faults: 'text_sensor/Faults',
   timeSource: 'text_sensor/Time Source',
   firmware: 'text_sensor/Firmware Version',
+  firmwareVariant: 'text_sensor/Firmware Variant',
   todaysFeeds: "text_sensor/Today's Feeds",
   feedGuard: 'text_sensor/Feed Guard',
   deviceTime: 'text_sensor/Device Time',

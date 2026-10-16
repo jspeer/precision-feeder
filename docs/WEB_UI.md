@@ -67,7 +67,14 @@ else the feeder lists under Faults.
 - **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
   Configuration (Device). Steps: welcome, network, time zone (by place) and location,
   board and pins, keys, settings password, calibration. Each saves as it goes and can be
-  skipped; Finish (or skipping) tells the feeder setup is done.
+  skipped; Finish (or skipping) tells the feeder setup is done. On a prebuilt binary whose
+  access point has no password yet, the network step strongly recommends setting one.
+- **Firmware** (`#firmware`, not a tab; 2.0.0): linked from Diagnostics. The installed version
+  and variant; the update check (your browser reads the latest release's manifest from GitHub
+  Pages when the page opens: up to date, an update with its release notes, or "Couldn't
+  check"; it can be turned off for that browser); and the upload: choose an `.ota.bin`, the
+  page names it from the release (or warns that it is not one), uploads it signed with the
+  settings password, and the feeder checks it again before restarting into it.
 - **Maintenance:**
   - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
     and the servo pulse range;
@@ -77,6 +84,7 @@ else the feeder lists under Faults.
   its address), counters, and the last 32 connections and writes.
 - **Diagnostics:** system, clock, network addresses, memory, the live log, and every
   entity the feeder reports, each with a control. Anything no other page shows is here.
+  System links to the Firmware page.
 
 ## Good to know
 

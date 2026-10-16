@@ -280,9 +280,10 @@ PAGES.configuration = {
     }
     if (n.ap !== 'off') {
       box.appendChild(part('Access point password', 'Used by the access point the feeder opens when it cannot join ' +
-                           `Wi-Fi. ${n.ap === 'device' ? 'Set here.' : 'From the build.'}`, [
-        btn('Change', () => this.apDialog()),
-        n.ap === 'device' ? btn('Use the build\'s', () => run(auth.setNetwork('ap', { password: '' }),
+                           `Wi-Fi. ${n.ap === 'device' ? 'Set here.' : n.ap === 'open' ? 'None: anyone in range can ' +
+                           'join it. Set one.' : 'From the build.'}`, [
+        btn(n.ap === 'open' ? 'Set' : 'Change', () => this.apDialog(), n.ap === 'open' ? 'btn btn-small btn-primary' : undefined),
+        n.ap === 'device' ? btn(n.ap_build_open ? 'Remove' : 'Use the build\'s', () => run(auth.setNetwork('ap', { password: '' }),
                                                               'Saved: used after the next restart')) : null,
       ].filter(Boolean)));
     }
