@@ -2,7 +2,7 @@
 
 From firmware 2.0 the feeder is an appliance: flash a release from a web page, then set it up in its own web app.
 Nothing to build. If you would rather build your own from YAML (the advanced path, with Home Assistant's ESPHome
-add-on or ESPHome on a computer), see the README, "Setting it up".
+add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 *Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
@@ -54,7 +54,8 @@ Maintenance hold the same settings later, and Configuration (Device) starts the 
 1. **Network:** the name (`precision-feeder-a1b2c3` until you change it; used after a restart), another Wi-Fi network
    if needed, and the **access point password. Set one.** Until you do, anyone in range can join the access point
    whenever it is up (no Wi-Fi yet, or Wi-Fi lost) and change the feeder's settings.
-2. **Time zone and location:** choose your place; the location is needed for sunrise and sunset events.
+2. **Time zone and location:** choose your place; the location is needed for sunrise and sunset events. Optionally,
+   a time (NTP) server on your network (2.0.2); otherwise the public pool servers are used.
 3. **Board and pins:** a preset (Waveshare ESP32-S3-Zero, ESP32-S3-DevKitC-1) or each pin; "none" for a button or LED
    that is not fitted. Pins apply after a restart.
 4. **Keys:** the Home Assistant (API) key and the Bluetooth key (`full` only). See below.
@@ -103,7 +104,7 @@ The feeder's name changes to `precision-feeder-<6 hex digits>` unless you set on
 | Forgot the access point password | Plug it into a computer and set Wi-Fi over USB (as above); then change the password in the web app. |
 | An update will not start | The feeder falls back to the firmware it had (ESPHome's rollback). If it does not come back, flash the factory image from the install page; do not erase, to keep your settings. |
 | Start over completely | Flash from the install page **with erase**. Everything is wiped: settings, calibration, Wi-Fi, keys, password. |
-| Tray position unknown after a power cut mid-feed | Maintenance: declare the position, or Tray Reload. See the README, Safety behaviour. |
+| Tray position unknown after a power cut mid-feed | Maintenance: declare the position, or Tray Reload. See [USING.md](USING.md#safety-behaviour). |
 
 There is no factory reset in the web app yet; erase-and-flash is the way to wipe a feeder.
 

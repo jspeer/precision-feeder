@@ -43,7 +43,7 @@ substitutions:
   # --- Network ------------------------------------------------------------
   # IPv6 alongside IPv4 (dual stack): the web app, Home Assistant and mDNS answer on both. "false" for
   # IPv4 only. ESPHome's Wi-Fi needs an IPv4 address to count as connected, so on a network with no
-  # DHCPv4 give the feeder a static IPv4 address (wifi: manual_ip:); see the README.
+  # DHCPv4 give the feeder a static IPv4 address (wifi: manual_ip:); see docs/USING.md, Limits.
   enable_ipv6: "true"
 
   # --- Servo and tray (see components/precision_feeder/__init__.py) -------

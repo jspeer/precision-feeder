@@ -1,6 +1,6 @@
 # The web app
 
-The feeder carries its own web app (firmware 1.1.0 and later). It runs the whole feeder
+The feeder carries its own web app (firmware 1.1.0 and later; this guide describes 2.0). It runs the whole feeder
 from any browser on your network, on a computer or a phone, with no Home Assistant, no
 internet and nothing to install. It is stored in the firmware, so nothing is loaded
 from the internet.
@@ -9,12 +9,15 @@ from the internet.
 
 ## Opening it
 
-- Browse to `http://precision-feeder.local` (your `name` substitution plus `.local`), or
-  to the feeder's IP address. IPv4 and IPv6 both work; Diagnostics lists the addresses.
-- It needs the `web_server` package (on in both examples).
-- **Password:** none by default. Uncomment `auth` in `packages/web_server.yaml` and add
-  `web_username` / `web_password` to `secrets.yaml`. It is HTTP authentication over
-  plain HTTP: it keeps casual visitors out, but it is not encrypted.
+- Browse to `http://<name>.local` (the prebuilt firmware: `precision-feeder-` and the end of
+  the board's MAC address, for example `precision-feeder-a1b2c3.local`; a YAML build: its
+  `name`), or to the feeder's IP address. IPv4 and IPv6 both work; Diagnostics lists the
+  addresses. A new feeder opens the setup wizard.
+- It is in the prebuilt firmware, and in a YAML build with the `web_server` package (on in
+  both examples).
+- **Passwords:** none by default. A **settings password** (Configuration) protects the
+  safety limits, calibration, pins, keys, network and firmware ([SECURITY.md](SECURITY.md)).
+  A YAML build can also put the whole app behind a login ([BUILDING.md](BUILDING.md)).
 - **Phones:** the tabs move to a bar at the bottom. Add the page to your home screen
   for an app-like shortcut.
 
@@ -50,7 +53,7 @@ else the feeder lists under Faults.
   - the feeding safety limits, reload pause, refill interval and location, each with
     the feeder's own limits and units;
   - the time zone, chosen by place or typed as a POSIX string (empty means the YAML's, or
-    Home Assistant's);
+    Home Assistant's), and the NTP servers (2.0.2; up to three, empty means the build's);
   - network: the name (used after a restart), joining another Wi-Fi network (at once), and
     the fallback access point's password (used after a restart). Passwords are never shown
     or sent back;

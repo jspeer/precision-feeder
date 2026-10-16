@@ -1,8 +1,9 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **firmware v1.1.0, tested on a bench build** (section 15). This is the
-current design; history is in [CHANGELOG.md](CHANGELOG.md) and hardware results
-in [docs/BENCH.md](docs/BENCH.md). First written 2026-10-13.
+Status: **release 2.0.1, 2.0.2 in development; tested on a bench build** (section 15). This is the current design;
+history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
+[docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
+2026-10-13.
 
 ## 0. Disclosure and licence
 
@@ -32,6 +33,8 @@ Goals
 - On-board scheduler, so feeding continues with no HA, PLC or network.
 - **Local first (1.1.0):** a complete built-in web app, served from the firmware, so the
   feeder is usable from any browser with no HA, internet or app.
+- **An appliance (2.0):** prebuilt binaries installed from a web page, a setup wizard, settings changed at run time
+  (pins, network, keys, time zone, NTP servers), and updates from the web app (section 9.5).
 - Three control planes onto one core: on-board schedule, Home Assistant (native
   API), and BLE GATT (for a PLC/bridge or any other client).
 - One firmware serves both deployments (HA-driven and BLE/PLC-driven).
@@ -268,8 +271,8 @@ Global:
   a hold or reload pause still applies (decision 2026-10-14).
 - `refill_interval_days` (for runway warnings)
 
-Examples (README): A "Normal" (2 events, Sunday fast); B "Vacation" (1 event,
-every_2nd); C "Growout" (3 events/day, short runway warning).
+Example uses (not built in; [docs/SCHEDULING.md](docs/SCHEDULING.md) walks through building profiles): A "Normal"
+(2 events, Sunday fast); B "Vacation" (1 event, every 2nd day); C "Growout" (3 events a day, short runway warning).
 
 ### 5.2 Solar anchoring
 
@@ -378,7 +381,7 @@ path.
   feeds still work.
 - **No external RTC.** After a power loss with no network and no BLE client,
   the feeder waits for a valid time before scheduled feeding resumes. This is
-  documented plainly in the README.
+  documented plainly in [docs/USING.md](docs/USING.md) (Limits).
 - No periodic reboot (the reference restarts weekly; we do not).
 
 ## 7. Home Assistant entities
@@ -502,7 +505,8 @@ saying what it does and when to change it. A user clones the repository into the
 config folder as `precision-feeder/` and copies an example next to it; the copy
 reads the components and packages from the clone (`precision-feeder/...` paths),
 so `git pull` updates the firmware without touching the user's file or secrets.
-`tools/check.sh` validates the examples in exactly that layout. The README lists every package and substitution.
+`tools/check.sh` validates the examples in exactly that layout. [docs/BUILDING.md](docs/BUILDING.md) lists every
+package and substitution.
 
 Entities publish only when their value changes: each package refreshes its
 entities from one 1-second interval through `publish_number/text/bool/option`
@@ -514,7 +518,7 @@ The settings a prebuilt binary needs at run time are saved in their own record,
 `Device` (`feeder_core.h`, preference key `precision_feeder.device.v2`, version 2 since 2.0.2; version 1, key
 `.device.v1`, is migrated at boot with every field kept),
 next to Settings, Calibration and State. Its layout already holds every field 2.0
-sets at run time, so later milestones fill fields in instead of changing it:
+sets at run time. 2.0.0 laid out every field the milestones needed; 2.0.2 added the NTP servers as version 2:
 
 | Field | Meaning | "Use the build's value" | Milestone |
 |---|---|---|---|
@@ -566,7 +570,8 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   out over the old link). ESPHome keys that slot to the build (config and ESPHome version hash)
   when the YAML has a network, so a YAML build's own network returns after an update built from a changed YAML; with
   no network in the YAML (the prebuilt binaries) the key is fixed and the saved network stays. There is no
-  "forget": ESPHome has no call to delete the slot (factory reset, a later milestone, erases it).
+  "forget": ESPHome has no call to delete the slot; an erase-and-flash clears it (no factory reset yet: section 14,
+  item 21).
 - **Improv serial** (`packages/improv_serial.yaml`, on in both examples): ESP Web Tools sets Wi-Fi over the USB
   cable after flashing. Physical access is trusted (section 10.1).
 - **Endpoints** (signed like any protected change; section 10.1): `GET /feeder/network` reports the name in use,
@@ -697,7 +702,7 @@ section 10).
   permissions (BLE Can Change Guard Limits, BLE Can Change Calibration). Never the
   schedule, feeding, hold, tray reload, location or timezone.
   `tests/test_consistency.py` checks the list names real entities and covers the
-  guard limits and calibration. Later milestones add their settings to it.
+  guard limits and calibration. The network, keys, setup and firmware endpoints (below) are protected the same way.
 - **How:** ESPHome cannot hide one entity from the web server (section 14,
   item 10), so a handler of ours (`SettingsGuard`, precision_feeder.cpp) is
   registered ahead of the web server's: handlers are matched in order, and ours is
@@ -778,6 +783,8 @@ precision-feeder/
   docs/BENCH.md        hardware test results
   docs/WEB_UI.md       the built-in web app, page by page
   docs/INSTALL.md      installing the prebuilt binaries, updates, recovery, the binary and flash matrix
+  docs/BUILDING.md     building from YAML: packages, substitutions, flashing
+  docs/USING.md        everyday use, settings, safety behaviour, troubleshooting, limits
   docs/SECURITY.md     the security model, for users
   docs/plans/          release plans: milestones and the decisions behind them
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
@@ -937,7 +944,7 @@ precision-feeder/
     refusals are NOT_AUTHORIZED detail 7. Still protocol 2; the Python client names 6 and 7 and
     shows any other value by number.
   - API key at run time is opt-in for YAML builds (packages/api_key_on_device.yaml), so existing
-    YAML users keep their key; the prebuilt binaries (N7) will include it. Generate, enter and
+    YAML users keep their key; the prebuilt binaries include it. Generate, enter and
     clear in the web app, as decided in N1.
   - Keys are generated in the browser and shown once; the device never sends a key back. They
     travel masked by the settings password, like a new password key (section 10.1).
@@ -961,7 +968,7 @@ precision-feeder/
     `${name}-setup`, so a MAC suffix or a saved name changes it too.
   - `name_add_mac_suffix` is a substitution, off for YAML builds (an existing feeder keeps its name); the prebuilt
     binaries turn it on.
-  - Improv serial is on in both examples (and will be in the binaries); BLE Improv is not used.
+  - Improv serial is on in both examples and in the binaries; BLE Improv is not used.
 - **2.0.0 N6 (2026-10-16):**
   - The setup wizard is a page of the web app (`#setup`); the firmware only keeps whether it is finished
     (`DEVICE_SETUP_DONE`, section 9.4). It never blocks feeding or any page, and every step can be skipped.

@@ -51,7 +51,7 @@ packages:
   diagnostics: !include precision-feeder/packages/diagnostics.yaml           # free heap and loop time (useful when sizing BLE)
   network_info: !include precision-feeder/packages/network_info.yaml       # Wi-Fi network, addresses and signal
   improv_serial: !include precision-feeder/packages/improv_serial.yaml     # set Wi-Fi over USB from an install page (Improv)
-  web_ui: !include precision-feeder/packages/web_server.yaml                 # the original's web dashboard
+  web_ui: !include precision-feeder/packages/web_server.yaml                 # the built-in web app (and the settings password)
   status_led: !include precision-feeder/packages/status_led.yaml             # onboard RGB LED
   time_ha: !include precision-feeder/packages/time_homeassistant.yaml        # Home Assistant as a second clock source (keeps time when the internet is down)
   # button: !include precision-feeder/packages/button.yaml                   # only if your print has the button

@@ -13,6 +13,9 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
   public pool in the prebuilt firmware). Like the time zone, it needs no settings password.
 - Fixed: only the first of the three NTP servers in the YAML was ever asked (ESP-IDF allowed one by default); all
   three are now.
+- Documentation reworked and checked against the code: the README is now an overview, with new guides for building
+  from YAML ([docs/BUILDING.md](docs/BUILDING.md)) and everyday use ([docs/USING.md](docs/USING.md)) beside the
+  install guide; stale statements (the 1.1.0 status, the calibration bench notes, missing substitutions) fixed.
 - The device settings record moves to version 2; one saved by 2.0.0 or 2.0.1 is migrated at the first boot, with
   everything kept.
 

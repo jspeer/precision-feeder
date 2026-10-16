@@ -68,7 +68,8 @@ not know, do not send commands.**
 The feeder and the client share a secret **key**: 32 random bytes, base64 as made by
 `openssl rand -base64 32`. The same base64 text goes into the client. On the feeder
 it is either `ble_key` in its `secrets.yaml`, or (firmware 2.0.0) a key generated or
-entered in its web app and saved on the device, which wins. With no key at all, AUTH
+entered in its web app and saved on the device, which wins. The prebuilt firmware has
+no `ble_key`: make one in the web app (Configuration, Keys). With no key at all, AUTH
 is always refused with detail 6; an all-zero key is never accepted.
 
 ### 1. Read the challenge

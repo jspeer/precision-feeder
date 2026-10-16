@@ -7,19 +7,21 @@ each position needs a small correction.
 *Written with the assistance of an AI (Anthropic's Claude); verify against your
 own build.*
 
-**In the built-in web app** (firmware 1.1.0 and later), Maintenance has the same steps
-as a walkthrough: start calibration, pick a slot, nudge its offset by 0.1 or 1 degree,
-go to the next slot, then finish and save. The servo pulse range is under "Servo pulse
-range (advanced)" there.
+**In the built-in web app**, Maintenance has the same steps as a walkthrough (the setup
+wizard's last step points there): start calibration, pick a slot, nudge its offset by 0.1
+or 1 degree, go to the next slot, then finish and save. The servo pulse range is under
+"Servo pulse range (advanced)" there. Changing the calibration needs the settings password
+when one is set. The steps below use the entity names, as Home Assistant shows them.
 
 ## First-time setup
 
-1. Wire the servo (signal to `servo_pin`, 5 V, GND) and power the board.
+1. Wire the servo (signal to the servo pin, GPIO1 on the S3-Zero by default; 5 V; GND) and
+   power the board.
 2. Turn the tray fully **clockwise** to its end stop and fit it so slot 0, the
    closed slot, lines up with the alignment mark on the base. This matches the
    original firmware's instructions.
-3. Flash the firmware. At boot the servo moves to position 0 (a freshly flashed
-   device assumes a freshly loaded tray) and then goes limp after a second.
+3. Flash the firmware. At boot the servo moves to the saved position (position 0 on a new
+   feeder, which assumes a freshly loaded tray) and then goes limp after a second.
 
 ## Fine-tuning each position
 
@@ -46,7 +48,7 @@ first bench build ended at 637 to 2675 µs: the same scale within 2%, shifted by
 where the horn sits on its spline. Increasing pulse turns it counter-clockwise,
 so slot 0 is at the clockwise end, as the setup above expects.
 
-The YAML `min_pulse` / `max_pulse` are only the starting values for a fresh
+The build's `min_pulse` / `max_pulse` (544 / 2400 µs) are only the starting values for a new
 device. Once you change the range here it is saved and used from then on (a
 reflash does not reset it). The limits are 300 to 1500 µs for the minimum, 1500
 to 3000 µs for the maximum, and at least 500 µs between them. The firmware never
@@ -93,9 +95,13 @@ If power is lost during a feed, or you press **Stop** mid-feed, the position is
 Position**; or reload the tray. On a build with the push button, a short press
 reloads the tray in this state (it moves to the closed slot), then load it.
 
-## What still needs bench confirmation
+## What the bench build showed
 
-- The MG90S's real end stops against the 2.5 degree margin at position 0, and
-  the default 544 to 2400 µs pulse range (the original's, tuned on an SG92R).
-- Whether the tray stays put when the servo is released after a move.
-- Whether the servo twitches at power-up (and whether the 10 kΩ pull-down is needed).
+From the first calibrated feeder ([BENCH.md](BENCH.md), 2026-10-14):
+
+- The default 544 to 2400 µs range does not fit an MG90S: it ended at 637 to 2675 µs, with
+  offsets of at most +3.3 degrees. Calibrate the range per servo.
+- The horn had to be re-seated once so that slot 0 needs a positive correction.
+- No servo twitch at power-up, so the 10 kΩ pull-down was not needed there.
+- The tray stays put once the servo is released (checked with an empty tray; recheck with
+  food in it). Still to watch in daily use: whether the servo strains at position 6.

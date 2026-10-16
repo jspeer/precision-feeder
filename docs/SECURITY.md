@@ -9,7 +9,8 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 
 ## The short version
 
-- **Feeding is always open** to anyone who can reach the web app: feed, hold, schedule, tray reload, location. The
+- **Feeding is always open** to anyone who can reach the web app: feed, hold, schedule, tray reload, location, time
+  zone and NTP servers. The
   feed guard (minimum gap, daily cap, portions per command) limits what any source can do, whoever asks.
 - **Everything that could hurt the animals or take the feeder over** (the guard limits, calibration, pins, keys,
   Wi-Fi and name, the password itself, firmware) can be protected with a **settings password**. None is set by

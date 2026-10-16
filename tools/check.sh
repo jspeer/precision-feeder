@@ -48,7 +48,7 @@ if [ -z "$ESPHOME" ]; then
   exit 0
 fi
 # The examples are meant to sit in an ESPHome config folder next to a clone of this repository named
-# precision-feeder/ (see the README), so validate them in exactly that layout, in a temporary folder.
+# precision-feeder/ (see docs/BUILDING.md), so validate them in exactly that layout, in a temporary folder.
 CONFIG="$OUT/config"
 mkdir -p "$CONFIG"
 ln -s "$(pwd)" "$CONFIG/precision-feeder"
