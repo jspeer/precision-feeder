@@ -6,7 +6,7 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.0.2: NTP servers (in progress)
+## 2.0.2: NTP servers (2026-10-16)
 
 - New **NTP Servers** setting (Configuration, the setup wizard, and Home Assistant): up to three host names or IP
   addresses, for example a time server on your own network. Applied at once; empty uses the build's servers (the

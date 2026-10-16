@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **release 2.0.1, 2.0.2 in development; tested on a bench build** (section 15). This is the current design;
+Status: **release 2.0.2, tested on a bench build** (section 15). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
@@ -638,8 +638,8 @@ binary's config.
   bench, N8), and its SHA-256 is the signed one; otherwise it aborts and the running firmware stays (422: `image`,
   `sha256`, `incomplete`, `flash`). The Firmware page checks for the app description too. Then it restarts half a second later, or once the tray stops if it is moving.
   ESPHome's own `/update` stays off (`ota: false`): it is guarded only by web auth.
-- Flash, measured in N7 (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 78.9%** (1,447,887 bytes),
-  **no-BLE 60.9%** (1,116,743 bytes). No 8 MB variant needed.
+- Flash (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 79.1%** (1,451,555 bytes), **no-BLE 61.1%**
+  (1,120,447 bytes) in 2.0.2; 78.9% and 60.9% in N7. No 8 MB variant needed.
 
 ## 10. BLE security
 
@@ -1159,7 +1159,7 @@ precision-feeder/
     an erase-and-flash from the install page (docs/INSTALL.md, Recovery). To decide: a protected "factory reset" in
     the web app (erase our records and ESPHome's Wi-Fi slot), or keep erase-and-flash.
 
-## 15. Implementation status (v2.0.1)
+## 15. Implementation status (v2.0.2)
 
 Everything in sections 3 to 10 is built. On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
@@ -1174,8 +1174,8 @@ calendar and sun maths, the timezone parser, the settings password, the firmware
 upload, the BLE protocol and its cryptography, the web app's parsers and the Python
 client. Version history: [CHANGELOG.md](CHANGELOG.md).
 
-Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries): 60.9% of the
-1.8 MB app partition without BLE, 78.9% with it (section 9.5).
+Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries, 2.0.2): 61.1% of the
+1.8 MB app partition without BLE, 79.1% with it (section 9.5).
 
 Deviations from the first draft of this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said

@@ -21,10 +21,10 @@ add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 | Variant | What it has | App slot used (of 1.8 MB) | RAM used at boot |
 |---|---|---|---|
-| `full` | everything, including the BLE control plane for a PLC or a phone app | 78.9% (1,448,483 bytes) | 44.2% |
-| `no-ble` | Wi-Fi, the web app and Home Assistant; no Bluetooth | 60.9% (1,117,423 bytes) | 35.1% |
+| `full` | everything, including the BLE control plane for a PLC or a phone app | 79.1% (1,451,555 bytes) | 44.3% |
+| `no-ble` | Wi-Fi, the web app and Home Assistant; no Bluetooth | 61.1% (1,120,447 bytes) | 35.3% |
 
-Measured for 2.0.1 with ESPHome 2026.9.1 on the 4 MB layout. Both images run on larger flash too. Each comes as
+Measured for 2.0.2 with ESPHome 2026.9.1 on the 4 MB layout. Both images run on larger flash too. Each comes as
 `precision-feeder-<variant>-<version>.factory.bin` (the first flash, written from address 0: bootloader, partition
 table and app) and `.ota.bin` (updates through the web app). You can switch variants later by uploading the other
 one's `.ota.bin`; settings are kept.
