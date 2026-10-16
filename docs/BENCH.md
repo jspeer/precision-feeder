@@ -559,3 +559,10 @@ The same feeder (`full`, no keys yet, on the hotspot).
 
 Left on the board: 2.0.1 `full`, on the phone hotspot, the API key from this test (not in Home Assistant), no BLE
 key, no settings password, setup offered, IPv4-only router.
+
+## Release 2.0.1 (2026-10-16)
+
+Tag `v2.0.1`: the Release workflow checked, built both variants and published the GitHub release (four images and
+`manifest.json`; notes from CHANGELOG.md with the unreleased 2.0.0 section and absolute links) and GitHub Pages (the
+install page, the install manifests, the factory images, `manifest.json` with `Access-Control-Allow-Origin: *`). The
+bench feeder's Firmware page, reading the live manifest: "Up to date (latest release 2.0.1)".
