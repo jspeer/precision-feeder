@@ -19,6 +19,9 @@
 #include <cstring>
 
 #include <esp_random.h>
+#ifdef USE_WIFI
+#include <esp_wifi.h>
+#endif
 #include <esp_sntp.h>
 #include <esp_timer.h>
 #include <sys/time.h>
@@ -184,6 +187,14 @@ bool PrecisionFeeder::set_wifi(const std::string &ssid, const std::string &passw
     return false;
   ESP_LOGW(TAG, "Wi-Fi network set from the web app: joining it now");
   wifi::global_wifi_component->save_wifi_sta(ssid, password);
+  // save_wifi_sta() only connects when Wi-Fi is idle (found on the bench): a connected feeder would stay on the old
+  // network until it next lost it. Dropping the link hands the switch to ESPHome's own reconnect, which now tries the
+  // saved network and opens the fallback access point if it cannot join. A second later, so the web app's request
+  // is answered over the old link first.
+  this->set_timeout("wifi_switch", 1000, []() {
+    if (wifi::global_wifi_component->is_connected())
+      esp_wifi_disconnect();
+  });
   return true;
 #else
   (void) ssid;
@@ -509,7 +520,12 @@ class SettingsGuard : public AsyncWebHandler {
                   static_cast<unsigned>(wait));
     if (result == AuthResult::REFUSED)
       ESP_LOGW(TAG, "Settings password refused for %s", message.substr(0, message.find('\n')).c_str());
-    request->send(result == AuthResult::WAIT ? 429 : 403, "application/json", body);
+    // ESPHome's ESP-IDF request (2026.9.1) knows only 200, 204, 400, 401, 404, 409 and 422 and sends anything else as
+    // 500 (found on the bench), so these two go straight to ESP-IDF, which takes any status line.
+    httpd_req_t *raw = *request;
+    httpd_resp_set_status(raw, result == AuthResult::WAIT ? "429 Too Many Requests" : "403 Forbidden");
+    httpd_resp_set_type(raw, "application/json");
+    httpd_resp_send(raw, body, HTTPD_RESP_USE_STRLEN);
     return false;
   }
 

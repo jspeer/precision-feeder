@@ -17,7 +17,7 @@
 # example configurations do).
 
 substitutions:
-  # Shown to BLE scanners. At most 20 characters.
+  # Shown to BLE scanners. At most 20 characters; at most 13 with name_add_mac_suffix (ESPHome adds the MAC there too).
   ble_name: Precision Feeder
 
   # What to do with a clock pushed over BLE (the SET_TIME command):

@@ -238,12 +238,16 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
   if (device != nullptr && device->version == DEVICE_VERSION) {
     this->dev_ = *device;
     this->clamp_device_();
-  } else if ((settings != nullptr && settings->version == SETTINGS_VERSION) ||
-             (calibration != nullptr && calibration->version == CALIBRATION_VERSION) ||
-             (legacy_v3 != nullptr && legacy_v3->version == 3)) {
-    // A feeder that was in use before it had a Device record (an update from 1.x): not a new one, so no setup
-    // wizard. Kept in memory only; saved with the first change to the record.
-    this->dev_.flags |= DEVICE_SETUP_DONE;
+  } else if (device == nullptr) {
+    // The first boot with a Device record to make. A feeder that was in use before (an update from 1.x: settings or a
+    // calibration saved) is not a new one, so no setup wizard. Decided once and saved now: a new feeder saves its
+    // settings and tray state soon after its first boot, so the next boot could no longer tell. Every other field
+    // still says "the build's", so a YAML build keeps following its YAML.
+    if ((settings != nullptr && settings->version == SETTINGS_VERSION) ||
+        (calibration != nullptr && calibration->version == CALIBRATION_VERSION) ||
+        (legacy_v3 != nullptr && legacy_v3->version == 3))
+      this->dev_.flags |= DEVICE_SETUP_DONE;
+    this->hal_save_device(this->dev_);
   }
   const bool have_calibration = calibration != nullptr && calibration->version == CALIBRATION_VERSION;
   if (have_calibration)

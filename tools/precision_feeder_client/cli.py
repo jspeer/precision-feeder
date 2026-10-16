@@ -71,13 +71,13 @@ async def _run(args: argparse.Namespace) -> None:
             resp = await feeder.command(OP_SET_POSITION, struct.pack("<B", args.position))
         elif cmd == "config":
             if args.action == "get":
-                names = list(CONFIG_KEYS) if args.key in (None, "all") else [args.key]
+                names = list(CONFIG_KEYS) if args.config_key in (None, "all") else [args.config_key]
                 for name in names:
                     print(f"{name} = {await feeder.read_config(CONFIG_KEYS[name])}")
                 return
-            if args.key not in CONFIG_KEYS or args.value is None:
+            if args.config_key not in CONFIG_KEYS or args.value is None:
                 raise SystemExit(f"usage: config set KEY VALUE, KEY one of {', '.join(CONFIG_KEYS)}")
-            resp = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS[args.key], args.value))
+            resp = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS[args.config_key], args.value))
         elif cmd == "profile":
             p = "ABC".index(args.profile.upper())
             if args.action == "show":
@@ -151,7 +151,8 @@ def main() -> None:
     add("set-position").add_argument("position", type=int)
     p = add("config", help="config get [KEY|all] | config set KEY VALUE")
     p.add_argument("action", choices=["get", "set"])
-    p.add_argument("key", nargs="?")
+    # Not "key": that name is the BLE key (--key), which main() sets after parsing.
+    p.add_argument("config_key", nargs="?", metavar="KEY")
     p.add_argument("value", type=int, nargs="?")
     p = add("profile", help="profile A show | profile A header EVERY_N FAST_DAYS | profile A event N on|off ANCHOR TIME PORTIONS DAYS")
     p.add_argument("profile", choices=["A", "B", "C", "a", "b", "c"])

@@ -13,7 +13,8 @@ substitutions:
   fw_version: "2.0.0"
   # "true" adds the last six hex digits of the board's MAC address to the name (precision-feeder-a1b2c3), so several
   # feeders built from one YAML (or the prebuilt binaries) do not share a name on the network. A name set on the
-  # feeder (web app, Configuration, Network) wins over both and is used exactly as typed.
+  # feeder (web app, Configuration, Network) wins over both and is used exactly as typed. With BLE, keep ble_name to 13
+  # characters or fewer (ESPHome adds the suffix to the BLE name too, and refuses a longer one).
   name_add_mac_suffix: "false"
 
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------

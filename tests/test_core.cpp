@@ -1024,12 +1024,14 @@ static void test_device_record() {
           "fresh device follows the build's pins");
     CHECK(d.flags == (DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION), "BLE toggles default on, setup not done");
     CHECK(f->timezone_text().empty() && f->tz_applies == 0, "no timezone of its own");
-    CHECK(!flash.have_device, "nothing saved until something changes");
+    CHECK(flash.have_device && flash.device_saves == 1 && f->setup_needed() && flash.device.timezone[0] == '\0',
+          "first boot: the record is made at once, every value the build's, setup not done");
+    flash.device_saves = 0;
 
     CHECK(f->set_timezone("Europe/Berlin") == Result::INVALID_ARG, "IANA name refused");
-    CHECK(!flash.have_device && f->tz_applies == 0, "refused: nothing saved or applied");
+    CHECK(flash.device_saves == 0 && f->tz_applies == 0, "refused: nothing saved or applied");
     CHECK(f->set_timezone("CET-1CEST,M3.5.0,M10.5.0/3") == Result::OK, "POSIX string accepted");
-    CHECK(flash.have_device && flash.device_saves == 1, "saved at once");
+    CHECK(flash.device_saves == 1, "saved at once");
     CHECK(f->tz_applies == 1 && f->tz_applied && f->tz_rules.std_offset_s == -3600 && f->tz_rules.has_dst(),
           "applied at once");
     CHECK(f->timezone_text() == "CET-1CEST,M3.5.0,M10.5.0/3", "reported");
@@ -1131,7 +1133,7 @@ static void test_pins() {
     CHECK(f->set_pin(PinRole::SERVO, 0) == Result::INVALID_ARG, "strapping pin refused");
     CHECK(f->set_pin(PinRole::SERVO, PIN_NONE) == Result::INVALID_ARG, "the servo needs a pin");
     CHECK(f->set_pin(PinRole::SERVO, 21) == Result::INVALID_ARG, "the LED's pin refused for the servo");
-    CHECK(!flash.have_device, "nothing saved by refusals");
+    CHECK(flash.device.servo_pin == PIN_BUILD && flash.device.button_pin == PIN_BUILD, "nothing saved by refusals");
 
     CHECK(f->set_pin(PinRole::BUTTON, PIN_NONE) == Result::OK && flash.device.button_pin == PIN_NONE,
           "no button: saved at once");
@@ -1321,8 +1323,9 @@ static void test_ble_settings() {
     const uint8_t none[DEVICE_KEY_SIZE] = {};
     f->set_build_ble_key(none);
     CHECK(f->ble_built() && f->ble_key_source() == KeySource::NONE, "BLE built with no key");
+    flash.device_saves = 0;  // the first boot's
     const uint32_t serial = f->ble_key_serial();
-    CHECK(f->set_ble_key(key) == Result::OK && flash.have_device && flash.device_saves == 1, "saved at once");
+    CHECK(f->set_ble_key(key) == Result::OK && flash.device_saves == 1, "saved at once");
     CHECK(f->ble_key_serial() != serial && f->ble_key(out) && std::memcmp(out, key, sizeof(key)) == 0, "in use");
     CHECK(f->set_ble_key(key) == Result::OK && flash.device_saves == 1, "the same key is not rewritten");
     f->set_ble_may_change_guard(false);
@@ -1368,12 +1371,14 @@ static void test_network() {
   Flash flash;
   {
     auto f = boot(flash, T0);
-    CHECK(f->set_hostname("feeder") == Result::UNSUPPORTED && !flash.have_device, "nothing before the adapter applies");
+    flash.device_saves = 0;  // the first boot's
+    CHECK(f->set_hostname("feeder") == Result::UNSUPPORTED && flash.device_saves == 0,
+          "nothing before the adapter applies");
     f->set_network_in_use("precision-feeder", false, f->device());
     CHECK(f->hostname_in_use() == "precision-feeder" && f->hostname_saved().empty() && !f->restart_needed(),
           "the build's name");
-    CHECK(f->set_hostname("Bad Name") == Result::INVALID_ARG && !flash.have_device, "a bad name is refused");
-    CHECK(f->set_hostname("tank-feeder") == Result::OK && flash.have_device && flash.device_saves == 1, "saved at once");
+    CHECK(f->set_hostname("Bad Name") == Result::INVALID_ARG && flash.device_saves == 0, "a bad name is refused");
+    CHECK(f->set_hostname("tank-feeder") == Result::OK && flash.device_saves == 1, "saved at once");
     CHECK(f->restart_needed() && f->hostname_in_use() == "precision-feeder", "used after the next restart");
     CHECK(f->set_hostname("tank-feeder") == Result::OK && flash.device_saves == 1, "the same name is not rewritten");
     CHECK(f->set_ap_password("12345678") == Result::UNSUPPORTED, "no access point in this build");
@@ -1405,11 +1410,16 @@ static void test_setup_flag() {
   {
     Flash flash;
     auto f = boot(flash, T0);
-    CHECK(f->setup_needed(), "a new feeder needs setting up");
-    f->set_setup_done(true);
-    CHECK(!f->setup_needed() && flash.have_device && flash.device_saves == 1, "finished: saved at once");
-    f->set_setup_done(true);
-    CHECK(flash.device_saves == 1, "no change, no write");
+    CHECK(f->setup_needed() && flash.device_saves == 1, "a new feeder needs setting up (saved at the first boot)");
+    // A new feeder saves its settings and tray state soon after the first boot: the next boot must still know.
+    f->set_min_gap_s(90);
+    f->advance(5000);
+    auto again = boot(flash, T0 + 30);
+    CHECK(flash.have_settings && again->setup_needed(), "still needed after a restart with settings saved");
+    again->set_setup_done(true);
+    CHECK(!again->setup_needed() && flash.device_saves == 2, "finished: saved at once");
+    again->set_setup_done(true);
+    CHECK(flash.device_saves == 2, "no change, no write");
     auto g = boot(flash, T0 + 60);
     CHECK(!g->setup_needed(), "kept across a restart");
     g->set_setup_done(false);
@@ -1419,9 +1429,13 @@ static void test_setup_flag() {
     // An update from 1.x: settings and a calibration saved, no Device record yet.
     Flash flash;
     { auto f = boot(flash, T0); f->set_min_gap_s(120); f->advance(5000); }
-    flash.have_device = false;
+    flash.have_device = false;  // as 1.x left it
     auto f = boot(flash, T0 + 60);
-    CHECK(flash.have_settings && !flash.have_device && !f->setup_needed(), "an existing feeder is not set up again");
+    CHECK(flash.have_settings && !f->setup_needed(), "an existing feeder is not set up again");
+    CHECK(flash.have_device && (flash.device.flags & DEVICE_SETUP_DONE), "and that is saved at once");
+    flash.have_settings = false;
+    auto g = boot(flash, T0 + 120);
+    CHECK(!g->setup_needed(), "decided once: the saved record wins from then on");
   }
 }
 

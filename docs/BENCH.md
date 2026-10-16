@@ -369,3 +369,47 @@ over Wi-Fi, then the normal build put back.
   - an IPv6-only network with a static IPv4 address;
   - Home Assistant connected and adopting the feeder, alongside the web app.
 
+
+## Firmware 2.0.0 N5 and N6 on hardware (2026-10-16)
+
+Waveshare ESP32-S3-Zero (4 MB, 2 MB PSRAM), flash erased by the owner, then a build shaped like the planned
+prebuilt binary: `examples/ble.yaml` plus `api_key_on_device` and `name_add_mac_suffix: "true"` (78.6% of the app
+slot). Flashed over USB. The checks were scripted: the web app's own code (the served bundle, re-run on the feeder's
+page in a browser), Python for the API, OTA, Improv and signed requests, and the BLE client from a terminal.
+
+Passed:
+- **Fresh feeder:** named `precision-feeder-add020` (MAC suffix); `GET /feeder/network` reports setup needed, and the
+  app opens the setup wizard by itself. Still needed after a reset (once fixed, below).
+- **Network endpoints:** bad values answered 400; with a settings password, an unsigned change 403, a wrong key 403
+  then 429 during the wait; signed: the name and the access-point password (masked) saved, Restart Needed on.
+- **Setup flag:** done, offered again, done, and still done after a restart.
+- **Time zone:** the Berlin rule set through the Timezone entity; Device Time showed +02:00.
+- **Restart:** the feeder came back as `pf-bench-test.local` (mDNS), the access-point password from the device, the
+  settings password kept.
+- **Keys made in the web app:** an API client connected with the new key and saw the new name (86 entities);
+  plaintext and a wrong key were refused. BLE selftest with the new BLE key: 14/14. With BLE Can Change Guard Limits
+  off (a signed write), `config set daily_cap` was refused with detail 7 and Reload Pause still accepted.
+- **Plaintext OTA** refused ("Authentication invalid"), as the runtime-key build intends.
+- **Wi-Fi from the web app:** the same network again: answered, dropped after 3 s, back after 11 s. An unreachable
+  network: off the LAN and stayed off.
+- **Improv serial** (a script speaking the protocol over USB): device info with the saved name, the current URL, and
+  sending the real network brought the feeder back from the unreachable one, twice.
+
+Found and fixed during the run:
+- **HTTP 500 instead of 403/429:** ESPHome's ESP-IDF request maps only a few status codes and sends the rest as 500.
+  Every settings-password refusal (since N2) arrived as 500. Now sent through ESP-IDF directly.
+- **Setup wizard lost after one restart:** a new feeder saves settings soon after its first boot, and the next boot
+  took it for an update from 1.x. The decision is now made once, at the first boot, and saved.
+- **Joining another network did nothing while connected:** ESPHome's `save_wifi_sta()` only connects when idle. The
+  feeder now drops the link a second after answering, and ESPHome's reconnect joins the saved network.
+- **BLE name with a MAC suffix:** ESPHome refuses a BLE name over 13 characters when it adds the suffix; the bins
+  need a short `ble_name` (N7).
+- **The BLE client's `config set`** never worked: the `--key` option overwrote the setting's name.
+
+Not checked: the access point's SSID on air (macOS redacts scanned SSIDs), the DHCP host name, Home Assistant
+adoption and renaming, encrypted OTA, ESP Web Tools itself. Two harness notes: Node could not reach the LAN here
+(macOS Local Network permission), and Node's `fetch` sends a body-less POST with no Content-Length, which the
+feeder's server waits on (browsers send `Content-Length: 0`).
+
+Left on the board: the build's name and access-point password, no settings password, no API key, the BLE key made
+during the test (a BLE key cannot be cleared, only replaced), setup offered again, the Wi-Fi network the YAML has.

@@ -300,7 +300,7 @@ calibration mode; dim cyan hold or reload pause.
 | `step_time` | `1s` | time for each tray move |
 | `wiggle` | `"true"` | forward, back, forward on each feed to shake food loose |
 | `detach_delay` | `1s` | the servo is released this long after a move (no buzzing, no heat) |
-| `ble_name` | `Precision Feeder` | name shown to BLE scanners (BLE package) |
+| `ble_name` | `Precision Feeder` | name shown to BLE scanners (BLE package). At most 13 characters with `name_add_mac_suffix` |
 | `ble_time_policy` | `fallback_only` | whether a clock pushed over BLE is accepted: only when network time is stale (recommended), `always`, or `off` |
 
 The BLE key itself is `ble_key` in `secrets.yaml`, not a substitution. It is optional since 2.0.0: a key made in
@@ -329,7 +329,7 @@ needs the password, and the passwords travel masked by it; with none, they cross
 - **Name** on the network (mDNS `<name>.local`, the DHCP host name, the access point's name). Lowercase letters,
   digits and hyphens, up to 31. Saved on the feeder, it wins over `name` in your YAML (and over a MAC suffix), and is
   used after the next restart. Home Assistant may need the feeder added again under the new name.
-- **Wi-Fi network.** Join another network: the feeder switches at once. If it cannot join, it opens its access point
+- **Wi-Fi network.** Join another network: the feeder answers, then switches a second later. If it cannot join, it opens its access point
   (below) after a while, so you can fix it there. A network saved this way (or in the captive portal, or over USB with
   Improv) replaces the one in your YAML; ESPHome keys it to the build, so with a network in your YAML, the YAML's
   comes back after the next update built from a changed YAML.
