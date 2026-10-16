@@ -744,7 +744,8 @@ std::string BleEngine::session_text() const {
     std::snprintf(peer, sizeof(peer), "%02X:%02X", this->peer_[4], this->peer_[5]);
   auto seconds = [](int64_t ms) { return ms < 0 ? -1L : static_cast<long>(ms / 1000); };
   const BleStats &s = this->stats_;
-  char buf[240];
+  // Room for every field at its widest on a 64-bit host (430 bytes), so GCC's -Wformat-truncation stays quiet.
+  char buf[432];
   std::snprintf(buf, sizeof(buf),
                 "connected=%d;auth=%d;peer=%s;mtu=%u;since=%ld;last=%ld;conns=%lu;wr=%lu;wrb=%lu;rd=%lu;rdb=%lu;"
                 "nt=%lu;ntb=%lu;authok=%lu;authfail=%lu;refused=%lu;invalid=%lu",
