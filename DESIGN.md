@@ -325,8 +325,13 @@ end up with no network in oddball cases (fallback AP mode; power returns while
 the internet is down). BLE exists as a control plane, so it is also a time
 path.
 
-- **NTP is the truth.** Uses ESPHome's defaults; server addresses are
-  configurable in the YAML.
+- **NTP is the truth.** Up to three servers: the YAML's (`ntp_server_1` to `3`, the public pool by default), or
+  ones set on the feeder (firmware 2.0.2): the **NTP Servers** text entity (web app, Configuration and the setup
+  wizard; Home Assistant), host names or IPv4/IPv6 addresses separated by commas, saved in the Device record and
+  applied at once. ESPHome sets its servers once and has no setter, so the adapter stops ESP-IDF's SNTP client, gives
+  it the new names and starts it again (empty goes back to the build's, read from ESP-IDF at boot). Not protected by
+  the settings password, like the timezone (owner, 2026-10-16). **Found in 2.0.2:** ESP-IDF's default
+  `CONFIG_LWIP_SNTP_MAX_SERVERS` is 1, so before 2.0.2 only the first server was ever asked; core.yaml now sets 3.
 - **BLE `SET_TIME` is the fallback.** It carries `epoch u32` (UTC) and
   `utc_offset_min i16`. Policy `ble_time_policy`:
   - `fallback_only` (recommended): accepted only if NTP has not synced within
@@ -506,7 +511,8 @@ entities from one 1-second interval through `publish_number/text/bool/option`
 ### 9.2 Device record (firmware 2.0.0)
 
 The settings a prebuilt binary needs at run time are saved in their own record,
-`Device` (`feeder_core.h`, preference key `precision_feeder.device.v1`, version 1),
+`Device` (`feeder_core.h`, preference key `precision_feeder.device.v2`, version 2 since 2.0.2; version 1, key
+`.device.v1`, is migrated at boot with every field kept),
 next to Settings, Calibration and State. Its layout already holds every field 2.0
 sets at run time, so later milestones fill fields in instead of changing it:
 
@@ -519,6 +525,7 @@ sets at run time, so later milestones fill fields in instead of changing it:
 | `ap_password` | fallback access-point password (section 9.3) | empty | N5 (built) |
 | `ble_key` | BLE key (section 10) | all zero (no key set here) | N4 (built) |
 | `password_scheme`, `password_salt`, `password_hash` | settings password (0: none) | | N2 |
+| `ntp_servers` | up to three NTP servers, "a,b,c" (version 2) | empty | 2.0.2 |
 
 - **The YAML stays in charge until the device is changed.** A fresh record says "use
   the build's value" everywhere, so a YAML build keeps following edits to its YAML. A
@@ -964,6 +971,9 @@ precision-feeder/
   - Location is typed in: the browser's geolocation needs HTTPS, which the feeder does not serve.
   - Wi-Fi in the wizard is "join another network" (section 9.3): to reach the wizard the feeder is already on a
     network (set by the captive portal or Improv).
+- **2.0.2 (2026-10-16):** NTP servers set at run time (section 6), treated like the timezone: not protected by the
+  settings password (owner). Up to three, in Device record version 2 (version 1 migrated). Three servers asked for real
+  (`CONFIG_LWIP_SNTP_MAX_SERVERS`).
 - **2.0.0 N7 (2026-10-16):**
   - 2.0.0 merged to main (N1 to N6); N7 onward is built on main, as it needs GitHub Actions and Pages.
   - **The prebuilt binaries' access point is open on a clean flash** (owner), reversing the plan's "documented

@@ -167,6 +167,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_save_state(const State &state, bool flush) override;
   void hal_save_device(const Device &device) override;
   void hal_apply_timezone(const TzRules *rules) override;
+  void hal_apply_ntp(const std::vector<std::string> *servers) override;
   void hal_log(LogLevel level, const char *message) override;
   void hal_random(uint8_t *out, size_t n) override;
 
@@ -195,6 +196,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   ESPPreferenceObject pref_device_;
   std::string hostname_build_;
   bool ap_build_open_{false};
+  const char *ntp_build_[NTP_SERVERS_MAX]{};  // the build's NTP servers, as the sntp component gave them
   Mutex password_lock_;
 #ifdef USE_WEBSERVER
   web_server::WebServer *web_server_{nullptr};

@@ -6,6 +6,16 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.0.2: NTP servers (in progress)
+
+- New **NTP Servers** setting (Configuration, the setup wizard, and Home Assistant): up to three host names or IP
+  addresses, for example a time server on your own network. Applied at once; empty uses the build's servers (the
+  public pool in the prebuilt firmware). Like the time zone, it needs no settings password.
+- Fixed: only the first of the three NTP servers in the YAML was ever asked (ESP-IDF allowed one by default); all
+  three are now.
+- The device settings record moves to version 2; one saved by 2.0.0 or 2.0.1 is migrated at the first boot, with
+  everything kept.
+
 ## 2.0.1: appliance, fixed on the bench (2026-10-16)
 
 The first release of 2.0, "appliance": prebuilt binaries installed from a web page, a setup wizard, settings changed

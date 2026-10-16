@@ -182,6 +182,15 @@ class Consistency(unittest.TestCase):
         block = controls[controls.index('name: "Timezone"'):]
         self.assertEqual(int(re.search(r"max_length: (\d+)", block).group(1)), limit)
 
+    def test_ntp_servers_length(self):
+        """The NTP Servers entity takes as many characters as the Device record holds, and is not protected."""
+        core_h = (ROOT / "components/precision_feeder/feeder_core.h").read_text()
+        size = int(re.search(r"NTP_SERVERS_SIZE = (\d+);", core_h).group(1))
+        controls = (ROOT / "packages/controls.yaml").read_text()
+        block = controls[controls.index('name: "NTP Servers"'):]
+        self.assertEqual(int(re.search(r"max_length: (\d+)", block).group(1)), size - 1)
+        self.assertNotIn("text/NTP Servers", (ROOT / "packages/web_server.yaml").read_text())
+
     def test_timezone_golden(self):
         """tests/tz_golden.h still matches ESPHome's reference parser (skipped without aioesphomeapi)."""
         try:

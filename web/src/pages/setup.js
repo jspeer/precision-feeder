@@ -117,7 +117,9 @@ PAGES.setup = {
 
   step2() {
     const box = h('div', {});
-    const rows = [timezonePicker(), setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude)]
+    const rows = [timezonePicker(), setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude),
+                  setting('NTP servers', 'Optional: a time server on your network (for example 192.168.1.1), or up to ' +
+                          'three separated by commas. Empty: public pool servers.', E.ntpServers)]
       .filter(Boolean);
     this.rows.push(...rows);
     append(box, h('p', {}, 'The time zone decides when "08:00" is, and when daylight saving changes. Latitude and ' +

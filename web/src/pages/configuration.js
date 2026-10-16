@@ -67,7 +67,10 @@ PAGES.configuration = {
     const tz = setting('Time zone rule', 'Set by the place above, or type a POSIX TZ string, for example ' +
                        'CET-1CEST,M3.5.0,M10.5.0/3. Empty: the one in your YAML, or Home Assistant\'s.', E.timezone);
     const zone = timezonePicker();
-    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), zone, tz]
+    const ntp = setting('NTP servers', 'Up to three host names or IP addresses, separated by commas, for example ' +
+                        '192.168.1.1 for a server on your network. Empty: the ones in the build (public pool servers).',
+                        E.ntpServers);
+    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), zone, tz, ntp]
       .filter(Boolean)) {
       this.rows.push(r);
       loc.appendChild(r);

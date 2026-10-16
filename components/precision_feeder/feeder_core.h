@@ -14,6 +14,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "calendar.h"
 #include "crypto.h"
@@ -40,7 +41,7 @@ constexpr int POLAR_SUNSET_MIN = 18 * 60;
 constexpr uint32_t SETTINGS_VERSION = 4;       // 2: no late start; 3: servo pulse range; 4: calibration moved out
 constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
-constexpr uint32_t DEVICE_VERSION = 1;
+constexpr uint32_t DEVICE_VERSION = 2;         // 2: NTP servers (firmware 2.0.2)
 // Setting limits: the single source of truth. Every way of changing a setting (Home Assistant, BLE, loading from
 // flash) goes through the setters below, which check against these. The YAML entities repeat them as min/max for
 // their input boxes; tests/test_consistency.py checks that they agree.
@@ -66,6 +67,9 @@ constexpr uint8_t PIN_NONE = 0xFF;   // no button or no LED fitted
 constexpr unsigned HOSTNAME_SIZE = 32;                 // ESPHome names are at most 31 characters
 constexpr unsigned TIMEZONE_SIZE = TZ_TEXT_MAX + 1;    // POSIX TZ string and its terminator
 constexpr unsigned AP_PASSWORD_SIZE = 64;              // WPA2: at most 63 characters
+constexpr unsigned NTP_SERVERS_SIZE = 192;             // up to three servers, comma-separated, and a terminator
+constexpr unsigned NTP_SERVERS_MAX = 3;                // ESP-IDF's SNTP client (CONFIG_LWIP_SNTP_MAX_SERVERS)
+constexpr unsigned NTP_SERVER_LEN_MAX = 63;            // one host name or address
 constexpr unsigned DEVICE_KEY_SIZE = 32;               // BLE key, as docs/PROTOCOL.md
 constexpr unsigned PASSWORD_SALT_SIZE = 16;
 constexpr unsigned PASSWORD_HASH_SIZE = 32;            // SHA-256
@@ -258,13 +262,38 @@ struct Device {
   uint8_t reserved[3];
   uint8_t password_salt[PASSWORD_SALT_SIZE];
   uint8_t password_hash[PASSWORD_HASH_SIZE];
+  char ntp_servers[NTP_SERVERS_SIZE];  // version 2: "a,b,c" (host names or addresses); empty = the build's servers
 };
+
+/// Parse a list of NTP servers: host names, IPv4 or IPv6 addresses, separated by commas or spaces, at most
+/// NTP_SERVERS_MAX of NTP_SERVER_LEN_MAX characters each (letters, digits, '.', '-', ':'). Empty is an empty list.
+/// `problem` (optional) says why one is refused.
+bool parse_ntp_servers(const std::string &text, std::vector<std::string> &out, std::string *problem = nullptr);
 
 /// The pins a Device record asks for, given the build's (PIN_NONE where the build has no button or LED). A saved pin
 /// that is refused falls back to the build's, and so do all three if they clash; `problem` (optional) then says why.
 Pins resolve_pins(const Device &device, const Pins &build, std::string *problem);
 
 namespace legacy {
+/// The Device record as saved by firmware 2.0.0 and 2.0.1 (version 1, no NTP servers). Migrated, not discarded.
+struct DeviceV1 {
+  uint32_t version;
+  uint8_t servo_pin;
+  uint8_t button_pin;
+  uint8_t led_pin;
+  uint8_t flags;
+  char hostname[HOSTNAME_SIZE];
+  char timezone[TIMEZONE_SIZE];
+  char ap_password[AP_PASSWORD_SIZE];
+  uint8_t ble_key[DEVICE_KEY_SIZE];
+  uint8_t password_scheme;
+  uint8_t reserved[3];
+  uint8_t password_salt[PASSWORD_SALT_SIZE];
+  uint8_t password_hash[PASSWORD_HASH_SIZE];
+};
+/// The current record from a version 1 one: every field kept, no NTP servers (the build's).
+Device migrate_device_v1(const DeviceV1 &v1);
+
 /// Settings as saved by firmware 0.3.0 to 0.4.x (version 3, with the calibration inside). Migrated, not discarded.
 struct SettingsV3 {
   uint32_t version;
@@ -346,7 +375,8 @@ class FeederCore {
   /// Start up. Pass what was loaded from storage (nullptr if nothing was); wrong versions are ignored. `legacy_v3`
   /// is the old settings record, used only when there are no current settings: it is migrated.
   void core_start(const Settings *settings, const Calibration *calibration, const State *state,
-                  const legacy::SettingsV3 *legacy_v3 = nullptr, const Device *device = nullptr);
+                  const legacy::SettingsV3 *legacy_v3 = nullptr, const Device *device = nullptr,
+                  const legacy::DeviceV1 *device_v1 = nullptr);
   /// Call often (every main-loop pass). Runs motion, the scheduler and debounced saving.
   void core_loop();
 
@@ -455,6 +485,12 @@ class FeederCore {
   Result set_timezone(const std::string &posix);
   /// The timezone set on the device, or "" when the build's (or Home Assistant's) is in use.
   std::string timezone_text() const { return this->dev_.timezone; }
+  /// Set the NTP servers (up to three, comma-separated; parse_ntp_servers()); empty goes back to the build's. Saved
+  /// at once and applied without a reboot. INVALID_ARG for a list parse_ntp_servers() refuses. Not protected by the
+  /// settings password, like the timezone (owner, 2026-10-16).
+  Result set_ntp_servers(const std::string &text);
+  /// The NTP servers set on the device ("a,b,c"), or "" when the build's are in use.
+  std::string ntp_servers_text() const { return this->dev_.ntp_servers; }
 
   // ---- pins (DESIGN.md section 2.1) ----
   // The adapter resolves the saved pins at boot, before the drivers start, and reports what it applied. A change
@@ -665,6 +701,8 @@ class FeederCore {
   virtual void hal_save_device(const Device &device) = 0;  // always written at once
   /// Use this timezone for local time from now on; nullptr goes back to the one in use before any was applied.
   virtual void hal_apply_timezone(const TzRules *rules) = 0;
+  /// Ask these NTP servers from now on; nullptr goes back to the build's. A build without SNTP ignores it.
+  virtual void hal_apply_ntp(const std::vector<std::string> *servers) { (void) servers; }
   virtual void hal_log(LogLevel /*level*/, const char * /*message*/) {}
   virtual void hal_random(uint8_t *out, size_t n) = 0;  // cryptographically strong
 

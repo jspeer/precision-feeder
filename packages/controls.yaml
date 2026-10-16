@@ -243,6 +243,22 @@ text:
       - lambda: id(feeder).set_timezone(x);
     update_interval: never
 
+  # --- NTP servers (changes without a rebuild; firmware 2.0.2) ----------------
+  # Up to three host names or IP addresses (IPv4 or IPv6), separated by commas: "192.168.1.1" for a local server,
+  # "time.cloudflare.com,pool.ntp.org". Empty means the build's (ntp_server_1 to 3 in core.yaml). Applied at once.
+  # Like the timezone, not protected by the settings password (owner, 2026-10-16).
+  - platform: template
+    id: pf_ntp_servers
+    name: "NTP Servers"
+    icon: mdi:clock-time-four-outline
+    entity_category: config
+    mode: text
+    min_length: 0
+    max_length: 191
+    set_action:
+      - lambda: id(feeder).set_ntp_servers(x);
+    update_interval: never
+
 # Publish the entities above only when their value changes (see packages/status.yaml).
 interval:
   - interval: 1s
@@ -260,3 +276,4 @@ interval:
           publish_number(id(pf_latitude), id(feeder).cfg.latitude);
           publish_number(id(pf_longitude), id(feeder).cfg.longitude);
           publish_text(id(pf_timezone), id(feeder).timezone_text());
+          publish_text(id(pf_ntp_servers), id(feeder).ntp_servers_text());

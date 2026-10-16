@@ -1441,6 +1441,76 @@ static void test_setup_flag() {
   }
 }
 
+static void test_ntp_servers() {
+  current = "NTP servers";
+  std::vector<std::string> out;
+  std::string problem;
+  CHECK(parse_ntp_servers("", out) && out.empty(), "empty: the build's");
+  CHECK(parse_ntp_servers("time.cloudflare.com", out) && out.size() == 1, "one host name");
+  CHECK(parse_ntp_servers(" 192.168.1.1, ntp.lan ,fd00::1 ", out) && out.size() == 3 && out[0] == "192.168.1.1" &&
+            out[1] == "ntp.lan" && out[2] == "fd00::1",
+        "three, any separators, IPv4 and IPv6");
+  CHECK(!parse_ntp_servers("a,b,c,d", out, &problem) && problem == "more than three servers", "four refused");
+  CHECK(!parse_ntp_servers("ntp.lan;x", out), "other characters refused");
+  CHECK(!parse_ntp_servers("[fd00::1]", out), "brackets refused");
+  CHECK(!parse_ntp_servers(std::string(64, 'a'), out), "longer than 63 refused");
+  CHECK(!parse_ntp_servers("-ntp", out) && !parse_ntp_servers("ntp-", out) && !parse_ntp_servers(".lan", out),
+        "a leading or trailing '-' or a leading '.' refused");
+  {
+    Flash flash;
+    auto f = boot(flash, T0);
+    CHECK(f->ntp_servers_text().empty() && f->ntp_applied == 0, "a new feeder uses the build's servers");
+    const int saves = flash.device_saves;
+    CHECK(f->set_ntp_servers("pool.ntp.org, 10.0.0.1") == Result::OK, "set");
+    CHECK(f->ntp_servers_text() == "pool.ntp.org,10.0.0.1" && f->ntp.size() == 2 && f->ntp[1] == "10.0.0.1",
+          "saved normalised and applied at once");
+    CHECK(flash.device_saves == saves + 1, "saved at once");
+    CHECK(f->set_ntp_servers("pool.ntp.org,10.0.0.1") == Result::OK && flash.device_saves == saves + 1, "no change, no write");
+    CHECK(f->set_ntp_servers("a,b,c,d") == Result::INVALID_ARG && f->ntp_servers_text() == "pool.ntp.org,10.0.0.1",
+          "a refused list changes nothing");
+    auto g = boot(flash, T0 + 60);
+    CHECK(g->ntp_applied == 1 && g->ntp.size() == 2, "applied again at boot");
+    CHECK(g->set_ntp_servers("") == Result::OK && g->ntp_applied == 2 && g->ntp.empty() && g->ntp_servers_text().empty(),
+          "empty: back to the build's");
+    flash.device.ntp_servers[0] = ';';  // corrupted on flash
+    auto h = boot(flash, T0 + 120);
+    CHECK(h->ntp_servers_text().empty() && h->ntp_applied == 0, "an unusable saved list is dropped");
+  }
+  {
+    // Firmware 2.0.0 and 2.0.1 saved a version 1 Device record: migrated, every field kept.
+    Flash flash;
+    { auto f = boot(flash, T0); f->set_min_gap_s(120); f->set_timezone("CET-1CEST,M3.5.0,M10.5.0/3"); f->set_setup_done(true); f->advance(5000); }
+    legacy::DeviceV1 v1{};
+    const Device &d = flash.device;
+    v1.version = 1;
+    v1.servo_pin = 4;
+    v1.button_pin = PIN_NONE;
+    v1.led_pin = d.led_pin;
+    v1.flags = d.flags;
+    std::strcpy(v1.hostname, "fish-room");
+    std::memcpy(v1.timezone, d.timezone, sizeof(v1.timezone));
+    std::strcpy(v1.ap_password, "feed the fish");
+    v1.ble_key[0] = 7;
+    v1.password_scheme = 1;
+    v1.password_salt[3] = 9;
+    v1.password_hash[31] = 5;
+    flash.have_device = false;
+    flash.have_device_v1 = true;
+    flash.device_v1 = v1;
+    const int saves = flash.device_saves;
+    auto f = boot(flash, T0 + 60);
+    const Device &n = flash.device;
+    CHECK(flash.have_device && flash.device_saves == saves + 1 && n.version == DEVICE_VERSION, "saved as version 2 at once");
+    CHECK(n.servo_pin == 4 && n.button_pin == PIN_NONE && std::strcmp(n.hostname, "fish-room") == 0 &&
+              std::strcmp(n.ap_password, "feed the fish") == 0 && n.ble_key[0] == 7 && n.password_scheme == 1 &&
+              n.password_salt[3] == 9 && n.password_hash[31] == 5 && n.ntp_servers[0] == '\0',
+          "every field kept, no NTP servers");
+    CHECK(f->timezone_text() == "CET-1CEST,M3.5.0,M10.5.0/3" && !f->setup_needed() && f->password_set(),
+          "timezone, setup done and the password kept");
+    CHECK(f->cfg.min_gap_s == 120, "settings untouched");
+  }
+}
+
 // A sink that records what reached the "partition".
 struct FakeSink : UpdateSink {
   std::vector<uint8_t> data;
@@ -1590,6 +1660,7 @@ int main() {
   test_network();
   test_setup_flag();
   test_firmware_upload();
+  test_ntp_servers();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

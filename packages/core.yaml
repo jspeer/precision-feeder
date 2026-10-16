@@ -10,7 +10,7 @@
 substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
-  fw_version: "2.0.1"
+  fw_version: "2.0.2"
   # Which build this is, shown as Firmware Variant: "full" or "no-ble" for the prebuilt binaries (firmware/), "yaml"
   # for a build from your own YAML. The web app's update check (Firmware page) offers the matching prebuilt image only
   # to a prebuilt binary; a YAML build is updated with ESPHome. Leave it.
@@ -31,7 +31,8 @@ substitutions:
 
   # --- Time ---------------------------------------------------------------
   # NTP is the primary time source. Leave the pool servers, or point at a
-  # local NTP server if your network has no internet access.
+  # local NTP server if your network has no internet access. These are the starting
+  # values: servers set on the feeder (NTP Servers, controls.yaml; web app, Configuration) win.
   ntp_server_1: 0.pool.ntp.org
   ntp_server_2: 1.pool.ntp.org
   ntp_server_3: 2.pool.ntp.org
@@ -65,6 +66,10 @@ esp32:
   flash_size: 4MB              # ESP32-S3FH4R2 (Waveshare ESP32-S3-Zero H4R2)
   framework:
     type: esp-idf
+    sdkconfig_options:
+      # Ask all three NTP servers. ESP-IDF's default is 1, so with it the second and third were never used (found in
+      # 2.0.2); the NTP Servers setting (controls.yaml) can give up to three too.
+      CONFIG_LWIP_SNTP_MAX_SERVERS: "3"
 
 logger:
   level: INFO

@@ -27,6 +27,7 @@
 #include <esp_wifi.h>
 #endif
 #include <esp_sntp.h>
+#include <sdkconfig.h>
 #include <esp_timer.h>
 #include <sys/time.h>
 
@@ -43,7 +44,7 @@ void PrecisionFeeder::setup() {
   this->pref_calibration_ =
       global_preferences->make_preference<Calibration>(fnv1_hash("precision_feeder.calibration.v1"));
   this->pref_state_ = global_preferences->make_preference<State>(fnv1_hash("precision_feeder.state"));
-  this->pref_device_ = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v1"));
+  this->pref_device_ = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v2"));
   Settings settings;
   Calibration calibration;
   State state;
@@ -52,6 +53,18 @@ void PrecisionFeeder::setup() {
   const bool have_calibration = this->pref_calibration_.load(&calibration);
   const bool have_state = this->pref_state_.load(&state);
   const bool have_device = this->pref_device_.load(&device);
+  legacy::DeviceV1 device_v1;
+  bool have_device_v1 = false;
+  if (!have_device) {  // firmware 2.0.0 and 2.0.1: migrated by core_start() and saved under the new key
+    auto pref_v1 = global_preferences->make_preference<legacy::DeviceV1>(fnv1_hash("precision_feeder.device.v1"));
+    have_device_v1 = pref_v1.load(&device_v1);
+  }
+#ifdef SNTP_SERVER_COUNT
+  // The sntp component (set up earlier, BEFORE_CONNECTION) has given ESP-IDF the build's servers: remember them, to
+  // go back to when the servers set here are cleared. They point at string literals, which last.
+  for (uint8_t i = 0; i < NTP_SERVERS_MAX && i < CONFIG_LWIP_SNTP_MAX_SERVERS; i++)
+    this->ntp_build_[i] = esp_sntp_getservername(i);
+#endif
 #ifdef USE_TIME_TIMEZONE
   // The time platforms set the build's timezone before any component starts.
   this->build_tz_ = time::get_global_tz();
@@ -63,7 +76,8 @@ void PrecisionFeeder::setup() {
     have_v3 = pref_v3.load(&v3);
   }
   this->core_start(have_settings ? &settings : nullptr, have_calibration ? &calibration : nullptr,
-                   have_state ? &state : nullptr, have_v3 ? &v3 : nullptr, have_device ? &device : nullptr);
+                   have_state ? &state : nullptr, have_v3 ? &v3 : nullptr, have_device ? &device : nullptr,
+                   have_device_v1 ? &device_v1 : nullptr);
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   if (this->ota_ != nullptr) {
     uint8_t random[16];
@@ -134,8 +148,15 @@ Device PrecisionFeeder::load_device_early_() {
   Device saved{};
   saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
   Device loaded;
-  auto pref = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v1"));
-  if (pref.load(&loaded) && loaded.version == DEVICE_VERSION) {
+  auto pref = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v2"));
+  legacy::DeviceV1 v1;
+  auto pref_v1 = global_preferences->make_preference<legacy::DeviceV1>(fnv1_hash("precision_feeder.device.v1"));
+  bool ok = pref.load(&loaded) && loaded.version == DEVICE_VERSION;
+  if (!ok && pref_v1.load(&v1) && v1.version == 1) {  // not migrated yet: core_start() does that, later
+    loaded = legacy::migrate_device_v1(v1);
+    ok = true;
+  }
+  if (ok) {
     saved = loaded;
     saved.hostname[HOSTNAME_SIZE - 1] = '\0';
     saved.ap_password[AP_PASSWORD_SIZE - 1] = '\0';
@@ -339,6 +360,31 @@ void PrecisionFeeder::hal_save_state(const State &state, bool flush) {
 void PrecisionFeeder::hal_save_device(const Device &device) {
   this->pref_device_.save(&device);
   global_preferences->sync();
+}
+
+void PrecisionFeeder::hal_apply_ntp(const std::vector<std::string> *servers) {
+#ifdef SNTP_SERVER_COUNT
+  // ESPHome sets its servers once (sntp component, setup()) and has no setter; underneath it is ESP-IDF's SNTP client,
+  // which takes new names after a stop and polls them from the next start. It keeps the pointers, so the names live
+  // here. CONFIG_LWIP_SNTP_MAX_SERVERS (core.yaml) decides how many are asked.
+  static char names[NTP_SERVERS_MAX][NTP_SERVER_LEN_MAX + 1];
+  esp_sntp_stop();
+  for (uint8_t i = 0; i < NTP_SERVERS_MAX && i < CONFIG_LWIP_SNTP_MAX_SERVERS; i++) {
+    const char *name = nullptr;
+    if (servers == nullptr) {
+      name = this->ntp_build_[i];
+    } else if (i < servers->size()) {
+      std::snprintf(names[i], sizeof(names[i]), "%s", (*servers)[i].c_str());  // parse_ntp_servers() checked lengths
+      name = names[i];
+    }
+    esp_sntp_setservername(i, name);
+  }
+  esp_sntp_init();
+  ESP_LOGI(TAG, "NTP: asking %s", servers == nullptr ? "the build's servers" : "the servers set on the feeder");
+#else
+  if (servers != nullptr)
+    ESP_LOGW(TAG, "This build has no NTP (sntp time platform): servers saved, not used");
+#endif
 }
 
 void PrecisionFeeder::hal_apply_timezone(const TzRules *rules) {

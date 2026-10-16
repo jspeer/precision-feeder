@@ -76,7 +76,13 @@ void FeederCore::clamp_device_() {
   d.hostname[HOSTNAME_SIZE - 1] = '\0';
   d.timezone[TIMEZONE_SIZE - 1] = '\0';
   d.ap_password[AP_PASSWORD_SIZE - 1] = '\0';
+  d.ntp_servers[NTP_SERVERS_SIZE - 1] = '\0';
   d.flags &= DEVICE_FLAGS_KNOWN;
+  std::vector<std::string> servers;
+  if (d.ntp_servers[0] != '\0' && (!parse_ntp_servers(d.ntp_servers, servers) || servers.empty())) {
+    this->log_(LogLevel::kWarn, "Saved NTP servers not usable, using the build's");
+    std::memset(d.ntp_servers, 0, NTP_SERVERS_SIZE);
+  }
   if (d.hostname[0] != '\0' && !check_hostname(d.hostname)) {
     this->log_(LogLevel::kWarn, "Saved name not usable, using the build's");
     std::memset(d.hostname, 0, HOSTNAME_SIZE);
@@ -233,11 +239,23 @@ void FeederCore::migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration
 }
 
 void FeederCore::core_start(const Settings *settings, const Calibration *calibration, const State *state,
-                            const legacy::SettingsV3 *legacy_v3, const Device *device) {
+                            const legacy::SettingsV3 *legacy_v3, const Device *device,
+                            const legacy::DeviceV1 *device_v1) {
   this->defaults_();
+  // A version 1 record (firmware 2.0.0 and 2.0.1) with no current one: migrate it and save it in the new layout.
+  Device migrated;
+  const bool migrate = device == nullptr && device_v1 != nullptr && device_v1->version == 1;
+  if (migrate) {
+    migrated = legacy::migrate_device_v1(*device_v1);
+    device = &migrated;
+  }
   if (device != nullptr && device->version == DEVICE_VERSION) {
     this->dev_ = *device;
     this->clamp_device_();
+    if (migrate) {
+      this->hal_save_device(this->dev_);
+      this->log_(LogLevel::kInfo, "Device settings migrated from version 1 (all kept)");
+    }
   } else if (device == nullptr) {
     // The first boot with a Device record to make. A feeder that was in use before (an update from 1.x: settings or a
     // calibration saved) is not a new one, so no setup wizard. Decided once and saved now: a new feeder saves its
@@ -271,6 +289,11 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
   this->clamp_loaded_();
   if (this->dev_.timezone[0] != '\0')
     this->apply_timezone_();
+  if (this->dev_.ntp_servers[0] != '\0') {
+    std::vector<std::string> servers;
+    parse_ntp_servers(this->dev_.ntp_servers, servers);  // clamp_device_() checked it
+    this->hal_apply_ntp(&servers);
+  }
   this->clock_kept_ = this->hal_time_valid();
   if (this->clock_kept_)
     this->log_(LogLevel::kInfo, "Clock kept across a restart (valid at boot, not a fresh sync)");

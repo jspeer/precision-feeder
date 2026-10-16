@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '8692ea3511e5';
+const BUILD_ID = '0810da80447e';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -59,6 +59,7 @@ const E = {
   latitude: 'number/Latitude',
   longitude: 'number/Longitude',
   timezone: 'text/Timezone',
+  ntpServers: 'text/NTP Servers',
 
   // packages/schedule_editor.yaml
   editedProfile: 'text_sensor/Edited Profile',
@@ -2308,7 +2309,10 @@ PAGES.configuration = {
     const tz = setting('Time zone rule', 'Set by the place above, or type a POSIX TZ string, for example ' +
                        'CET-1CEST,M3.5.0,M10.5.0/3. Empty: the one in your YAML, or Home Assistant\'s.', E.timezone);
     const zone = timezonePicker();
-    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), zone, tz]
+    const ntp = setting('NTP servers', 'Up to three host names or IP addresses, separated by commas, for example ' +
+                        '192.168.1.1 for a server on your network. Empty: the ones in the build (public pool servers).',
+                        E.ntpServers);
+    for (const r of [setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude), zone, tz, ntp]
       .filter(Boolean)) {
       this.rows.push(r);
       loc.appendChild(r);
@@ -3326,7 +3330,9 @@ PAGES.setup = {
 
   step2() {
     const box = h('div', {});
-    const rows = [timezonePicker(), setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude)]
+    const rows = [timezonePicker(), setting('Latitude', null, E.latitude), setting('Longitude', null, E.longitude),
+                  setting('NTP servers', 'Optional: a time server on your network (for example 192.168.1.1), or up to ' +
+                          'three separated by commas. Empty: public pool servers.', E.ntpServers)]
       .filter(Boolean);
     this.rows.push(...rows);
     append(box, h('p', {}, 'The time zone decides when "08:00" is, and when daylight saving changes. Latitude and ' +

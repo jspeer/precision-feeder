@@ -29,6 +29,8 @@ struct Flash {
   Calibration calibration{};
   legacy::SettingsV3 v3{};
   Device device{};
+  bool have_device_v1{false};
+  legacy::DeviceV1 device_v1{};
   int device_saves{0};
   int settings_saves{0};
   bool settings_flushed{false};
@@ -45,12 +47,15 @@ class FakeFeeder : public FeederCore {
  public:
   FakeFeeder(Flash &flash, int64_t epoch_ms, bool clock_valid) : flash_(flash), epoch_ms_(epoch_ms), valid_(clock_valid) {}
 
+  int ntp_applied{0};
+  std::vector<std::string> ntp;  // the NTP servers last applied; empty: the build's
+
   void start() {
     this->set_detach_delay(1000);
     this->core_start(flash_.have_settings ? &flash_.settings : nullptr,
                      flash_.have_calibration ? &flash_.calibration : nullptr,
                      flash_.have_state ? &flash_.state : nullptr, flash_.have_v3 ? &flash_.v3 : nullptr,
-                     flash_.have_device ? &flash_.device : nullptr);
+                     flash_.have_device ? &flash_.device : nullptr, flash_.have_device_v1 ? &flash_.device_v1 : nullptr);
     this->set_feed_listener([this](const FeedRecord &r) { this->records.push_back(r); });
   }
 
@@ -129,6 +134,11 @@ class FakeFeeder : public FeederCore {
     flash_.state = s;
     flash_.have_state = true;
   }
+  void hal_apply_ntp(const std::vector<std::string> *servers) override {
+    ntp_applied++;
+    ntp = servers != nullptr ? *servers : std::vector<std::string>{};
+  }
+
   void hal_save_device(const Device &d) override {
     flash_.device_saves++;
     flash_.device = d;

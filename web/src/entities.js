@@ -51,6 +51,7 @@ const E = {
   latitude: 'number/Latitude',
   longitude: 'number/Longitude',
   timezone: 'text/Timezone',
+  ntpServers: 'text/NTP Servers',
 
   // packages/schedule_editor.yaml
   editedProfile: 'text_sensor/Edited Profile',
