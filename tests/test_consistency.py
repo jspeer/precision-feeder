@@ -17,11 +17,22 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORE_H = (ROOT / "components/precision_feeder/feeder_core.h").read_text()
+SERVO_H = (ROOT / "components/precision_feeder/mechanism_servo.h").read_text()
+
+
+def mechanism_substitutions(package: str) -> dict[str, str]:
+    """The substitutions a mechanism package sets (its tray_capacity, ...)."""
+    found = {}
+    for line in (ROOT / "packages" / package).read_text().splitlines():
+        m = re.match(r'  (\w+): "?([^"#]*?)"?\s*(#.*)?$', line)
+        if m:
+            found[m.group(1)] = m.group(2)
+    return found
 
 
 def core_constants() -> dict[str, int]:
     found = {}
-    for line in CORE_H.splitlines():
+    for line in (CORE_H + SERVO_H).splitlines():
         m = re.match(r"\s*constexpr \w+ (.*);", line)
         if m:
             for name, value in re.findall(r"(\w+) = (-?\d+)", m.group(1)):
@@ -30,7 +41,9 @@ def core_constants() -> dict[str, int]:
 
 
 def yaml_entities() -> dict[str, dict[str, float]]:
-    """name -> {min_value, max_value} for every entity in packages/*.yaml that has them."""
+    """name -> {min_value, max_value} for every entity in packages/*.yaml that has them. ${tray_capacity} is read as
+    the servo mechanism's value (packages/mechanism_servo.yaml), the mechanism main builds with."""
+    capacity = mechanism_substitutions("mechanism_servo.yaml")["tray_capacity"]
     entities = {}
     for path in (ROOT / "packages").glob("*.yaml"):
         current = None
@@ -39,6 +52,7 @@ def yaml_entities() -> dict[str, dict[str, float]]:
             if m:
                 current = entities.setdefault(m.group(1), {})
                 continue
+            line = line.replace("${tray_capacity}", capacity)
             m = re.match(r"\s+(min_value|max_value): (-?[\d.]+)", line)
             if m and current is not None:
                 current[m.group(1)] = float(m.group(2))
@@ -76,8 +90,20 @@ class Consistency(unittest.TestCase):
         self.check("Gap Between Portions", c["PORTION_GAP_S_LO"], c["PORTION_GAP_S_HI"])
         self.check("Reload Pause", c["RELOAD_PAUSE_MIN_LO"], c["RELOAD_PAUSE_MIN_HI"])
         self.check("Refill Interval", c["REFILL_DAYS_LO"], c["REFILL_DAYS_HI"])
-        self.check("Daily Portion Cap", c["DAILY_CAP_LO"], c["DAILY_CAP_HI"])
-        self.check("Max Portions Per Command", c["PORTIONS_CMD_LO"], c["PORTIONS_CMD_HI"])
+        # The portion limits go up to the mechanism's capacity, which the YAML repeats as ${tray_capacity}.
+        self.check("Daily Portion Cap", c["DAILY_CAP_LO"], c["SERVO_CAPACITY"])
+        self.check("Max Portions Per Command", c["PORTIONS_CMD_LO"], c["SERVO_CAPACITY"])
+        self.check("Manual Portions", 1, c["SERVO_CAPACITY"])
+        self.check("Event Portions", c["EVENT_PORTIONS_LO"], c["SERVO_CAPACITY"])
+        self.check("One-shot Portions", 1, c["SERVO_CAPACITY"])
+        self.check("Declared Tray Position", 0, c["SERVO_CAPACITY"])
+
+    def test_tray_capacity(self):
+        """Each mechanism package's tray_capacity is that mechanism's capacity, and every portion limit uses it."""
+        self.assertEqual(int(mechanism_substitutions("mechanism_servo.yaml")["tray_capacity"]), self.c["SERVO_CAPACITY"])
+        for path in (ROOT / "packages").glob("*.yaml"):
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                self.assertNotRegex(line, r"max_value: 6$", f"{path.name}:{n}: a literal 6; use ${{tray_capacity}}")
 
     def test_calibration(self):
         c = self.c

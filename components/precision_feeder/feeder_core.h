@@ -1,7 +1,8 @@
 // Precision Feeder: tray state machine, feed guard, scheduler and status, as plain C++.
 //
 // No ESPHome dependencies: everything the logic needs from the platform (clock, servo, storage,
-// logging) goes through the hal_* hooks below. The ESPHome component (precision_feeder.h) implements
+// logging) goes through the hal_* hooks below. What moves the tray is a Mechanism (mechanism.h); the servo fan tray
+// (mechanism_servo.h) is the default one. The ESPHome component (precision_feeder.h) implements
 // them for the real device; tests/test_core.cpp implements them with a simulated clock, so the logic
 // can be tested on any computer.
 //
@@ -10,6 +11,7 @@
 // reviewed by a human, but it may still contain mistakes.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -18,14 +20,18 @@
 
 #include "calendar.h"
 #include "crypto.h"
+#include "mechanism.h"
+#include "mechanism_servo.h"
 #include "solar.h"
 #include "tz_rules.h"
 
 namespace esphome {
 namespace precision_feeder {
 
-constexpr uint8_t NUM_POSITIONS = 7;                 // tray positions 0..6 (0 = closed slot)
-constexpr uint8_t MAX_PORTIONS = NUM_POSITIONS - 1;  // 6 open slots per load
+// The servo's slots, which its calibration (Calibration::offsets, the BLE calibration channel) is indexed by. Portions
+// per load are the mechanism's capacity() (6 for the servo), not a constant.
+constexpr uint8_t NUM_POSITIONS = SERVO_POSITIONS;
+constexpr uint8_t CAPACITY_MAX = 64;  // the most portions per load any mechanism may have
 constexpr uint8_t NUM_PROFILES = 3;
 constexpr uint8_t EVENTS_PER_PROFILE = 4;
 constexpr uint8_t MAX_ONESHOTS = 8;
@@ -42,6 +48,7 @@ constexpr uint32_t SETTINGS_VERSION = 4;       // 2: no late start; 3: servo pul
 constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
 constexpr uint32_t DEVICE_VERSION = 2;         // 2: NTP servers (firmware 2.0.2)
+constexpr uint32_t TUNING_VERSION = 1;         // firmware 2.1.0
 // Setting limits: the single source of truth. Every way of changing a setting (Home Assistant, BLE, loading from
 // flash) goes through the setters below, which check against these. The YAML entities repeat them as min/max for
 // their input boxes; tests/test_consistency.py checks that they agree.
@@ -49,8 +56,11 @@ constexpr int32_t MIN_GAP_S_LO = 10, MIN_GAP_S_HI = 3600;           // minimum s
 constexpr int32_t PORTION_GAP_S_LO = 1, PORTION_GAP_S_HI = 60;      // seconds between portions of one feed
 constexpr int32_t RELOAD_PAUSE_MIN_LO = 0, RELOAD_PAUSE_MIN_HI = 60;
 constexpr int32_t REFILL_DAYS_LO = 1, REFILL_DAYS_HI = 30;
-constexpr int32_t DAILY_CAP_LO = 1, DAILY_CAP_HI = 6;               // portions in any rolling 24 h
-constexpr int32_t PORTIONS_CMD_LO = 1, PORTIONS_CMD_HI = 6;         // portions per manual / remote command
+// The daily cap, the portions per command and an event's portions go from 1 up to the mechanism's capacity() (6 for the
+// servo). The YAML repeats that as ${tray_capacity}, which the mechanism's package sets.
+constexpr int32_t DAILY_CAP_LO = 1;                                 // portions in any rolling 24 h
+constexpr int32_t PORTIONS_CMD_LO = 1;                              // portions per manual / remote command
+constexpr int32_t EVENT_PORTIONS_LO = 1;
 constexpr int16_t CAL_OFFSET_LO = -150, CAL_OFFSET_HI = 150;        // tenths of a degree
 // Servo pulse range limits (microseconds for 0 and 180 degrees). Wide enough for servos that turn less than
 // the nominal amount per microsecond; the firmware never commands more than about 155 degrees.
@@ -202,7 +212,7 @@ struct Event {
   uint8_t enabled;
   uint8_t anchor;      // Anchor
   int16_t offset_min;  // clock: minutes after midnight; solar: signed minutes from the anchor
-  uint8_t portions;    // 1..6
+  uint8_t portions;    // 1 to the mechanism's capacity()
   uint8_t days;        // weekday mask, bit0 = Sunday ... bit6 = Saturday
 };
 
@@ -263,6 +273,20 @@ struct Device {
   uint8_t password_salt[PASSWORD_SALT_SIZE];
   uint8_t password_hash[PASSWORD_HASH_SIZE];
   char ntp_servers[NTP_SERVERS_SIZE];  // version 2: "a,b,c" (host names or addresses); empty = the build's servers
+};
+
+/// The mechanism's tuning values (firmware 2.1.0; mechanism.h, TuningParam), saved on their own. Values belong to the
+/// mechanism named here and to its table `layout`: a record for another mechanism or layout is not used (and is kept
+/// as it is until a value is changed), so changing mechanisms never reads one table's values as another's.
+constexpr uint8_t TUNING_MAX = 16;
+constexpr unsigned MECHANISM_NAME_SIZE = 16;
+struct Tuning {
+  uint32_t version;
+  char mechanism[MECHANISM_NAME_SIZE];  // Mechanism::name()
+  uint8_t layout;                       // Mechanism::tuning_layout()
+  uint8_t count;
+  uint8_t reserved[2];
+  int32_t values[TUNING_MAX];
 };
 
 /// Parse a list of NTP servers: host names, IPv4 or IPv6 addresses, separated by commas or spaces, at most
@@ -351,16 +375,44 @@ struct LocalTime {
 
 enum class LogLevel : uint8_t { kError = 0, kWarn = 1, kInfo = 2, kDebug = 3 };
 
-class FeederCore {
+class FeederCore : private ServoOutput {
  public:
   virtual ~FeederCore() = default;
 
-  // ---- configuration ----
-  void set_sweep(float degrees) { this->sweep_ = degrees; }
-  void set_invert(bool invert) { this->invert_ = invert; }
-  void set_step_time(uint32_t ms) { this->step_ms_ = ms; }
-  void set_wiggle(bool wiggle) { this->wiggle_ = wiggle; }
-  void set_detach_delay(uint32_t ms) { this->detach_ms_ = ms; }
+  // ---- mechanism (mechanism.h) ----
+  /// Use another mechanism instead of the servo. Call before core_start(); the core does not own it.
+  void set_mechanism(Mechanism *mechanism) { this->mech_ = mechanism != nullptr ? mechanism : &this->servo_; }
+  Mechanism &mechanism() { return *this->mech_; }
+  const Mechanism &mechanism() const { return *this->mech_; }
+  /// True while the servo fan tray is the mechanism (its calibration and pulse range then apply).
+  bool is_servo() const { return this->mech_ == &this->servo_; }
+  ServoMechanism &servo() { return this->servo_; }
+  /// Portions per load: the mechanism's (6 for the servo), at least 1 and at most CAPACITY_MAX.
+  uint8_t capacity() const {
+    const uint8_t c = this->mech_->capacity();
+    return c < 1 ? 1 : (c > CAPACITY_MAX ? CAPACITY_MAX : c);
+  }
+  /// Why the mechanism's last move failed, or "".
+  const char *mechanism_fault() const { return this->mech_->fault_text(); }
+
+  // ---- tuning (the mechanism's table, mechanism.h) ----
+  uint8_t tuning_count() const { return std::min<uint8_t>(this->mech_->tuning_count(), TUNING_MAX); }
+  const TuningParam *tuning_param(uint8_t index) const {
+    return index < this->tuning_count() ? this->mech_->tuning_param(index) : nullptr;
+  }
+  /// The index of a tuning value by its key, or -1.
+  int tuning_index(const char *key) const;
+  int32_t tuning_value(uint8_t index) const { return index < this->tuning_count() ? this->tuning_.values[index] : 0; }
+  /// Change a tuning value (saved shortly, like the settings). INVALID_ARG outside the table's limits or for no such
+  /// value; BUSY while the tray moves.
+  Result set_tuning(uint8_t index, int32_t value);
+
+  // ---- configuration (the servo's; set from the YAML) ----
+  void set_sweep(float degrees) { this->servo_.set_sweep(degrees); }
+  void set_invert(bool invert) { this->servo_.set_invert(invert); }
+  void set_step_time(uint32_t ms) { this->servo_.set_step_time(ms); }
+  void set_wiggle(bool wiggle) { this->servo_.set_wiggle(wiggle); }
+  void set_detach_delay(uint32_t ms) { this->servo_.set_detach_delay(ms); }
   /// The pulse range a fresh device starts with (the YAML values). Saved settings override it.
   void set_default_pulse_range(uint16_t min_us, uint16_t max_us) {
     this->default_min_pulse_us_ = min_us;
@@ -376,7 +428,7 @@ class FeederCore {
   /// is the old settings record, used only when there are no current settings: it is migrated.
   void core_start(const Settings *settings, const Calibration *calibration, const State *state,
                   const legacy::SettingsV3 *legacy_v3 = nullptr, const Device *device = nullptr,
-                  const legacy::DeviceV1 *device_v1 = nullptr);
+                  const legacy::DeviceV1 *device_v1 = nullptr, const Tuning *tuning = nullptr);
   /// Call often (every main-loop pass). Runs motion, the scheduler and debounced saving.
   void core_loop();
 
@@ -385,9 +437,10 @@ class FeederCore {
   /// number of portions that will really be dispensed (a request for more than remain is clamped).
   Result request_feed(uint8_t portions, Source source, uint8_t *accepted = nullptr);
   /// The optional push button, as in the original firmware: feed one portion, or reload the tray when it is
-  /// empty or its position is unknown (reloading moves to the closed slot, so it is always safe).
+  /// empty or its position is unknown (reloading makes the tray ready to load, so it is always safe).
   void button_press();
-  /// Before loading the tray: return to position 0 (closed) and pause scheduled feeding briefly.
+  /// Before loading the tray: get it ready to load (the servo returns to its closed slot 0; position 0) and pause
+  /// scheduled feeding briefly.
   void tray_reload();
   /// Abort any motion. An interrupted step leaves the position unknown.
   void stop();
@@ -402,6 +455,8 @@ class FeederCore {
   void restart_cadence_today(int profile = -1);
 
   // ---- calibration ----
+  // Calibration mode refuses every feed, whatever the mechanism. The points, offsets and pulse range below are the
+  // servo's (its calibration points are its slots); with another mechanism they do nothing.
   void set_calibration_mode(bool on);
   bool calibration_mode() const { return this->calibrating_; }
   void calibration_select(uint8_t position);
@@ -415,7 +470,8 @@ class FeederCore {
   /// Write the offsets (all settings) to storage now.
   void save_calibration();
   /// Change the servo pulse range at run time (saved like other settings). In calibration mode the servo
-  /// moves to the selected position again so the effect can be seen. INVALID_ARG if out of range.
+  /// moves to the selected position again so the effect can be seen. INVALID_ARG if out of range; UNSUPPORTED when
+  /// the mechanism is not the servo.
   Result set_pulse_range(uint16_t min_us, uint16_t max_us);
   uint16_t min_pulse_us() const { return this->calib.min_pulse_us; }
   uint16_t max_pulse_us() const { return this->calib.max_pulse_us; }
@@ -611,7 +667,8 @@ class FeederCore {
 
   // ---- status ----
   uint8_t position() const { return this->state_.position; }
-  uint8_t remaining() const { return this->state_.position >= MAX_PORTIONS ? 0 : MAX_PORTIONS - this->state_.position; }
+  /// Portions left: capacity() minus the portions fed since the last reload (the tray position).
+  uint8_t remaining() const { return this->state_.position >= this->capacity() ? 0 : this->capacity() - this->state_.position; }
   bool position_unknown() const { return this->state_.unknown != 0; }
   TrayState tray_state() const;
   std::string tray_state_text() const;
@@ -699,6 +756,7 @@ class FeederCore {
   virtual void hal_save_calibration(const Calibration &calibration, bool flush) = 0;
   virtual void hal_save_state(const State &state, bool flush) = 0;
   virtual void hal_save_device(const Device &device) = 0;  // always written at once
+  virtual void hal_save_tuning(const Tuning &tuning, bool flush) = 0;
   /// Use this timezone for local time from now on; nullptr goes back to the one in use before any was applied.
   virtual void hal_apply_timezone(const TzRules *rules) = 0;
   /// Ask these NTP servers from now on; nullptr goes back to the build's. A build without SNTP ignores it.
@@ -706,7 +764,9 @@ class FeederCore {
   virtual void hal_log(LogLevel /*level*/, const char * /*message*/) {}
   virtual void hal_random(uint8_t *out, size_t n) = 0;  // cryptographically strong
 
-  enum class Phase : uint8_t { IDLE, STEP_A, STEP_B, STEP_C, GAP, SETTLE };
+  // MOVE: the mechanism drops one portion. GAP: between portions of one feed. POSITION: the mechanism moves for a
+  // reload or a restore. SETTLE: still, before the mechanism lets go of the motor.
+  enum class Phase : uint8_t { IDLE, MOVE, GAP, POSITION, SETTLE };
 
   struct DayCtx {
     int32_t day_no;
@@ -725,11 +785,14 @@ class FeederCore {
   void migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration);
   void save_state_(bool flush);
 
-  // servo
-  float angle_for_(uint8_t position) const;
-  void move_to_(uint8_t position) { this->hal_servo_write(this->angle_for_(position)); }
+  // ServoOutput: the servo mechanism's commands go to the hal hooks.
+  void servo_write(float angle_degrees) final { this->hal_servo_write(angle_degrees); }
+  void servo_release() final { this->hal_servo_release(); }
 
   // motion
+  /// After reload() or restore(): wait while the mechanism moves, then settle.
+  void positioned_();
+  void load_tuning_(const Tuning *saved);
   void start_next_portion_();
   void commit_step_();
   void run_motion_();
@@ -789,11 +852,10 @@ class FeederCore {
   std::string format_local_(int64_t epoch, bool with_date = true);
   std::string profile_summary_(uint8_t profile);
 
-  float sweep_{175.0f};
-  bool invert_{false};
-  uint32_t step_ms_{1000};
-  bool wiggle_{true};
-  uint32_t detach_ms_{1000};
+  ServoMechanism servo_{*this, this->calib.offsets};
+  Mechanism *mech_{&this->servo_};
+  Tuning tuning_{};
+  bool tuning_dirty_{false};
   uint16_t default_min_pulse_us_{544};
   uint16_t default_max_pulse_us_{2400};
 

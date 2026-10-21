@@ -1,0 +1,46 @@
+# Precision Feeder: the servo fan tray mechanism (DESIGN.md section 3). core.yaml includes it; you do not.
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# A hobby servo (MG90S or SG92R) swings a 7-slot tray: slot 0 is closed, slots 1 to 6 are open, so a load holds 6
+# portions. Each value below can be overridden from your own YAML under `substitutions:`; these are the defaults.
+# The servo's calibration (per-slot offsets, pulse range) is in packages/calibration.yaml.
+
+substitutions:
+  # Portions per load. The input boxes for portions and the daily cap go up to this. It must match the mechanism
+  # (6 for the servo tray); tests/test_consistency.py checks it. Do not change it.
+  tray_capacity: "6"
+  # Starting value only when the hardware package is included: a pin chosen there is saved on the feeder and wins
+  # (DESIGN.md section 2.1).
+  servo_pin: GPIO1             # servo signal wire
+  # See components/precision_feeder/__init__.py.
+  sweep_degrees: "175"         # angle the 7 slots span; 25 degrees per position
+  min_pulse: 544us             # pulse width for 0 degrees (as the original firmware)
+  max_pulse: 2400us            # pulse width for 180 degrees (as the original firmware)
+  servo_invert: "false"        # "true" if the servo is mounted the other way round
+  step_time: 1s                # time given to each of the three moves of a feed
+  wiggle: "true"               # shake food loose: forward, back, forward again
+  detach_delay: 1s             # release the servo this long after the last move
+
+# The servo signal: a standard 50 Hz hobby-servo PWM.
+output:
+  - platform: ledc
+    id: servo_output
+    pin:
+      number: ${servo_pin}
+      id: pf_servo_gpio        # so a pin saved on the feeder can replace it at startup
+    frequency: 50Hz
+
+precision_feeder:
+  output: servo_output
+  sweep_degrees: ${sweep_degrees}
+  min_pulse_width: ${min_pulse}
+  max_pulse_width: ${max_pulse}
+  invert: ${servo_invert}
+  step_time: ${step_time}
+  wiggle: ${wiggle}
+  detach_delay: ${detach_delay}
+  # The servo pin, replaced at startup by one saved on the feeder (hardware package).
+  servo_pin_id: pf_servo_gpio

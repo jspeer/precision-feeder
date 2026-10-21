@@ -14,7 +14,8 @@
 namespace esphome {
 namespace precision_feeder {
 
-// The protocol's layout constants must agree with the feeder.
+// The protocol's layout constants must agree with the feeder. POSITIONS is the servo's slots, which the calibration
+// channel is indexed by; Info reports the mechanism's positions (capacity + 1), which is the same for the servo.
 static_assert(proto::POSITIONS == NUM_POSITIONS, "protocol and feeder disagree on the number of positions");
 static_assert(proto::PROFILES == NUM_PROFILES, "protocol and feeder disagree on the number of profiles");
 static_assert(proto::EVENTS_PER_PROFILE == EVENTS_PER_PROFILE, "protocol and feeder disagree on events per profile");
@@ -37,8 +38,12 @@ void BleEngine::log_(LogLevel level, const char *fmt, ...) {
 // ---------------------------------------------------------------------------------------------
 
 uint16_t BleEngine::capabilities() const {
-  uint16_t caps = proto::CAP_SOLAR | proto::CAP_PROFILE_EDIT | proto::CAP_CALIBRATION | proto::CAP_HOLD_FOREVER |
-                  proto::CAP_SERVO_PULSE | proto::CAP_AUTH;
+  uint16_t caps = proto::CAP_SOLAR | proto::CAP_PROFILE_EDIT | proto::CAP_HOLD_FOREVER | proto::CAP_AUTH;
+  // Calibration offsets and the pulse range are the servo's; another mechanism does not offer them over BLE.
+  if (this->feeder_.mechanism().calibration_points() > 0)
+    caps |= proto::CAP_CALIBRATION;
+  if (this->feeder_.is_servo())
+    caps |= proto::CAP_SERVO_PULSE;
   if (this->time_policy_ != proto::TimePolicy::OFF)
     caps |= proto::CAP_TIME_PUSH;
   return caps;
@@ -49,7 +54,7 @@ void BleEngine::start() {
   uint8_t info[6];
   info[0] = proto::PROTOCOL_VERSION;
   proto::put_u16(info + 1, this->capabilities());
-  info[3] = proto::POSITIONS;
+  info[3] = static_cast<uint8_t>(this->feeder_.capacity() + 1);  // positions 0 to capacity
   info[4] = proto::PROFILES;
   info[5] = proto::EVENTS_PER_PROFILE;
   this->transport_.set_value(proto::CHANNEL_INFO, info, sizeof(info), false);
@@ -293,7 +298,7 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       return {RES_OK, 0};
 
     case OP_SET_POSITION:
-      if (n != 1 || args[0] > MAX_PORTIONS)
+      if (n != 1 || args[0] > f.capacity())
         return invalid;
       if (f.calibration_mode())
         return res(Result::CALIBRATING);
@@ -539,6 +544,8 @@ BleEngine::Answer BleEngine::handle_config_(const uint8_t *d, size_t n) {
       break;
     }
   }
+  if (r == Result::UNSUPPORTED)  // the pulse range, on a mechanism that is not the servo
+    return {RES_UNSUPPORTED, key};
   if (r != Result::OK)
     return {RES_INVALID_ARG, key};
   this->set_config_read_(key);
@@ -550,7 +557,7 @@ BleEngine::Answer BleEngine::handle_config_(const uint8_t *d, size_t n) {
 // ---------------------------------------------------------------------------------------------
 
 void BleEngine::set_calibration_read_(uint8_t index) {
-  if (index >= proto::POSITIONS)
+  if (index >= proto::POSITIONS || index >= this->feeder_.mechanism().calibration_points())
     return;
   uint8_t out[proto::CALIBRATION_SET_SIZE];
   out[0] = index;
@@ -562,7 +569,7 @@ BleEngine::Answer BleEngine::handle_calibration_(const uint8_t *d, size_t n) {
   using namespace proto;
   if (n == QUERY_SIZE && (d[0] & QUERY_FLAG)) {
     const uint8_t index = d[0] & ~QUERY_FLAG;
-    if (index >= POSITIONS)
+    if (index >= POSITIONS || index >= this->feeder_.mechanism().calibration_points())
       return {RES_INVALID_ARG, index};
     this->set_calibration_read_(index);
     return {RES_OK, index};
@@ -573,7 +580,8 @@ BleEngine::Answer BleEngine::handle_calibration_(const uint8_t *d, size_t n) {
     return {RES_NOT_AUTHORIZED, AUTH_DETAIL_SETTING_OFF};
   const uint8_t index = d[0];
   const int16_t tenths = get_i16(d + 1);
-  if (index >= POSITIONS || tenths < CAL_OFFSET_LO || tenths > CAL_OFFSET_HI)
+  if (index >= POSITIONS || index >= this->feeder_.mechanism().calibration_points() || tenths < CAL_OFFSET_LO ||
+      tenths > CAL_OFFSET_HI)
     return {RES_INVALID_ARG, index};
   this->feeder_.set_calibration_offset_at(index, tenths);
   this->set_calibration_read_(index);

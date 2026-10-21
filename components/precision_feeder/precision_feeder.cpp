@@ -75,9 +75,17 @@ void PrecisionFeeder::setup() {
     auto pref_v3 = global_preferences->make_preference<legacy::SettingsV3>(fnv1_hash("precision_feeder.settings"));
     have_v3 = pref_v3.load(&v3);
   }
+  // The mechanism's tuning values (firmware 2.1.0), only for a mechanism that has any: the servo has none, so a servo
+  // build never touches this record.
+  Tuning tuning;
+  bool have_tuning = false;
+  if (this->tuning_count() > 0) {
+    this->pref_tuning_ = global_preferences->make_preference<Tuning>(fnv1_hash("precision_feeder.tuning.v1"));
+    have_tuning = this->pref_tuning_.load(&tuning);
+  }
   this->core_start(have_settings ? &settings : nullptr, have_calibration ? &calibration : nullptr,
                    have_state ? &state : nullptr, have_v3 ? &v3 : nullptr, have_device ? &device : nullptr,
-                   have_device_v1 ? &device_v1 : nullptr);
+                   have_device_v1 ? &device_v1 : nullptr, have_tuning ? &tuning : nullptr);
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   if (this->ota_ != nullptr) {
     uint8_t random[16];
@@ -280,11 +288,20 @@ void PrecisionFeeder::apply_pins() {
 
 void PrecisionFeeder::dump_config() {
   ESP_LOGCONFIG(TAG, "Precision Feeder:");
-  ESP_LOGCONFIG(TAG, "  Sweep: %.1f deg, pitch %.1f deg, invert: %s", this->sweep_, this->sweep_ / NUM_POSITIONS,
-                YESNO(this->invert_));
-  ESP_LOGCONFIG(TAG, "  Pulse: %u-%u us (saved), step time %u ms, wiggle: %s, detach delay %u ms",
-                (unsigned) this->calib.min_pulse_us, (unsigned) this->calib.max_pulse_us, (unsigned) this->step_ms_,
-                YESNO(this->wiggle_), (unsigned) this->detach_ms_);
+  ESP_LOGCONFIG(TAG, "  Mechanism: %s, %u portions per load", this->mechanism().name(), this->capacity());
+  if (this->is_servo()) {
+    ServoMechanism &servo = this->servo();
+    ESP_LOGCONFIG(TAG, "  Sweep: %.1f deg, pitch %.1f deg, invert: %s", servo.sweep(), servo.sweep() / NUM_POSITIONS,
+                  YESNO(servo.invert()));
+    ESP_LOGCONFIG(TAG, "  Pulse: %u-%u us (saved), step time %u ms, wiggle: %s, detach delay %u ms",
+                  (unsigned) this->calib.min_pulse_us, (unsigned) this->calib.max_pulse_us,
+                  (unsigned) servo.step_time(), YESNO(servo.wiggle()), (unsigned) servo.settle_ms());
+  }
+  for (uint8_t i = 0; i < this->tuning_count(); i++) {
+    const TuningParam *p = this->tuning_param(i);
+    if (p != nullptr)
+      ESP_LOGCONFIG(TAG, "  %s: %ld (x%u, %s)", p->name, (long) this->tuning_value(i), (unsigned) p->scale, p->unit);
+  }
   ESP_LOGCONFIG(TAG, "  Tray position: %u (%s), remaining: %u", this->position(), this->tray_state_text().c_str(),
                 this->remaining());
 }
@@ -332,12 +349,17 @@ int64_t PrecisionFeeder::hal_local_to_epoch(int year, int month, int day, int ho
 }
 
 void PrecisionFeeder::hal_servo_write(float angle) {
+  if (this->output_ == nullptr)
+    return;
   const float span = static_cast<float>(this->calib.max_pulse_us) - static_cast<float>(this->calib.min_pulse_us);
   const float pulse = static_cast<float>(this->calib.min_pulse_us) + (angle / 180.0f) * span;
   this->output_->set_level(pulse / SERVO_PERIOD_US);
 }
 
-void PrecisionFeeder::hal_servo_release() { this->output_->set_level(0.0f); }
+void PrecisionFeeder::hal_servo_release() {
+  if (this->output_ != nullptr)
+    this->output_->set_level(0.0f);
+}
 
 void PrecisionFeeder::hal_save_settings(const Settings &settings, bool flush) {
   this->pref_settings_.save(&settings);
@@ -353,6 +375,14 @@ void PrecisionFeeder::hal_save_calibration(const Calibration &calibration, bool 
 
 void PrecisionFeeder::hal_save_state(const State &state, bool flush) {
   this->pref_state_.save(&state);
+  if (flush)
+    global_preferences->sync();
+}
+
+void PrecisionFeeder::hal_save_tuning(const Tuning &tuning, bool flush) {
+  if (this->tuning_count() == 0)
+    return;
+  this->pref_tuning_.save(&tuning);
   if (flush)
     global_preferences->sync();
 }

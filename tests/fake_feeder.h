@@ -33,6 +33,9 @@ struct Flash {
   Device device{};
   bool have_device_v1{false};
   legacy::DeviceV1 device_v1{};
+  bool have_tuning{false};
+  Tuning tuning{};
+  int tuning_saves{0};
   int device_saves{0};
   int settings_saves{0};
   bool settings_flushed{false};
@@ -57,7 +60,8 @@ class FakeFeeder : public FeederCore {
     this->core_start(flash_.have_settings ? &flash_.settings : nullptr,
                      flash_.have_calibration ? &flash_.calibration : nullptr,
                      flash_.have_state ? &flash_.state : nullptr, flash_.have_v3 ? &flash_.v3 : nullptr,
-                     flash_.have_device ? &flash_.device : nullptr, flash_.have_device_v1 ? &flash_.device_v1 : nullptr);
+                     flash_.have_device ? &flash_.device : nullptr, flash_.have_device_v1 ? &flash_.device_v1 : nullptr,
+                     flash_.have_tuning ? &flash_.tuning : nullptr);
     this->set_feed_listener([this](const FeedRecord &r) { this->records.push_back(r); });
   }
 
@@ -165,6 +169,11 @@ class FakeFeeder : public FeederCore {
     ntp = servers != nullptr ? *servers : std::vector<std::string>{};
   }
 
+  void hal_save_tuning(const Tuning &t, bool) override {
+    flash_.tuning_saves++;
+    flash_.tuning = t;
+    flash_.have_tuning = true;
+  }
   void hal_save_device(const Device &d) override {
     flash_.device_saves++;
     flash_.device = d;

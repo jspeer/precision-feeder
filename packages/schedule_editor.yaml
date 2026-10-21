@@ -154,7 +154,7 @@ number:
     name: "Event Portions"
     icon: mdi:fish
     min_value: 1
-    max_value: 6
+    max_value: ${tray_capacity}
     step: 1
     mode: box
     set_action:
@@ -183,7 +183,7 @@ number:
     name: "One-shot Portions"
     icon: mdi:fish
     min_value: 1
-    max_value: 6
+    max_value: ${tray_capacity}
     step: 1
     mode: box
     optimistic: true

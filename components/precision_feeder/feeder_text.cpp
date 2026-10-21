@@ -162,7 +162,7 @@ bool FeederCore::add_oneshot(const std::string &local_datetime, uint8_t portions
   civil_from_days(days_from_civil(y, static_cast<unsigned>(mo), static_cast<unsigned>(d)), cy, cm, cd);
   if (cy != y || static_cast<int>(cm) != mo || static_cast<int>(cd) != d)
     return false;
-  if (portions < 1 || portions > MAX_PORTIONS)
+  if (portions < 1 || portions > this->capacity())
     return false;
   const int64_t at = this->hal_local_to_epoch(y, mo, d, h, mi);
   if (at <= 0)
@@ -243,7 +243,7 @@ TrayState FeederCore::tray_state() const {
     return TrayState::MOVING;
   if (this->state_.unknown)
     return TrayState::UNKNOWN;
-  if (this->state_.position >= MAX_PORTIONS)
+  if (this->state_.position >= this->capacity())
     return TrayState::EMPTY;
   return TrayState::LOADED;
 }
@@ -347,7 +347,7 @@ std::string FeederCore::faults_text() {
     add("clock not re-synchronised for over a week");
   if (this->state_.unknown)
     add("tray position unknown");
-  if (this->state_.position >= MAX_PORTIONS)
+  if (this->state_.position >= this->capacity())
     add("tray empty");
   else if (this->needs_food())
     add("next feed needs more portions than remain");

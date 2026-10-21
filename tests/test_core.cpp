@@ -821,6 +821,7 @@ class DstFeeder : public FeederCore {
   void hal_save_calibration(const Calibration &, bool) override {}
   void hal_save_state(const State &, bool) override {}
   void hal_save_device(const Device &) override {}
+  void hal_save_tuning(const Tuning &, bool) override {}
   void hal_apply_timezone(const TzRules *) override {}
   void hal_random(uint8_t *out, size_t n) override { std::memset(out, 0, n); }
 
@@ -1625,6 +1626,187 @@ static void test_firmware_upload() {
   }
 }
 
+// ---- the mechanism interface (firmware 2.1.0) ----------------------------------------------------
+// A mechanism that is not the servo: 14 portions, a reload that does not move, a feed that takes 300 ms, an injected
+// fault, and a tuning table of two values.
+class FakeMechanism : public Mechanism {
+ public:
+  static constexpr TuningParam PARAMS[2] = {
+      {"speed", "Speed", "%", 10, 100, 80, 1},
+      {"wiggle_tenths", "Wiggle", "°", 1, 50, 20, 10},
+  };
+  int feeds{0}, reloads{0}, restores{0}, stops{0}, releases{0}, shows{0};
+  bool fail_next{false};
+  int32_t applied[2]{0, 0};
+  uint8_t layout{1};
+
+  const char *name() const override { return "fake"; }
+  uint8_t capacity() const override { return 14; }
+  void feed_one(uint8_t, uint32_t now) override {
+    feeds++;
+    busy_ = true;
+    start_ = now;
+  }
+  void reload(uint32_t) override { reloads++; }
+  void restore(uint8_t, uint32_t) override { restores++; }
+  MoveStatus poll(uint32_t now) override {
+    if (!busy_)
+      return MoveStatus::DONE;
+    if (now - start_ < 300)
+      return MoveStatus::BUSY;
+    busy_ = false;
+    if (fail_next) {
+      fail_next = false;
+      fault_ = "stalled";
+      return MoveStatus::FAULT;
+    }
+    return MoveStatus::DONE;
+  }
+  void stop() override {
+    stops++;
+    busy_ = false;
+  }
+  void release() override { releases++; }
+  uint32_t settle_ms() const override { return 0; }
+  const char *fault_text() const override { return fault_; }
+  uint8_t tuning_count() const override { return 2; }
+  uint8_t tuning_layout() const override { return layout; }
+  const TuningParam *tuning_param(uint8_t i) const override { return i < 2 ? &PARAMS[i] : nullptr; }
+  void apply_tuning(uint8_t i, int32_t v) override { applied[i] = v; }
+
+ private:
+  bool busy_{false};
+  uint32_t start_{0};
+  const char *fault_{""};
+};
+constexpr TuningParam FakeMechanism::PARAMS[2];
+
+static std::unique_ptr<FakeFeeder> boot_with(Flash &flash, Mechanism &m, int64_t epoch = T0) {
+  auto f = std::make_unique<FakeFeeder>(flash, epoch * 1000, true);
+  f->set_mechanism(&m);
+  f->start();
+  f->advance(1500);
+  return f;
+}
+
+static void test_mechanism_capacity_and_motion() {
+  current = "mechanism: capacity and motion";
+  Flash flash;
+  FakeMechanism m;
+  auto f = boot_with(flash, m);
+  CHECK(!f->is_servo() && std::strcmp(f->mechanism().name(), "fake") == 0, "the fake mechanism is in use");
+  CHECK(f->capacity() == 14 && f->remaining() == 14, "14 portions per load");
+  CHECK(m.restores == 1 && f->angles.empty(), "boot restores through the mechanism; the servo is never driven");
+  CHECK(f->set_daily_cap(14) == Result::OK && f->set_daily_cap(15) == Result::INVALID_ARG, "daily cap up to 14");
+  CHECK(f->set_max_portions_cmd(14) == Result::OK && f->set_max_portions_cmd(15) == Result::INVALID_ARG,
+        "portions per command up to 14");
+  CHECK(f->set_min_gap_s(10) == Result::OK, "short gap for the test");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feed accepted");
+  CHECK(f->tray_state() == TrayState::MOVING && flash.state.moving_to == 1, "moving, intent saved");
+  f->advance(250);
+  CHECK(f->tray_state() == TrayState::MOVING && f->position() == 0, "still moving before the mechanism is done");
+  f->advance(250);
+  CHECK(f->position() == 1 && f->remaining() == 13 && flash.state.moving_to == NO_MOVE, "committed when done");
+  // Thirteen more, in one command: 13 separate steps.
+  f->advance(11000);
+  CHECK(f->request_feed(13, Source::ESPHOME) == Result::OK, "13 at once");
+  f->advance(13 * 6000);
+  CHECK(f->position() == 14 && f->remaining() == 0 && f->tray_state() == TrayState::EMPTY, "empty after 14");
+  CHECK(m.feeds == 14, "one feed_one per portion");
+  f->advance(11000);
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::EMPTY, "empty refuses");
+  f->tray_reload();
+  CHECK(m.reloads == 1 && f->remaining() == 14 && f->tray_state() == TrayState::LOADED, "reload: full again");
+  CHECK(f->angles.empty(), "the servo was never driven");
+}
+
+static void test_mechanism_fault() {
+  current = "mechanism: fault";
+  Flash flash;
+  FakeMechanism m;
+  auto f = boot_with(flash, m);
+  f->set_max_portions_cmd(3);
+  m.fail_next = true;
+  CHECK(f->request_feed(3, Source::ESPHOME) == Result::OK, "feed of 3 accepted");
+  f->advance(500);
+  CHECK(f->position_unknown() && f->tray_state() == TrayState::UNKNOWN, "a fault leaves the position unknown");
+  CHECK(m.stops == 1 && m.feeds == 1, "motor stopped; no further portions");
+  CHECK(std::strcmp(f->mechanism_fault(), "stalled") == 0, "the reason is reported");
+  CHECK(f->portions_24h() == 1, "the faulted portion counts as fed, the other two do not");
+  CHECK(flash.state.unknown == 1 && flash.state.moving_to == NO_MOVE, "saved as unknown");
+  bool logged = false;
+  for (const auto &l : f->logs)
+    logged = logged || l.find("Motor fault: stalled") != std::string::npos;
+  CHECK(logged, "logged as a motor fault");
+  f->declare_position(4);
+  CHECK(!f->position_unknown() && f->remaining() == 10 && m.restores == 2, "declare recovers through restore()");
+}
+
+static void test_mechanism_tuning() {
+  current = "mechanism: tuning";
+  Flash flash;
+  FakeMechanism m;
+  auto f = boot_with(flash, m);
+  CHECK(f->tuning_count() == 2 && f->tuning_index("wiggle_tenths") == 1 && f->tuning_index("nope") == -1, "table");
+  CHECK(f->tuning_value(0) == 80 && m.applied[0] == 80 && m.applied[1] == 20, "defaults applied at boot");
+  CHECK(!flash.have_tuning, "nothing saved until a value changes");
+  CHECK(f->set_tuning(0, 101) == Result::INVALID_ARG && f->set_tuning(0, 9) == Result::INVALID_ARG, "limits");
+  CHECK(f->set_tuning(2, 50) == Result::INVALID_ARG, "no such value");
+  CHECK(f->set_tuning(0, 55) == Result::OK && m.applied[0] == 55, "set and applied");
+  f->advance(5000);
+  CHECK(flash.have_tuning && flash.tuning.values[0] == 55 && std::strcmp(flash.tuning.mechanism, "fake") == 0 &&
+            flash.tuning.layout == 1,
+        "saved shortly, with the mechanism and layout");
+  f->set_max_portions_cmd(1);
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "feeding");
+  CHECK(f->set_tuning(1, 30) == Result::BUSY, "not while moving");
+  f->advance(2000);
+
+  // Reboot: loaded again.
+  FakeMechanism m2;
+  auto g = boot_with(flash, m2, T0 + 60);
+  CHECK(g->tuning_value(0) == 55 && m2.applied[0] == 55, "kept across a reboot");
+
+  // A saved value out of range (a damaged record) falls back to the default.
+  flash.tuning.values[1] = 999;
+  FakeMechanism m3;
+  auto h = boot_with(flash, m3, T0 + 120);
+  CHECK(h->tuning_value(1) == 20 && h->tuning_value(0) == 55, "an out-of-range value is replaced by its default");
+
+  // Another layout (the table changed): defaults, and the old record is left alone until a value is set.
+  FakeMechanism m4;
+  m4.layout = 2;
+  const int saves = flash.tuning_saves;
+  auto k = boot_with(flash, m4, T0 + 180);
+  CHECK(k->tuning_value(0) == 80, "another layout's values are not used");
+  k->advance(5000);
+  CHECK(flash.tuning_saves == saves && flash.tuning.layout == 1, "and not overwritten by themselves");
+
+  // The servo has no tuning table, so a servo build never writes the record.
+  Flash servo_flash;
+  auto s = boot(servo_flash, T0);
+  CHECK(s->tuning_count() == 0 && s->set_tuning(0, 1) == Result::INVALID_ARG, "the servo has no tuning values");
+  s->set_daily_cap(5);
+  s->advance(5000);
+  CHECK(!servo_flash.have_tuning, "a servo build never saves a tuning record");
+}
+
+static void test_mechanism_servo_only_calibration() {
+  current = "mechanism: servo-only calibration";
+  Flash flash;
+  FakeMechanism m;
+  auto f = boot_with(flash, m);
+  CHECK(f->set_pulse_range(600, 2300) == Result::UNSUPPORTED, "no pulse range without the servo");
+  f->set_calibration_mode(true);
+  CHECK(f->tray_state() == TrayState::CALIBRATING, "calibration mode still refuses feeds");
+  CHECK(f->request_feed(1, Source::ESPHOME) == Result::CALIBRATING, "refused while calibrating");
+  CHECK(f->jog_calibration(0, 5) == Result::INVALID_ARG, "no servo calibration points to jog");
+  f->calibration_select(3);
+  CHECK(f->calibration_position() == 0 && m.shows == 0, "nothing to select");
+  f->set_calibration_mode(false);
+  CHECK(f->tray_state() == TrayState::LOADED && f->angles.empty(), "back to loaded; the servo was never driven");
+}
+
 // ---- golden servo trace (firmware 2.1.0, plan S1.0) -------------------------------------------
 // A scripted session through every motion path: boot, feeds of one and three portions (with and without the wiggle),
 // reload, calibration, stop mid-step and mid-gap, declare, a power cut mid-step, the button, a scheduled feed and an
@@ -1734,6 +1916,10 @@ int main() {
   return 0;
 #endif
   test_servo_golden_trace();
+  test_mechanism_capacity_and_motion();
+  test_mechanism_fault();
+  test_mechanism_tuning();
+  test_mechanism_servo_only_calibration();
   test_feed_motion();
   test_guard();
   test_power_loss_mid_step_and_button();

@@ -100,8 +100,15 @@ struct Rig {
   FakeTransport transport;
   std::unique_ptr<BleEngine> engine;
   std::unique_ptr<Client> client;
-  explicit Rig(bool clock_valid = true, bool build_key = true) {
-    this->feeder = boot(this->flash, T0, clock_valid);
+  explicit Rig(bool clock_valid = true, bool build_key = true, Mechanism *mechanism = nullptr) {
+    if (mechanism == nullptr) {
+      this->feeder = boot(this->flash, T0, clock_valid);
+    } else {
+      this->feeder = std::make_unique<FakeFeeder>(this->flash, T0 * 1000, clock_valid);
+      this->feeder->set_mechanism(mechanism);
+      this->feeder->start();
+      this->feeder->advance(1500);
+    }
     this->engine = std::make_unique<BleEngine>(*this->feeder, this->transport);
     uint8_t key[crypto::KEY_SIZE];
     for (size_t i = 0; i < sizeof(key); i++)
@@ -324,8 +331,8 @@ static void test_ranges() {
       {proto::CFG_PORTION_GAP_S, PORTION_GAP_S_LO, PORTION_GAP_S_HI},
       {proto::CFG_RELOAD_PAUSE_MIN, RELOAD_PAUSE_MIN_LO, RELOAD_PAUSE_MIN_HI},
       {proto::CFG_REFILL_INTERVAL_DAYS, REFILL_DAYS_LO, REFILL_DAYS_HI},
-      {proto::CFG_DAILY_CAP, DAILY_CAP_LO, DAILY_CAP_HI},
-      {proto::CFG_MAX_PORTIONS_CMD, PORTIONS_CMD_LO, PORTIONS_CMD_HI},
+      {proto::CFG_DAILY_CAP, DAILY_CAP_LO, SERVO_CAPACITY},
+      {proto::CFG_MAX_PORTIONS_CMD, PORTIONS_CMD_LO, SERVO_CAPACITY},
       {proto::CFG_SCHEDULER_ENABLED, 0, 1},
       {proto::CFG_LATITUDE_E5, -9000000, 9000000},
       {proto::CFG_LONGITUDE_E5, -18000000, 18000000},
@@ -532,8 +539,50 @@ static void test_permissions() {
             r.feeder->cfg.daily_cap == 4, "allowed again");
 }
 
+// A mechanism that is not the servo (firmware 2.1.0): 14 portions, no servo calibration, no pulse range. The protocol
+// is unchanged; Info reports the positions and leaves out the calibration and pulse-range capability bits.
+struct DiscMechanism : Mechanism {
+  const char *name() const override { return "disc"; }
+  uint8_t capacity() const override { return 14; }
+  void feed_one(uint8_t, uint32_t) override {}  // done at the next poll
+  void reload(uint32_t) override {}
+  void restore(uint8_t, uint32_t) override {}
+  MoveStatus poll(uint32_t) override { return MoveStatus::DONE; }
+  void stop() override {}
+  void release() override {}
+  uint32_t settle_ms() const override { return 0; }
+};
+
+static void test_other_mechanism() {
+  current = "another mechanism";
+  DiscMechanism disc;
+  Rig r(true, true, &disc);
+  const Bytes info = r.transport.value.at(proto::CHANNEL_INFO);
+  const uint16_t caps = proto::get_u16(info.data() + 1);
+  CHECK(info.size() == 6 && info[3] == 15, "Info: positions 0 to 14");
+  CHECK(!(caps & proto::CAP_CALIBRATION) && !(caps & proto::CAP_SERVO_PULSE) && (caps & proto::CAP_AUTH),
+        "no servo calibration or pulse range offered");
+  r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  Client &c = *r.client;
+  Bytes resp = c.command(proto::OP_SET_POSITION, {14});
+  CHECK(resp[2] == proto::RES_OK && resp[3] == 0, "SET_POSITION 14: 0 remaining");
+  CHECK(c.command(proto::OP_SET_POSITION, {15})[2] == proto::RES_INVALID_ARG, "SET_POSITION 15 refused");
+  resp = c.command(proto::OP_TRAY_RELOAD);
+  CHECK(resp[2] == proto::RES_OK && resp[3] == 14, "TRAY_RELOAD: 14 remaining");
+  Bytes body = cat(Bytes{c.next()}, cfg(proto::CFG_DAILY_CAP, 14));
+  CHECK(c.write(proto::CHANNEL_CONFIG, c.signed_(proto::CHANNEL_CONFIG, body))[2] == proto::RES_OK, "daily cap 14");
+  body = cat(Bytes{c.next()}, cfg(proto::CFG_DAILY_CAP, 15));
+  CHECK(c.write(proto::CHANNEL_CONFIG, c.signed_(proto::CHANNEL_CONFIG, body))[2] == proto::RES_INVALID_ARG,
+        "daily cap 15 refused");
+  body = cat(Bytes{c.next()}, cfg(proto::CFG_MIN_PULSE_US, 600));
+  CHECK(c.write(proto::CHANNEL_CONFIG, c.signed_(proto::CHANNEL_CONFIG, body))[2] == proto::RES_UNSUPPORTED,
+        "pulse range: unsupported");
+  CHECK(c.record(proto::CHANNEL_CALIBRATION, {0, 5, 0})[2] == proto::RES_INVALID_ARG, "no calibration offsets");
+}
+
 int main() {
   test_before_auth();
+  test_other_mechanism();
   test_auth_flow();
   test_feed_retry_and_replay();
   test_signing_rules();

@@ -17,14 +17,14 @@ trap 'rm -rf "$OUT"' EXIT
 
 echo "== C++ host tests"
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder \
-  tests/test_core.cpp components/precision_feeder/feeder_*.cpp -o "$OUT/test_core"
+  tests/test_core.cpp components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp -o "$OUT/test_core"
 "$OUT/test_core"
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder tests/test_logic.cpp -o "$OUT/test_logic"
 "$OUT/test_logic" | tail -1
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder_ble tests/test_protocol.cpp -o "$OUT/test_protocol"
 "$OUT/test_protocol"
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder -Icomponents/precision_feeder_ble -Itests \
-  tests/test_ble_engine.cpp components/precision_feeder_ble/engine.cpp components/precision_feeder/feeder_*.cpp \
+  tests/test_ble_engine.cpp components/precision_feeder_ble/engine.cpp components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp \
   -o "$OUT/test_ble_engine"
 "$OUT/test_ble_engine"
 

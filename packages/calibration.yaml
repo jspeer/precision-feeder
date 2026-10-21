@@ -90,7 +90,7 @@ number:
     name: "Declared Tray Position"
     icon: mdi:numeric
     min_value: 0
-    max_value: 6
+    max_value: ${tray_capacity}
     step: 1
     mode: box
     optimistic: true

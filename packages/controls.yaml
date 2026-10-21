@@ -83,7 +83,7 @@ number:
     name: "Manual Portions"
     icon: mdi:numeric
     min_value: 1
-    max_value: 6
+    max_value: ${tray_capacity}
     step: 1
     mode: box
     optimistic: true
@@ -135,7 +135,7 @@ number:
     entity_category: config
     icon: mdi:shield-check
     min_value: 1
-    max_value: 6
+    max_value: ${tray_capacity}
     step: 1
     mode: box
     set_action:
@@ -165,7 +165,7 @@ number:
     entity_category: config
     icon: mdi:shield-check
     min_value: 1
-    max_value: 6
+    max_value: ${tray_capacity}
     step: 1
     mode: box
     set_action:

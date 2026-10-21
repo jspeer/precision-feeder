@@ -1,4 +1,4 @@
-// Precision Feeder core: start-up and persistence, servo motion, calibration, feed guard, clock.
+// Precision Feeder core: start-up and persistence, motion (through the mechanism), calibration, feed guard, clock.
 //
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
@@ -104,7 +104,7 @@ void FeederCore::clamp_loaded_() {
     p.fast_days &= 0x7F;
     for (auto &e : p.ev) {
       e.anchor = std::min<uint8_t>(e.anchor, static_cast<uint8_t>(Anchor::SUNSET));
-      e.portions = std::min<uint8_t>(std::max<uint8_t>(e.portions, 1), MAX_PORTIONS);
+      e.portions = std::min<uint8_t>(std::max<uint8_t>(e.portions, EVENT_PORTIONS_LO), this->capacity());
       e.days &= 0x7F;
     }
   }
@@ -119,14 +119,14 @@ void FeederCore::clamp_loaded_() {
       static_cast<uint16_t>(clamp(this->cfg.reload_pause_min, RELOAD_PAUSE_MIN_LO, RELOAD_PAUSE_MIN_HI));
   this->cfg.refill_interval_days =
       static_cast<uint16_t>(clamp(this->cfg.refill_interval_days, REFILL_DAYS_LO, REFILL_DAYS_HI));
-  this->cfg.daily_cap = static_cast<uint8_t>(clamp(this->cfg.daily_cap, DAILY_CAP_LO, DAILY_CAP_HI));
-  this->cfg.max_portions_cmd = static_cast<uint8_t>(clamp(this->cfg.max_portions_cmd, PORTIONS_CMD_LO, PORTIONS_CMD_HI));
+  this->cfg.daily_cap = static_cast<uint8_t>(clamp(this->cfg.daily_cap, DAILY_CAP_LO, this->capacity()));
+  this->cfg.max_portions_cmd = static_cast<uint8_t>(clamp(this->cfg.max_portions_cmd, PORTIONS_CMD_LO, this->capacity()));
   this->cfg.scheduler_enabled = this->cfg.scheduler_enabled ? 1 : 0;
   if (!location_ok(this->cfg.latitude, this->cfg.longitude)) {  // also catches NaN
     this->cfg.latitude = 0.0f;
     this->cfg.longitude = 0.0f;
   }
-  this->state_.position = std::min<uint8_t>(this->state_.position, MAX_PORTIONS);
+  this->state_.position = std::min<uint8_t>(this->state_.position, this->capacity());
   if (!pulse_range_ok(this->calib.min_pulse_us, this->calib.max_pulse_us)) {
     this->calib.min_pulse_us = this->default_min_pulse_us_;
     this->calib.max_pulse_us = this->default_max_pulse_us_;
@@ -172,14 +172,14 @@ Result FeederCore::set_refill_interval_days(int32_t d) {
   return Result::OK;
 }
 Result FeederCore::set_daily_cap(int32_t n) {
-  if (!in_range(n, DAILY_CAP_LO, DAILY_CAP_HI))
+  if (!in_range(n, DAILY_CAP_LO, this->capacity()))
     return Result::INVALID_ARG;
   this->cfg.daily_cap = static_cast<uint8_t>(n);
   this->cfg_changed();
   return Result::OK;
 }
 Result FeederCore::set_max_portions_cmd(int32_t n) {
-  if (!in_range(n, PORTIONS_CMD_LO, PORTIONS_CMD_HI))
+  if (!in_range(n, PORTIONS_CMD_LO, this->capacity()))
     return Result::INVALID_ARG;
   this->cfg.max_portions_cmd = static_cast<uint8_t>(n);
   this->cfg_changed();
@@ -215,7 +215,78 @@ Result FeederCore::set_location_e5(int32_t lat, int32_t lon) {
 void FeederCore::save_calibration() {
   this->hal_save_calibration(this->calib, true);
   this->hal_save_settings(this->cfg, true);
+  if (this->tuning_dirty_)
+    this->hal_save_tuning(this->tuning_, true);
   this->cfg_dirty_ = false;
+  this->tuning_dirty_ = false;
+}
+
+int FeederCore::tuning_index(const char *key) const {
+  for (uint8_t i = 0; i < this->tuning_count(); i++) {
+    const TuningParam *p = this->tuning_param(i);
+    if (p != nullptr && std::strcmp(p->key, key) == 0)
+      return i;
+  }
+  return -1;
+}
+
+Result FeederCore::set_tuning(uint8_t index, int32_t value) {
+  const TuningParam *p = this->tuning_param(index);
+  if (p == nullptr || value < p->min || value > p->max) {
+    if (p != nullptr)
+      this->log_(LogLevel::kWarn, "%s %ld refused (limits %ld to %ld)", p->name, static_cast<long>(value),
+                 static_cast<long>(p->min), static_cast<long>(p->max));
+    return Result::INVALID_ARG;
+  }
+  if (this->moving_())
+    return Result::BUSY;
+  if (this->tuning_.values[index] == value)
+    return Result::OK;
+  // From the first change on, the record is this mechanism's (one saved for another mechanism is replaced only now).
+  std::strncpy(this->tuning_.mechanism, this->mech_->name(), MECHANISM_NAME_SIZE - 1);
+  this->tuning_.layout = this->mech_->tuning_layout();
+  this->tuning_.count = this->tuning_count();
+  this->tuning_.values[index] = value;
+  this->mech_->apply_tuning(index, value);
+  this->tuning_dirty_ = true;
+  this->cfg_changed();
+  this->log_(LogLevel::kInfo, "%s set to %ld", p->name, static_cast<long>(value));
+  return Result::OK;
+}
+
+void FeederCore::load_tuning_(const Tuning *saved) {
+  // Every value starts at its default; saved ones replace them only if they are this mechanism's, in this layout,
+  // and within the limits.
+  std::memset(&this->tuning_, 0, sizeof(this->tuning_));
+  this->tuning_.version = TUNING_VERSION;
+  std::strncpy(this->tuning_.mechanism, this->mech_->name(), MECHANISM_NAME_SIZE - 1);
+  this->tuning_.layout = this->mech_->tuning_layout();
+  this->tuning_.count = this->tuning_count();
+  bool usable = false;
+  if (saved != nullptr && saved->version == TUNING_VERSION) {
+    char name[MECHANISM_NAME_SIZE];
+    std::memcpy(name, saved->mechanism, MECHANISM_NAME_SIZE);
+    name[MECHANISM_NAME_SIZE - 1] = '\0';
+    usable = std::strcmp(name, this->tuning_.mechanism) == 0 && saved->layout == this->tuning_.layout;
+    if (!usable)
+      this->log_(LogLevel::kWarn, "Saved tuning is for %s (layout %u), not %s (layout %u): using the defaults", name,
+                 saved->layout, this->tuning_.mechanism, this->tuning_.layout);
+  }
+  for (uint8_t i = 0; i < this->tuning_count(); i++) {
+    const TuningParam *p = this->tuning_param(i);
+    if (p == nullptr)
+      continue;
+    int32_t v = p->def;
+    if (usable && i < saved->count) {
+      if (saved->values[i] >= p->min && saved->values[i] <= p->max)
+        v = saved->values[i];
+      else
+        this->log_(LogLevel::kWarn, "Saved %s %ld out of range, using %ld", p->name, static_cast<long>(saved->values[i]),
+                   static_cast<long>(p->def));
+    }
+    this->tuning_.values[i] = v;
+    this->mech_->apply_tuning(i, v);
+  }
 }
 
 void FeederCore::migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration) {
@@ -240,8 +311,9 @@ void FeederCore::migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration
 
 void FeederCore::core_start(const Settings *settings, const Calibration *calibration, const State *state,
                             const legacy::SettingsV3 *legacy_v3, const Device *device,
-                            const legacy::DeviceV1 *device_v1) {
+                            const legacy::DeviceV1 *device_v1, const Tuning *tuning) {
   this->defaults_();
+  this->load_tuning_(tuning);
   // A version 1 record (firmware 2.0.0 and 2.0.1) with no current one: migrate it and save it in the new layout.
   Device migrated;
   const bool migrate = device == nullptr && device_v1 != nullptr && device_v1->version == 1;
@@ -326,10 +398,9 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
   }
 
   if (!this->state_.unknown) {
-    // Go to the saved position (never to 0), then let the servo go limp after a moment.
-    this->move_to_(this->state_.position);
-    this->phase_ = Phase::SETTLE;
-    this->phase_start_ = this->hal_millis();
+    // Go to the saved position (never to 0), then let the motor go after a moment.
+    this->mech_->restore(this->state_.position, this->hal_millis());
+    this->positioned_();
   }
 }
 
@@ -348,7 +419,10 @@ void FeederCore::core_loop() {
     // cut in that time would lose the edit. Records that did not change are not rewritten.
     this->hal_save_settings(this->cfg, true);
     this->hal_save_calibration(this->calib, true);
+    if (this->tuning_dirty_)
+      this->hal_save_tuning(this->tuning_, true);
     this->cfg_dirty_ = false;
+    this->tuning_dirty_ = false;
   }
   if (this->tz_reapply_) {
     this->tz_reapply_ = false;
@@ -362,21 +436,21 @@ void FeederCore::core_loop() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Servo and motion
+// Motion: the mechanism moves; the core keeps the position, the intent and the history
 // ---------------------------------------------------------------------------------------------
 
-float FeederCore::angle_for_(uint8_t position) const {
-  position = std::min<uint8_t>(position, NUM_POSITIONS - 1);
-  const float margin = (180.0f - this->sweep_) / 2.0f;
-  const float pitch = this->sweep_ / NUM_POSITIONS;
-  float angle = margin + position * pitch + this->calib.offsets[position] / 10.0f;
-  angle = std::min(180.0f, std::max(0.0f, angle));
-  return this->invert_ ? 180.0f - angle : angle;
+bool FeederCore::moving_() const {
+  return this->phase_ == Phase::MOVE || this->phase_ == Phase::GAP || this->phase_ == Phase::POSITION;
 }
 
-bool FeederCore::moving_() const {
-  return this->phase_ == Phase::STEP_A || this->phase_ == Phase::STEP_B || this->phase_ == Phase::STEP_C ||
-         this->phase_ == Phase::GAP;
+void FeederCore::positioned_() {
+  const uint32_t now = this->hal_millis();
+  if (this->mech_->poll(now) == MoveStatus::BUSY) {
+    this->phase_ = Phase::POSITION;
+  } else {
+    this->phase_ = Phase::SETTLE;
+  }
+  this->phase_start_ = now;
 }
 
 void FeederCore::start_next_portion_() {
@@ -384,8 +458,8 @@ void FeederCore::start_next_portion_() {
   // Persist the intent before moving, so a power loss mid-step is detected at the next boot.
   this->state_.moving_to = target;
   this->save_state_(true);
-  this->move_to_(target);
-  this->phase_ = Phase::STEP_A;
+  this->mech_->feed_one(this->state_.position, this->hal_millis());
+  this->phase_ = Phase::MOVE;
   this->phase_start_ = this->hal_millis();
 }
 
@@ -397,7 +471,7 @@ void FeederCore::commit_step_() {
   if (this->queue_ > 0)
     this->queue_--;
   this->phase_start_ = this->hal_millis();
-  if (this->queue_ > 0 && this->state_.position < MAX_PORTIONS) {
+  if (this->queue_ > 0 && this->state_.position < this->capacity()) {
     this->phase_ = Phase::GAP;
   } else {
     this->phase_ = Phase::SETTLE;
@@ -410,40 +484,33 @@ void FeederCore::run_motion_() {
   switch (this->phase_) {
     case Phase::IDLE:
       return;
-    case Phase::STEP_A:
-      if (now - this->phase_start_ < this->step_ms_)
+    case Phase::MOVE:
+    case Phase::POSITION: {
+      const MoveStatus status = this->mech_->poll(now);
+      if (status == MoveStatus::BUSY)
         return;
-      if (this->wiggle_) {
-        // Step back and forward again to shake the food loose.
-        this->move_to_(this->state_.position);
-        this->phase_ = Phase::STEP_B;
-        this->phase_start_ = now;
-      } else {
+      if (status == MoveStatus::FAULT) {
+        // The mechanism could not finish (stalled, ran too far, timed out): treated as an interrupted move.
+        this->log_(LogLevel::kError, "Motor fault: %s", this->mech_->fault_text());
+        this->abort_motion_();
+      } else if (this->phase_ == Phase::MOVE) {
         this->commit_step_();
+      } else {
+        this->phase_ = Phase::SETTLE;
+        this->phase_start_ = now;
       }
       return;
-    case Phase::STEP_B:
-      if (now - this->phase_start_ < this->step_ms_)
-        return;
-      this->move_to_(this->state_.moving_to);
-      this->phase_ = Phase::STEP_C;
-      this->phase_start_ = now;
-      return;
-    case Phase::STEP_C:
-      if (now - this->phase_start_ < this->step_ms_)
-        return;
-      this->commit_step_();
-      return;
+    }
     case Phase::GAP:
       if (now - this->phase_start_ < static_cast<uint32_t>(this->cfg.portion_gap_s) * 1000UL)
         return;
       this->start_next_portion_();
       return;
     case Phase::SETTLE:
-      if (now - this->phase_start_ < this->detach_ms_)
+      if (now - this->phase_start_ < this->mech_->settle_ms())
         return;
       if (!this->calibrating_)
-        this->hal_servo_release();
+        this->mech_->release();
       this->phase_ = Phase::IDLE;
       return;
   }
@@ -451,9 +518,7 @@ void FeederCore::run_motion_() {
 
 void FeederCore::abort_motion_() {
   switch (this->phase_) {
-    case Phase::STEP_A:
-    case Phase::STEP_B:
-    case Phase::STEP_C:
+    case Phase::MOVE:
       // Interrupted mid-step: nobody knows whether the tray advanced. The step in progress still counts as fed
       // (the safe side for the daily cap); later portions of the same feed never started.
       this->log_(LogLevel::kWarn, "Motion aborted mid-step: tray position is now UNKNOWN");
@@ -464,7 +529,17 @@ void FeederCore::abort_motion_() {
       this->save_state_(true);
       this->queue_ = 0;
       this->phase_ = Phase::IDLE;
-      this->hal_servo_release();
+      this->mech_->stop();
+      break;
+    case Phase::POSITION:
+      // Interrupted while moving for a reload or a restore: the tray may be anywhere.
+      this->log_(LogLevel::kWarn, "Motion aborted while positioning: tray position is now UNKNOWN");
+      this->state_.unknown = 1;
+      this->state_.moving_to = NO_MOVE;
+      this->save_state_(true);
+      this->queue_ = 0;
+      this->phase_ = Phase::IDLE;
+      this->mech_->stop();
       break;
     case Phase::GAP:
       // Between portions of one feed: the remaining ones never dropped.
@@ -523,12 +598,11 @@ void FeederCore::tray_reload() {
           ? static_cast<uint32_t>(this->hal_epoch() + static_cast<int64_t>(this->cfg.reload_pause_min) * 60)
           : 0;
   this->save_state_(true);
-  this->move_to_(0);
-  this->phase_ = Phase::SETTLE;
-  this->phase_start_ = this->hal_millis();
+  this->mech_->reload(this->hal_millis());
+  this->positioned_();
   this->project_dirty_ = true;
-  this->log_(LogLevel::kInfo, "Tray reload: position 0, 6 portions, scheduled feeding paused for %u min",
-             this->cfg.reload_pause_min);
+  this->log_(LogLevel::kInfo, "Tray reload: position 0, %u portions, scheduled feeding paused for %u min",
+             this->capacity(), this->cfg.reload_pause_min);
 }
 
 void FeederCore::button_press() {
@@ -542,16 +616,15 @@ void FeederCore::button_press() {
 }
 
 void FeederCore::declare_position(uint8_t position) {
-  if (position > MAX_PORTIONS || this->calibrating_)
+  if (position > this->capacity() || this->calibrating_)
     return;
   this->abort_motion_();
   this->state_.position = position;
   this->state_.moving_to = NO_MOVE;
   this->state_.unknown = 0;
   this->save_state_(true);
-  this->move_to_(position);
-  this->phase_ = Phase::SETTLE;
-  this->phase_start_ = this->hal_millis();
+  this->mech_->restore(position, this->hal_millis());
+  this->positioned_();
   this->project_dirty_ = true;
   this->log_(LogLevel::kInfo, "Tray position declared: %u", position);
 }
@@ -566,28 +639,33 @@ void FeederCore::set_calibration_mode(bool on) {
   if (on) {
     this->abort_motion_();
     this->calibrating_ = true;
-    this->cal_pos_ = std::min<uint8_t>(this->state_.position, NUM_POSITIONS - 1);
-    this->move_to_(this->cal_pos_);
+    this->cal_pos_ = 0;
+    if (this->mech_->calibration_points() > 0) {
+      this->cal_pos_ = std::min<uint8_t>(this->state_.position, this->mech_->calibration_points() - 1);
+      this->mech_->calibration_show(this->cal_pos_, this->hal_millis());
+    }
     this->phase_ = Phase::IDLE;
     this->log_(LogLevel::kInfo, "Calibration mode on");
   } else {
     this->calibrating_ = false;
     this->save_calibration();
     if (!this->state_.unknown) {
-      this->move_to_(this->state_.position);
-      this->phase_ = Phase::SETTLE;
-      this->phase_start_ = this->hal_millis();
+      this->mech_->restore(this->state_.position, this->hal_millis());
+      this->positioned_();
     } else {
-      this->hal_servo_release();
+      this->mech_->release();
     }
     this->log_(LogLevel::kInfo, "Calibration mode off, offsets saved");
   }
 }
 
 void FeederCore::calibration_select(uint8_t position) {
-  this->cal_pos_ = std::min<uint8_t>(position, NUM_POSITIONS - 1);
+  const uint8_t points = this->mech_->calibration_points();
+  if (points == 0)
+    return;
+  this->cal_pos_ = std::min<uint8_t>(position, points - 1);
   if (this->calibrating_)
-    this->move_to_(this->cal_pos_);
+    this->mech_->calibration_show(this->cal_pos_, this->hal_millis());
 }
 
 void FeederCore::set_calibration_offset(int16_t tenths) { this->set_calibration_offset_at(this->cal_pos_, tenths); }
@@ -596,11 +674,13 @@ void FeederCore::set_calibration_offset_at(uint8_t position, int16_t tenths) {
   position = std::min<uint8_t>(position, NUM_POSITIONS - 1);
   this->calib.offsets[position] = std::min<int16_t>(std::max<int16_t>(tenths, CAL_OFFSET_LO), CAL_OFFSET_HI);
   this->cfg_changed();
-  if (this->calibrating_ && position == this->cal_pos_)
-    this->move_to_(position);
+  if (this->calibrating_ && position == this->cal_pos_ && position < this->mech_->calibration_points())
+    this->mech_->calibration_show(position, this->hal_millis());
 }
 
 Result FeederCore::set_pulse_range(uint16_t min_us, uint16_t max_us) {
+  if (!this->is_servo())
+    return Result::UNSUPPORTED;
   if (!pulse_range_ok(min_us, max_us)) {
     this->log_(LogLevel::kWarn, "Servo pulse range %u-%u us refused (limits: min %u-%u, max %u-%u, at least %u apart)",
                min_us, max_us, PULSE_MIN_LO, PULSE_MIN_HI, PULSE_MAX_LO, PULSE_MAX_HI, PULSE_SPAN_MIN);
@@ -611,21 +691,21 @@ Result FeederCore::set_pulse_range(uint16_t min_us, uint16_t max_us) {
   this->cfg_changed();
   this->log_(LogLevel::kInfo, "Servo pulse range %u-%u us", min_us, max_us);
   if (this->calibrating_)
-    this->move_to_(this->cal_pos_);
+    this->mech_->calibration_show(this->cal_pos_, this->hal_millis());
   return Result::OK;
 }
 
 Result FeederCore::jog_calibration(uint8_t position, int16_t delta_tenths) {
   if (!this->calibrating_)
     return Result::NOT_CALIBRATING;
-  if (position >= NUM_POSITIONS)
+  if (position >= this->mech_->calibration_points())
     return Result::INVALID_ARG;
   this->cal_pos_ = position;
   const int32_t next = static_cast<int32_t>(this->calib.offsets[position]) + delta_tenths;
   this->calib.offsets[position] =
       static_cast<int16_t>(std::min<int32_t>(std::max<int32_t>(next, CAL_OFFSET_LO), CAL_OFFSET_HI));
   this->cfg_changed();
-  this->move_to_(position);
+  this->mech_->calibration_show(position, this->hal_millis());
   return Result::OK;
 }
 
@@ -731,7 +811,7 @@ void FeederCore::record_history_(uint8_t portions, Source source) {
 
 Result FeederCore::check_guard_(uint8_t &portions, Source source) {
   const bool scheduled = source == Source::SCHEDULE || source == Source::ONE_SHOT;
-  if (portions == 0 || portions > MAX_PORTIONS)
+  if (portions == 0 || portions > this->capacity())
     return Result::INVALID_ARG;
   if (!scheduled && portions > this->cfg.max_portions_cmd)
     return Result::PORTION_LIMIT;
