@@ -37,6 +37,7 @@ bool N20Motion::begin_(int32_t target, int32_t ticks, uint32_t now) {
   this->last_ticks_ = ticks;
   this->phase_ = Phase::STARTING;
   this->phase_since_ = now;
+  this->move_started_ = now;
   const double expected_ms = this->full_speed_ > 0 ? std::abs(delta) / this->full_speed_ : 0;
   this->timeout_ms_ = this->t_.timeout_base_ms + static_cast<uint32_t>(3.0 * expected_ms);
   this->status_ = Status::BUSY;
@@ -115,6 +116,7 @@ bool N20Motion::advance_wiggle_(uint32_t now, int32_t ticks) {
 
 void N20Motion::finish_(uint32_t now, int32_t ticks) {
   this->phase_ = Phase::IDLE;
+  this->last_move_ms_ = now - this->move_started_;
   if (!this->reached_) {
     // Stopped or faulted: the rest of a wiggle is cancelled; the caller decides what the position is.
     this->wiggle_ = false;
@@ -331,6 +333,8 @@ void N20Mechanism::job_done_(uint32_t now) {
   switch (this->job_) {
     case Job::FEED_MOVE:
     case Job::CAL_SLOT_MOVE:
+      if (this->job_ == Job::FEED_MOVE)
+        this->last_feed_move_ms_ = this->motion_.last_move_ms();
       // The wiggle is part of positioning (D13): its last leg returns to the slot's centre.
       if (this->motion_.start_wiggle(amplitude, cycles, this->ticks_, now)) {
         this->job_ = this->job_ == Job::FEED_MOVE ? Job::FEED_WIGGLE : Job::CAL_SLOT_WIGGLE;
@@ -357,6 +361,7 @@ void N20Mechanism::job_done_(uint32_t now) {
   if (this->job_ == Job::FEED_MOVE || this->job_ == Job::FEED_WIGGLE) {
     this->k_ = this->next_k_;
     this->result_ = MoveStatus::DONE;
+    this->last_feed_ms_ = now - this->feed_started_;
   } else if (this->job_ == Job::CAL_SLOT_MOVE || this->job_ == Job::CAL_SLOT_WIGGLE) {
     this->k_ = this->next_k_;
     this->checked_++;
@@ -383,6 +388,7 @@ void N20Mechanism::feed_one(uint8_t from, uint32_t now_ms) {
   }
   this->result_ = MoveStatus::BUSY;
   this->job_ = Job::FEED_MOVE;
+  this->feed_started_ = now_ms;
 }
 
 void N20Mechanism::restore(uint8_t position, uint32_t now_ms) {

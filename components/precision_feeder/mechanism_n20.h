@@ -90,6 +90,8 @@ class N20Motion {
   void stop(uint32_t now);
 
   Status status() const { return this->status_; }
+  /// How long the last move took, from start() to done (ms): a bench diagnostic.
+  uint32_t last_move_ms() const { return this->last_move_ms_; }
   bool busy() const { return this->status_ == Status::BUSY; }
   const char *fault() const { return this->fault_; }
   Bridge bridge() const { return this->bridge_; }
@@ -121,6 +123,7 @@ class N20Motion {
   int dir_{1};
   uint8_t duty_{255};
   uint32_t began_{0}, last_edge_{0}, phase_since_{0}, timeout_ms_{0}, last_step_{0};
+  uint32_t move_started_{0}, last_move_ms_{0};
   bool stepped_{false};
   uint32_t pulse_ms_{3}, drive_pulse_ms_{3};
   int32_t pulse_start_{0};
@@ -189,6 +192,9 @@ class N20Mechanism : public Mechanism {
   Bridge control(uint32_t now_ms, int32_t raw_ticks);
   /// The encoder count after Reverse Encoder (for the Encoder Ticks diagnostic).
   int32_t ticks() const { return this->ticks_; }
+  /// Bench diagnostics: the last feed's slot move, and the whole feed (move and wiggle), in ms.
+  uint32_t last_feed_move_ms() const { return this->last_feed_move_ms_; }
+  uint32_t last_feed_ms() const { return this->last_feed_ms_; }
 
   const char *name() const override { return "n20-direct"; }
   uint8_t capacity() const override { return static_cast<uint8_t>(this->slots_ - 1); }
@@ -248,6 +254,7 @@ class N20Mechanism : public Mechanism {
   int32_t origin_{0};      // the count of slot 0
   int32_t k_{0};           // slots moved since the origin (it only grows)
   int32_t next_k_{0};      // the slot a feed or a check is moving to
+  uint32_t feed_started_{0}, last_feed_move_ms_{0}, last_feed_ms_{0};
   Job job_{Job::NONE};
   MoveStatus result_{MoveStatus::DONE};
   const char *fault_{""};

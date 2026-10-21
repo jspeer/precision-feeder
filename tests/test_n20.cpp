@@ -400,6 +400,10 @@ static void test_mechanism_wiggle_is_part_of_a_feed() {
     was_reverse = rev;
   }
   CHECK(reverse_starts >= 4, "four wiggle cycles: at least four drives back");
+  CHECK(d.mech->last_feed_move_ms() > 300 && d.mech->last_feed_ms() > d.mech->last_feed_move_ms(),
+        "the bench timings: the slot move, then the whole feed with the wiggle");
+  std::printf("  simulated feed: move %u ms, whole feed %u ms\n", (unsigned) d.mech->last_feed_move_ms(),
+              (unsigned) d.mech->last_feed_ms());
   CHECK(std::abs(d.ticks() - grid(1)) <= 4, "and it ends on the slot");
 }
 

@@ -284,6 +284,23 @@ sensor:
     entity_category: diagnostic
     accuracy_decimals: 0
     update_interval: never
+  # Bench diagnostics: how long the last feed took, its slot move alone and the whole feed with the wiggle.
+  - platform: template
+    id: pf_n20_feed_move_ms
+    name: "Last Feed Move Time"
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+    unit_of_measurement: ms
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: pf_n20_feed_ms
+    name: "Last Feed Time"
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+    unit_of_measurement: ms
+    accuracy_decimals: 0
+    update_interval: never
   # The longest gap between two motor control steps since boot (they should be 1 ms apart): the S2.0 timing check.
   - platform: template
     id: pf_n20_gap
@@ -311,3 +328,5 @@ interval:
           publish_text(id(pf_n20_fault), f->mechanism_fault()[0] ? f->mechanism_fault() : "none");
           publish_number(id(pf_n20_ticks_now), id(disc).encoder_ticks());
           publish_number(id(pf_n20_gap), id(disc).max_gap_us() / 1000.0f);
+          publish_number(id(pf_n20_feed_move_ms), id(disc).mechanism().last_feed_move_ms());
+          publish_number(id(pf_n20_feed_ms), id(disc).mechanism().last_feed_ms());
