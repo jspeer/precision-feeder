@@ -13,6 +13,7 @@ wrong is the device's word that counts.
     python3 tools/mock_device.py --port 8000 --no-ble --no-calibration --no-diagnostics
     python3 tools/mock_device.py --auth user:pass    HTTP basic authentication, as web_server's auth: block
     python3 tools/mock_device.py --unknown           start with the tray position unknown
+    python3 tools/mock_device.py --mechanism n20     the direct-drive disc (packages/mechanism_n20.yaml) instead of the servo
 
 Standard library only. The app is served from web/dist/ (app.js, app.css) when it exists.
 
@@ -117,6 +118,8 @@ class Feeder:
         self.clients: list[queue.Queue] = []
         self.started = time.monotonic()
         self.position = 2
+        self.disc = getattr(args, "mechanism", "servo") == "n20"
+        self.capacity = 14 if self.disc else 6
         self.unknown = args.unknown
         self.calibrating = False
         self.history: list[tuple[float, int, str]] = []  # (epoch, portions, source), newest first
@@ -161,8 +164,8 @@ class Feeder:
         a("sensor", "Portions Fed Today", icon="mdi:counter")
         a("sensor", "Runway", icon="mdi:calendar-clock", uom="d")
         a("sensor", "Minutes Since Clock Sync", 3, icon="mdi:clock-time-four-outline", category=DIAGNOSTIC, uom="min")
-        a("sensor", "Capacity", 6, icon="mdi:tray-full", category=DIAGNOSTIC)
-        a("text_sensor", "Mechanism", "servo", icon="mdi:cog-transfer", category=DIAGNOSTIC)
+        a("sensor", "Capacity", self.capacity, icon="mdi:tray-full", category=DIAGNOSTIC)
+        a("text_sensor", "Mechanism", "n20-direct" if self.disc else "servo", icon="mdi:cog-transfer", category=DIAGNOSTIC)
         for name, icon in [("Tray State", "mdi:state-machine"), ("Next Feed", "mdi:clock-outline"),
                            ("Hold", "mdi:pause-circle-outline"), ("Last Feed", "mdi:history"),
                            ("Last Result", "mdi:message-text-outline"), ("Recent Feeds", "mdi:format-list-bulleted"),
@@ -215,7 +218,28 @@ class Feeder:
         a("number", "One-shot Portions", 1, icon="mdi:fish", min_value=1, max_value=6, step=1)
         a("button", "Restart Cycle Today")
         a("button", "Clear One-shot Feeds")
-        if not args.no_calibration:  # calibration.yaml
+        if self.disc:  # mechanism_n20.yaml
+            a("switch", "Calibration Mode", False, icon="mdi:tune")
+            for name, value, lo, hi, step, uom in [("Ticks Per Turn", 8344, 1000, 100000, 1, "ticks"),
+                                                   ("Drive Power", 100, 20, 100, 1, "%"),
+                                                   ("Braking Distance", 160, 10, 2000, 1, "ticks"),
+                                                   ("Wiggle Amplitude", 2.0, 0.1, 5, 0.1, "°"),
+                                                   ("Wiggle Cycles", 4, 1, 10, 1, None),
+                                                   ("Slot Trim", 0.0, -12, 12, 0.1, "°"),
+                                                   ("Calibration Turns", 1, 1, 10, 1, None)]:
+                a("number", name, value, category=CONFIG, uom=uom, min_value=lo, max_value=hi, step=step)
+            a("switch", "Reverse Motor", False, category=CONFIG)
+            a("switch", "Reverse Encoder", False, category=CONFIG)
+            for name in ["Start", "Yes", "No", "Nudge 0.1°", "Nudge 1°", "Overshot", "Zero", "Run Turns", "Measured",
+                         "Next Slot"]:
+                a("button", f"Calibration {name}")
+            a("text_sensor", "Calibration Step", "Calibration mode is off")
+            a("text_sensor", "Motor Fault", "none", category=DIAGNOSTIC)
+            a("sensor", "Encoder Ticks", 1113, category=DIAGNOSTIC)
+            a("sensor", "Motor Loop Max Gap", 1.2, category=DIAGNOSTIC, uom="ms")
+            a("number", "Declared Tray Position", 0, icon="mdi:numeric", min_value=0, max_value=14, step=1)
+            a("button", "Declare Tray Position")
+        elif not args.no_calibration:  # calibration.yaml
             a("switch", "Calibration Mode", False, icon="mdi:tune")
             a("select", "Calibration Position", "0", icon="mdi:numeric", options=[str(i) for i in range(7)])
             a("number", "Calibration Offset", 0.0, icon="mdi:angle-acute", uom="°", decimals=1, min_value=-15,
@@ -227,9 +251,10 @@ class Feeder:
             a("number", "Declared Tray Position", 0, icon="mdi:numeric", min_value=0, max_value=6, step=1)
             a("button", "Declare Tray Position")
         # hardware.yaml, and the pin selects of button.yaml and status_led.yaml
-        a("select", "Board", "Build Default", icon="mdi:developer-board", category=CONFIG,
-          options=["Build Default"] + [name for name, _ in BOARD_PRESETS] + ["Custom"])
-        a("select", "Servo Pin", "GPIO1", icon="mdi:pin", category=CONFIG, options=PIN_OPTIONS)
+        if not self.disc:  # the disc build leaves hardware.yaml out (its pins are YAML-only)
+            a("select", "Board", "Build Default", icon="mdi:developer-board", category=CONFIG,
+              options=["Build Default"] + [name for name, _ in BOARD_PRESETS] + ["Custom"])
+            a("select", "Servo Pin", "GPIO1", icon="mdi:pin", category=CONFIG, options=PIN_OPTIONS)
         a("select", "Button Pin", "GPIO2", icon="mdi:gesture-tap-button", category=CONFIG, options=["none"] + PIN_OPTIONS)
         a("select", "LED Pin", "GPIO21", icon="mdi:led-outline", category=CONFIG, options=["none"] + PIN_OPTIONS)
         a("text_sensor", "Pins In Use", "", icon="mdi:pin-outline", category=DIAGNOSTIC)
@@ -328,7 +353,7 @@ class Feeder:
         return out
 
     def remaining(self) -> int:
-        return 6 - self.position
+        return self.capacity - self.position
 
     def fed_24h(self) -> int:
         return sum(n for t, n, _ in self.history if t > time.time() - 86400)
@@ -341,12 +366,12 @@ class Feeder:
         if self.hold_until is not None and self.hold_until != math.inf and time.time() > self.hold_until:
             self.hold_until = None
         state = ("calibrating" if self.calibrating else "unknown" if self.unknown
-                 else "empty" if self.position >= 6 else "loaded")
+                 else "empty" if self.position >= self.capacity else "loaded")
         s("sensor", "Tray Position", self.position)
         s("sensor", "Portions Remaining", self.remaining())
         midnight = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
         s("sensor", "Portions Fed Today", sum(n for t, n, _ in self.history if t >= midnight))
-        s("sensor", "Runway", None if self.position >= 6 else float(self.remaining() // 2))
+        s("sensor", "Runway", None if self.position >= self.capacity else float(self.remaining() // 2))
         s("text_sensor", "Tray State", state)
         nxt = time.time() + 3 * 3600
         s("text_sensor", "Next Feed", self.fmt(nxt - nxt % 60))
@@ -362,14 +387,14 @@ class Feeder:
           or "none")
         s("text_sensor", "Active Schedule", self.summary("ABC".index(self.get("select", "Active Profile"))))
         s("text_sensor", "One-shot Feeds", "; ".join(f"{self.fmt(t)} x{n}" for t, n in self.oneshots) or "none")
-        s("text_sensor", "Tray Empty On", "empty now" if self.position >= 6 else self.fmt(time.time() + 2 * 86400))
+        s("text_sensor", "Tray Empty On", "empty now" if self.position >= self.capacity else self.fmt(time.time() + 2 * 86400))
         faults = []
         if self.unknown:
             faults.append("tray position unknown")
-        if self.position >= 6:
+        if self.position >= self.capacity:
             faults.append("tray empty")
         s("text_sensor", "Faults", "; ".join(faults) or "none")
-        s("binary_sensor", "Needs Food", self.position >= 6)
+        s("binary_sensor", "Needs Food", self.position >= self.capacity)
         s("number", "Portions Counted (24 h)", self.fed_24h())
         guard = self.guard(1)
         s("text_sensor", "Feed Guard", "ready" if guard == "ok" else guard)
@@ -414,8 +439,11 @@ class Feeder:
               f"calibration={int(self.get('switch', 'BLE Can Change Calibration'))}")
         if "switch/Calibration Mode" in self.entities:
             s("switch", "Calibration Mode", self.calibrating)
+        if "select/Calibration Position" in self.entities:
             s("select", "Calibration Position", str(self.cal_pos))
             s("number", "Calibration Offset", self.offsets[self.cal_pos])
+        if self.disc and not self.calibrating:
+            s("text_sensor", "Calibration Step", "Calibration mode is off")
 
     def network_restart(self) -> bool:
         return (self.network["name_saved"], self.network["ap"]) != self.network_boot
@@ -440,7 +468,7 @@ class Feeder:
             return "calibrating"
         if self.unknown:
             return "position unknown"
-        if self.position >= 6:
+        if self.position >= self.capacity:
             return "tray empty"
         if time.monotonic() - self.last_feed_mono < self.get("number", "Minimum Gap Between Feeds"):
             return "too soon"
@@ -492,6 +520,19 @@ class Feeder:
                 self.feed(1)
             elif name == "Feed Selected Portions":
                 self.feed(int(self.get("number", "Manual Portions")))
+            elif self.disc and name.startswith("Calibration "):
+                # A plausible next step only: the device's own flow is mechanism_n20.cpp (tests/test_n20.cpp).
+                step = {"Calibration Start": "Did the disc turn the way it feeds? Yes or No.",
+                        "Calibration Yes": "Put one empty slot exactly over the hole (Nudge, Overshot), then press Zero.",
+                        "Calibration Zero": "Zeroed. Press Turns: the disc turns 1 time(s) and stops near the same slot.",
+                        "Calibration Run Turns": "Nudge until the same slot is centred over the hole again, then "
+                                                 "press Measured.",
+                        "Calibration Measured": "8351 ticks per turn. Press Next: the disc moves to each slot as a "
+                                                "feed does.",
+                        "Calibration Next Slot": "Slot 1 of 15: centred over the hole? Next if so. If every slot is "
+                                                 "off the same way, change Slot Trim."}.get(name)
+                if self.calibrating and step:
+                    self.set("text_sensor", "Calibration Step", step)
             elif name == "Tray Reload":
                 self.position, self.unknown = 0, False
                 self.log("I", "precision_feeder", "Tray reloaded: position 0, scheduled feeding paused")
@@ -898,6 +939,8 @@ def main():
     ap.add_argument("--no-network", action="store_true", help="as a build without the network_info package")
     ap.add_argument("--no-ble", action="store_true", help="as a build without the ble_gatt package")
     ap.add_argument("--unknown", action="store_true", help="start with the tray position unknown")
+    ap.add_argument("--mechanism", choices=["servo", "n20"], default="servo",
+                    help="the servo fan tray (default) or the direct-drive disc (variant/n20-direct-drive)")
     ap.add_argument("--ping", type=float, default=10.0, help="seconds between keep-alive pings (default 10)")
     args = ap.parse_args()
 
