@@ -15,7 +15,7 @@ own feeder.*
   **Active Profile**. Keep different plans in them, for example "normal",
   "holiday" and "sunset only", and switch with one click.
 - Each profile has **four events** (1 to 4). An event is one feeding: *when* (a
-  clock time, or so long before or after sunrise or sunset), *how much* (1 to 6
+  clock time, or so long before or after sunrise or sunset), *how much* (1 to 6, the tray's capacity
   portions) and *on which weekdays*.
 - Each profile also has two whole-profile settings: **every N days** (feed every
   day, every second day, ...) and **fast days** (weekdays with no feeding at all).
@@ -58,7 +58,7 @@ steps below set the time first and switch the event on last.
    2. **Event Time**: `08:30` for a clock event; `+01:30` or `-00:45` for a
       sun event (see the field reference).
    3. **Event Days**: `all`, `weekdays`, `mon,wed,fri`, ...
-   4. **Event Portions**: 1 to 6.
+   4. **Event Portions**: 1 to 6 (the tray's capacity).
    5. **Event Enabled**: switch it on last. The event is live from now on.
 5. Switch off any event you do not want (all four start switched off, at 08:00,
    12:00, 18:00 and 20:00 with 1 portion every day).
@@ -82,7 +82,7 @@ feeder's log says why (for example `Event time '25:00' not understood`).
 | Event Anchor | what the time is measured from | clock, sunrise, sunset |
 | Event Time | clock: time of day. Sunrise/sunset: offset from the sun event | clock: `HH:MM`, 00:00 to 23:59 (`8:30` is fine). Sun: `+HH:MM` or `-HH:MM`, up to 12 hours either way; `+90` means plus 90 minutes; no sign means plus |
 | Event Days | weekdays this event feeds on | `all` (or `daily`), `none`, `weekdays` (Mon to Fri), `weekend`, or day names separated by commas or spaces: `mon,wed,fri` (`monday` works too) |
-| Event Portions | portions this event feeds | 1 to 6 |
+| Event Portions | portions this event feeds | 1 to 6 (the tray's capacity) |
 | Event Enabled | whether the event runs | on / off |
 | Active Profile | the profile the feeder runs | A, B, C |
 | Scheduler | runs the active profile's events | on / off |

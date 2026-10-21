@@ -6,7 +6,8 @@ Guidance for AI agents (and humans) working on this repository.
 
 ESPHome firmware for the Precision Feeder Rev2 fish feeder, a servo-driven
 tray with 7 positions (position 0 closed, positions 1 to 6 open, so 6 portions
-per load). It recreates the original Arduino firmware with full parity, then
+per load). Since 2.1.0 what moves the tray is a *mechanism* (the servo fan tray is
+the reference one), so other motor formats can be added; see "Adding a mechanism". It recreates the original Arduino firmware with full parity, then
 improves on it: minute-accurate on-board scheduling with sunrise/sunset
 anchors, three profiles, a source-agnostic feed guard, Home Assistant control,
 and an optional BLE GATT control plane for external controllers.
@@ -38,9 +39,11 @@ substitutions.
 - Do not add dependencies with incompatible licences.
 
 ### Scope of the hardware
-- Only hardware on the ESP32 board is supported, plus the servo and the
-  **optional** push button. No external RTC, sensors or I2C add-ons. Do not add
-  support for them without an explicit decision.
+- Only hardware on the ESP32 board is supported, plus the tray's motor (the servo,
+  or another mechanism added under "Adding a mechanism") and the **optional** push
+  button. A motor's own feedback (an encoder built onto it) and its driver are part
+  of the motor. No external RTC, sensors (end stops, index switches, load cells) or
+  I2C add-ons. Do not add support for them without an explicit decision.
 - The button is optional. Everything must work with no button fitted.
 - Position is open-loop. Never assume the tray position is correct after an
   interrupted move; follow the tray state machine in DESIGN.md.
@@ -73,7 +76,9 @@ substitutions.
 ### Configuration and style
 - Every pin is a substitution with a documented default. No hard-coded GPIOs. Since
   2.0.0 the substitution is the starting value: a pin saved on the device (Device record,
-  DESIGN.md section 2.1) wins, and only pins `check_pin()` accepts can be saved.
+  DESIGN.md section 2.1) wins, and only pins `check_pin()` accepts can be saved. The one
+  exception (2.1.0, D4): the motor pins of a mechanism other than the servo are YAML-only;
+  the mechanism reserves them (`reserve_pin`) so the button and LED cannot be moved onto them.
 - Every feature is a package or build option with comments saying what the
   setting does and when to change it. Optional features (BLE, HA time, button,
   web UI) must compile out cleanly.
@@ -96,14 +101,14 @@ substitutions.
 - Run `tools/check.sh` after any change: it builds and runs every host test (C++ with
   -Werror, and Python) and validates both examples with ESPHome; CI runs the same script.
   The individual commands, if you need one: With any C++17 compiler, from `tests/`:
-  `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp`,
+  `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`; and
   `python3 -m unittest test_precision_feeder_ble test_make_release` in `tools/`. The C++ and Python
   protocol tests share golden byte vectors; change them together.
 - Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
   `feeder_schedule.cpp`, `feeder_text.cpp`, `feeder_password.cpp`, `feeder_pins.cpp` and `feeder_network.cpp`; the timezone parser is `tz_rules.h`, SHA-256 and
-HMAC are `crypto.h`), which must stay free of
+HMAC are `crypto.h`; what moves the tray is a mechanism, `mechanism.h`, the servo's in `mechanism_servo.*`), which must stay free of
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
   `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.
@@ -124,6 +129,62 @@ HMAC are `crypto.h`), which must stay free of
   owner's explicit say-so. A manual run of the Release workflow only builds.
 - Do not invent ESPHome options or BLE behaviour from memory; check the docs.
 
+## Adding a mechanism
+
+A mechanism is everything that turns "drop one portion" into motion: a motor, its
+driver and the tray or disc it moves. The servo fan tray (`mechanism_servo.*`,
+`packages/mechanism_servo.yaml`) is the reference; read DESIGN.md section 3.0 and
+[docs/MECHANISMS.md](docs/MECHANISMS.md) (the checklist) before adding one.
+
+1. **Implement the interface, nothing more.** A mechanism implements `Mechanism`
+   (`mechanism.h`): `capacity`, `feed_one`, `reload`, `restore`, `poll`, `stop`,
+   `release`, `settle_ms`, and optionally calibration points and a tuning table. It
+   never calls the guard, the scheduler, the history or the save hooks, and never
+   starts a move by itself. The core decides; the mechanism carries out one verb at a
+   time and reports `BUSY`, `DONE` or `FAULT`.
+2. **Logic in core, pins in the adapter.** Its logic goes in
+   `components/precision_feeder/mechanism_<name>.{h,cpp}`, free of ESPHome includes
+   (`check.sh` builds `mechanism_*.cpp` into the host tests). It reaches hardware only
+   through hooks named for it, implemented in the adapter, with fakes in the tests. A
+   control loop faster than ESPHome's main loop runs in its own task in the adapter;
+   the pure part takes the time and its inputs as arguments so the host can test it.
+3. **Faults are the safe side.** A fault, a timeout or an interrupted move ends with
+   the motor stopped and `poll()` answering `FAULT`; the core then marks the position
+   unknown. A motor that can keep turning must have a travel limit, a move timeout
+   worked out from the distance, and a watchdog on its control loop. It never retries
+   a feed and never reverses past the slot it started from (a bounded wiggle aside).
+   A missed meal beats an overfeed.
+4. **Tuning is a table.** Every tuning value is declared once in the mechanism's
+   `TuningParam` table (key, name, unit, limits, default, scale) and changed only
+   through `FeederCore::set_tuning`, which enforces the limits for Home Assistant, the
+   web app and flash. Its YAML entities repeat the limits and `tests/test_consistency.py`
+   checks them. Changing the table's entries or order means a new `tuning_layout()`;
+   saved values of another layout are never read as the new one.
+5. **One package, one name.** A mechanism has a unique `name()` (the Mechanism
+   entity, the Tuning record), one package `packages/mechanism_<name>.yaml` (its
+   `tray_capacity`, pins as substitutions with documented defaults, its tuning and
+   calibration entities, protected and in the config category), and an example.
+   `core.yaml` includes exactly one mechanism package; a build for another mechanism
+   changes that one line. Its motor pins go through `check_pin()` and `reserve_pin()`.
+6. **The web app follows the device.** A mechanism adds its description to
+   `MECHANISMS` in `web/src/mechanisms.js` under its `name()` (its tray drawing, its
+   wording, its calibration cards as data) and lists its entities in
+   `web/src/entities.js`. Shared pages are not edited for a mechanism. A description
+   holds layout and wording only: limits and behaviour come from the device.
+7. **Tests and the bench.** It comes with host tests against a simulated motor
+   (normal moves, a full load fed to empty, every fault, a stop mid-move) and a section
+   in docs/BENCH.md. Bench code it was tuned with may be committed under
+   `tests/reference/` with the project's header. The servo's golden trace
+   (`tests/servo_golden.h`) must keep passing.
+8. **Where it lives.** A mechanism for one person's build lives on a
+   `variant/<name>` branch: never tagged, no prebuilt binaries, its own
+   `fw_variant` and version suffix (`2.1.0-<name>.N`), and a README banner. It moves
+   to main only with the owner's decision, and then joins CI and, if wanted, the
+   release.
+9. **Docs.** DESIGN.md gets a subsection under section 3 for it (geometry, motion,
+   faults, calibration, decisions), docs/CALIBRATION.md a section, CHANGELOG.md an
+   entry.
+
 ## Working agreements
 
 - Prefer the smallest change that does the job. Do not refactor unrelated code.
@@ -137,14 +198,15 @@ README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
 docs/         user guides: INSTALL.md (prebuilt firmware), BUILDING.md (YAML builds), USING.md, WEB_UI.md,
               SCHEDULING.md, CALIBRATION.md, SECURITY.md; PROTOCOL.md (BLE, authoritative); BENCH.md (hardware
               results); plans/ (release plans)
-components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; feeder_schedule.cpp
+components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; mechanism.h the mechanism
+              interface and mechanism_servo.* the servo fan tray; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; feeder_password.cpp
               settings password, BLE key and BLE permissions; feeder_pins.cpp runtime pins and pin validator;
               feeder_network.cpp name, access-point password and Wi-Fi checks; calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
               and precision_feeder_ble/ (optional BLE protocol: protocol.h and BleEngine in
               engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)
-packages/     reusable YAML packages
+packages/     reusable YAML packages (core.yaml includes the mechanism's: mechanism_servo.yaml)
 examples/     basic.yaml, ble.yaml
 firmware/     full.yaml, no-ble.yaml: the prebuilt binaries (tools/build_bins.sh; nothing secret may reach them)
 install/      index.html: the install page, published to GitHub Pages by .github/workflows/release.yml

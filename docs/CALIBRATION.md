@@ -1,5 +1,8 @@
 # Calibration
 
+This guide is for the servo fan tray, the mechanism `main` builds. A feeder with another mechanism (another
+motor and tray, [MECHANISMS.md](MECHANISMS.md)) has its own section here or on its branch.
+
 The tray is moved by a servo to absolute angles: 7 positions, 25 degrees apart
 across a 175 degree sweep (both are configurable). Mechanical tolerances mean
 each position needs a small correction.

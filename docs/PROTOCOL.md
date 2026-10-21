@@ -57,10 +57,17 @@ Base `02dd1dd9-ba75-4bbc-bdea-306d2101xxxx`; `xxxx` is:
 
 `protocol u8, capabilities u16, positions u8, profiles u8, events_per_profile u8`
 
-Currently `02 | caps | 07 | 03 | 04`. Capability bits: 0 solar anchors,
+Currently `02 | caps | 07 | 03 | 04` for the servo tray. Capability bits: 0 solar anchors,
 1 clock push (`SET_TIME`) available, 2 profile editing, 3 calibration,
 4 hold-until-cancelled, 5 servo pulse range settable (Config keys 10 and 11),
-6 writes must be authenticated. **If your client sees a protocol version it does
+6 writes must be authenticated.
+
+`positions` is the number of tray positions, 0 to `positions - 1`: the portions per load plus one (7 for the servo
+tray, so 6 portions). Since firmware 2.1.0 a feeder can have another mechanism (another motor and tray); it reports
+its own `positions`, and the ranges that depend on it follow: SET_POSITION, event portions, Config keys 5 and 6 go up
+to `positions - 1`. Bits 3 (calibration) and 5 (pulse range) are set only when the mechanism is the servo, whose
+seven slots the Calibration characteristic is indexed by; without them, Calibration writes and queries answer
+INVALID_ARG and Config keys 10 and 11 UNSUPPORTED. Nothing in the packet layouts changed, so this is still protocol 2. **If your client sees a protocol version it does
 not know, do not send commands.**
 
 ## Authentication
@@ -297,7 +304,7 @@ immediately; they are answered on Response with this `seq`, opcode `0x80`,
 - Event `01, profile, event, flags, offset i16, portions, days` (8 bytes).
   `flags` bit 0 enabled, bits 1 to 2 anchor (0 clock, 1 sunrise, 2 sunset).
   `offset` is minutes after midnight (0 to 1439) for a clock event, or signed
-  minutes from the sun (-720 to +720). `portions` 1 to 6; `days` is a weekday
+  minutes from the sun (-720 to +720). `portions` 1 to 6 (`positions - 1`); `days` is a weekday
   mask like `fast_mask`.
 - Query `02, profile, event` (3 bytes; event `FF` means the header): selects which
   record the next **read** returns, in the formats above (no seq, no tag).
@@ -314,8 +321,8 @@ key).
 | 2 | seconds between portions of one feed | 1 to 60 |
 | 3 | reload pause, minutes | 0 to 60 |
 | 4 | refill interval, days | 1 to 30 |
-| 5 | rolling 24 h portion cap | 1 to 6 |
-| 6 | max portions per command | 1 to 6 |
+| 5 | rolling 24 h portion cap | 1 to 6 (`positions - 1`) |
+| 6 | max portions per command | 1 to 6 (`positions - 1`) |
 | 7 | scheduler enabled | 0 or 1 |
 | 8 | latitude, 1e-5 degree | -9,000,000 to 9,000,000 |
 | 9 | longitude, 1e-5 degree | -18,000,000 to 18,000,000 |

@@ -119,6 +119,7 @@ Then, either way:
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | lining up the tray |
 | [docs/SECURITY.md](docs/SECURITY.md) | the security model: who can change what, and the limits |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the BLE protocol, for controller and app developers |
+| [docs/MECHANISMS.md](docs/MECHANISMS.md) | adapting the firmware to another motor or tray (a mechanism) |
 | [DESIGN.md](DESIGN.md) | the design and the decisions behind it |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in each firmware version |
 | [docs/BENCH.md](docs/BENCH.md) | what has been tested on real hardware |

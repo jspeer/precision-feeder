@@ -1,8 +1,20 @@
 # Plan: a feeder mechanism interface, then a direct-drive N20 variant
 
-Status: **draft, not started. Every decision is settled (2026-10-20) except the D6 datasheet check.** No work
-starts until the owner says go. The first commit is this plan, on `release/2.1.0-mechanism`: the owner already runs a
-servo feeder, so nothing replaces a working binary before it has been on its own branch. Nothing in this plan is built.
+Status: **stage 1 built on `release/2.1.0-mechanism` (2026-10-21), host-tested; not merged, not on hardware.**
+Stage 2 not started. D6 checked (GPIO3: Espressif's ESP-IDF JTAG guide for the ESP32-S3). Nothing replaces a
+working binary before it has been on its own branch.
+
+Stage 1 as built, where it differs from the steps below (DESIGN.md section 13 has the same list):
+- S1.4: the tuning values got their own record, `Tuning` (`precision_feeder.tuning.v1`), instead of a block in a
+  Calibration version 2. No existing record changes layout, and a servo build never writes the new one.
+- S1.5: as D4 says, no Device record change; motor pins are reserved (`reserve_pin`). Pins by role were not needed.
+- S1.6: the servo's YAML moved into `packages/mechanism_servo.yaml`, included by `core.yaml` (a nested package), so
+  a build for another mechanism changes one line. `precision_feeder`'s `output:` is optional.
+- S1.7: the mechanism descriptions are one file, `web/src/mechanisms.js`, not a folder (the 64 KB budget). Cards
+  are `{title, hint, settings, buttons, readings}`.
+- Not done in stage 1, left for stage 2: registering a mechanism from YAML (`set_mechanism()` from a component's
+  code generation), and runtime button and LED pins in a build with no servo pin (`apply_pins()` returns early
+  without one). Nothing in this plan is built.
 Stage 1 changes the main firmware; stage 2 is a branch for one specific build that others can copy. Decisions
 still open are marked **open**; the rest are the owner's answers of 2026-10-20 and are logged in
 [DESIGN.md](../../DESIGN.md) section 13 when the step that needs them lands. Each step updates DESIGN.md, the

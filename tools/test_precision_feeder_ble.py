@@ -107,6 +107,12 @@ class GoldenVectors(unittest.TestCase):
     def test_info(self):
         i = pf.parse_info(b(2, 0x7F, 0x00, 7, 3, 4))
         self.assertEqual((i.protocol_version, i.capabilities, i.positions, i.profiles, i.events_per_profile), (2, 0x7F, 7, 3, 4))
+        self.assertTrue(i.has_calibration)
+        # Another mechanism (firmware 2.1.0): 15 positions, no servo calibration or pulse range.
+        d = pf.parse_info(b(2, 0x57, 0x00, 15, 3, 4))
+        self.assertEqual(d.positions, 15)
+        self.assertFalse(d.has_calibration)
+        self.assertFalse(d.capabilities & pf.CAP_SERVO_PULSE)
 
     def test_authentication_golden_vectors(self):
         # The same vectors as tests/test_protocol.cpp, so the firmware and the client agree byte for byte.

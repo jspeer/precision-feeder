@@ -349,13 +349,23 @@ def parse_event_log(data: bytes) -> EventLog:
     return EventLog(*struct.unpack("<IBBB", data))
 
 
+# Info capability bits (docs/PROTOCOL.md, Info).
+CAP_CALIBRATION = 1 << 3   # the servo's per-slot calibration offsets (the Calibration characteristic)
+CAP_SERVO_PULSE = 1 << 5   # the servo pulse range (Config keys 10 and 11)
+CALIBRATION_SLOTS = 7      # the servo's slots, which the Calibration characteristic is indexed by
+
+
 @dataclass
 class Info:
     protocol_version: int
     capabilities: int
-    positions: int
+    positions: int  # tray positions 0 to positions - 1: portions per load + 1 (7 for the servo tray)
     profiles: int
     events_per_profile: int
+
+    @property
+    def has_calibration(self) -> bool:
+        return bool(self.capabilities & CAP_CALIBRATION)
 
 
 def parse_info(data: bytes) -> Info:

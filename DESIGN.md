@@ -97,7 +97,7 @@ so other builds can move them; since 2.0.0 they can also be chosen on the device
 | `button_pin` | `GPIO2` | optional button to GND, internal pull-up. Only used if the button package is included. |
 | `status_led_pin` | `GPIO21` | onboard WS2812 (fixed by the board) |
 
-Avoid: GPIO0 (BOOT, strapping, not broken out), GPIO3, 45, 46 (strapping),
+Avoid: GPIO0 (BOOT, strapping, not broken out), GPIO45, 46 (strapping),
 GPIO43/44 (UART0), GPIO33 to 37 (not broken out). GPIO1 floats briefly at
 power-up, so the servo may twitch once at boot. A 10 kOhm pull-down on the
 signal line prevents that. The board is powered from USB-C or 3.7 to 6 V on
@@ -126,10 +126,14 @@ pin saved on the device wins, and "Build Default" goes back to the YAML's.
   `status_led_fitted()` first.
 - **The validator** (`check_pin`, `feeder_core.h`, host-tested), for the ESP32-S3:
   - refused: not on the chip (22 to 25), the SPI flash and PSRAM (26 to 32), USB
-    (19, 20), strapping pins (0, 3, 45, 46);
-  - accepted with a warning: 33 to 37 (octal flash or PSRAM on some modules, for
+    (19, 20), strapping pins that decide how it boots (0, 45, 46);
+  - accepted with a warning: 3 (a strapping pin only for the JTAG source, read at reset only when the
+    `STRAP_JTAG_SEL` eFuse is burned, which it is not by default: Espressif's ESP-IDF JTAG guide for the ESP32-S3;
+    firmware 2.1.0, D6), 33 to 37 (octal flash or PSRAM on some modules, for
     example N8R8) and 43, 44 (UART0: boot messages at every reset);
-  - two parts on one pin are refused; the servo always needs a pin.
+  - two parts on one pin are refused; the servo always needs a pin;
+  - pins a mechanism other than the servo drives are set in its YAML only (D4, firmware 2.1.0); it reserves them
+    (`reserve_pin`), and the button and LED are refused on them.
   The pin selects offer exactly the pins not refused (`tests/test_consistency.py`).
 - **A bad saved record** (a refused pin, or a clash) falls back to the build's pins at
   boot, with a warning in the log, so a damaged record cannot stop the feeder.
@@ -143,6 +147,43 @@ pin saved on the device wins, and "Build Default" goes back to the YAML's.
 - Pins are protected settings (section 10.1). BLE has no access to them.
 
 ## 3. Mechanism and magazine model
+
+### 3.0 Mechanisms (firmware 2.1.0)
+
+What moves the tray is a **mechanism** (`components/precision_feeder/mechanism.h`). The core asks it for a few verbs
+and keeps everything else itself:
+
+| Verb | What the mechanism does | The servo fan tray |
+|---|---|---|
+| `capacity()` | portions per load | 6 |
+| `feed_one(from)` | drop one portion: position `from` to `from + 1`, wiggle included | step to the next slot, back, forward |
+| `reload()` | get the tray ready to load (afterwards position 0) | back to the closed slot 0 |
+| `restore(p)` | put or keep the tray at `p` (boot, declare, end of calibration) | command the servo to slot `p` |
+| `poll()` | the move started last: BUSY, DONE, or FAULT (stopped; position not known) | DONE after the step times |
+| `stop()`, `release()`, `settle_ms()` | abort; let go of the motor after it has been still | release the PWM after `detach_delay` |
+| `calibration_points()`, `calibration_show(i)` | points a user fine-tunes in calibration mode | the 7 slots |
+| tuning table | `TuningParam` values: name, unit, limits, default | none |
+
+- **The core keeps:** the feed guard, persist-intent-before-moving, the position (portions fed since the last reload,
+  0 to `capacity()`), `UNKNOWN` after an interrupted move, the history and the schedule. A mechanism never starts a
+  move by itself and never sees the guard. A FAULT takes the existing mid-step abort path: the portion counts as fed,
+  later portions of the feed are uncounted, the position is `UNKNOWN` (Faults says "motor fault: ...").
+- **Portions per load** come from `capacity()`: remaining, EMPTY, the guard limits (daily cap, portions per command,
+  event and one-shot portions: 1 to capacity) and the BLE ranges. The YAML repeats it as `${tray_capacity}`, set by
+  the mechanism's package.
+- **One mechanism per firmware, chosen in the YAML** (owner, 2026-10-20): `core.yaml` includes the mechanism's
+  package (`packages/mechanism_servo.yaml` on main). A build for another mechanism changes that one line.
+- **Tuning values** of a mechanism are saved in their own record (`Tuning`, section 9.2), checked against the
+  mechanism's table by one setter (`set_tuning`). A record for another mechanism or table layout is not used (and is
+  left as it is until a value changes). The servo has no tuning table: its settings are the YAML's, and its pulse
+  range and offsets stay in the Calibration record, so a servo build never writes the Tuning record.
+- **Entities:** Mechanism (`servo`) and Capacity (6), both diagnostic. The web app picks the mechanism's tray drawing,
+  wording and calibration cards by Mechanism (`web/src/mechanisms.js`), the servo's when a firmware reports none.
+- Adding one: AGENTS.md, "Adding a mechanism", and [docs/MECHANISMS.md](docs/MECHANISMS.md). The first other
+  mechanism is a direct-drive N20 disc on the branch `variant/n20-direct-drive`
+  ([docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md), stage 2).
+
+### 3.0.1 The servo fan tray
 
 Facts taken from the original firmware and the builder's reading of the
 Printables instructions (verify on the physical print):
@@ -225,8 +266,8 @@ Every feed request, whatever its source, goes through one gate:
 | Rule | Default | Notes |
 |---|---|---|
 | Minimum gap between feeds | 60 s | the reference also paused 1 min after each feed |
-| Rolling 24 h cap | 4 portions | configurable 1 to 6. The count it uses can be edited in Home Assistant for debugging and recovery (decision 2026-10-14, section 13) |
-| Max portions per command | 1 | configurable 1 to 6 ("drop all" is opt-in) |
+| Rolling 24 h cap | 4 portions | configurable 1 to the mechanism's capacity (6 for the servo). The count it uses can be edited in Home Assistant for debugging and recovery (decision 2026-10-14, section 13) |
+| Max portions per command | 1 | configurable 1 to the capacity ("drop all" is opt-in) |
 | Tray state | must be `LOADED` | empty or unknown rejects |
 | Calibration lockout | on | |
 | Hold or reload pause active | scheduled feeds only | manual feeds still allowed |
@@ -260,7 +301,7 @@ Per event:
 - `anchor`: `clock`, `sunrise`, `sunset`
 - `offset`: for `clock`, minutes after midnight (0 to 1439); for solar
   anchors, signed minutes from -720 to +720
-- `portions`: 1 to 6, subject to the guard cap
+- `portions`: 1 to the capacity (6 for the servo), subject to the guard cap
 - `days`: 7-bit weekday mask
 
 Global:
@@ -532,6 +573,10 @@ sets at run time. 2.0.0 laid out every field the milestones needed; 2.0.2 added 
 | `password_scheme`, `password_salt`, `password_hash` | settings password (0: none) | | N2 |
 | `ntp_servers` | up to three NTP servers, "a,b,c" (version 2) | empty | 2.0.2 |
 
+The mechanism's tuning values (firmware 2.1.0) are not in the Device record but in their own, `Tuning`
+(`precision_feeder.tuning.v1`): the mechanism's name, its table layout and up to 16 values. Only a mechanism with a
+tuning table creates it; a value is checked against the table when it is set and again when it is loaded.
+
 - **The YAML stays in charge until the device is changed.** A fresh record says "use
   the build's value" everywhere, so a YAML build keeps following edits to its YAML. A
   value set on the device wins. The record is saved at the first boot that has none
@@ -796,21 +841,24 @@ precision-feeder/
                                     (runtime pins, ESP32-S3 pin validator), feeder_network.cpp
                                     (name, access-point password, Wi-Fi checks), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
-                                    parser), firmware_upload.h (the checked upload); precision_feeder.*
+                                    parser), firmware_upload.h (the checked upload); mechanism.h (the
+                                    mechanism interface), mechanism_servo.* (the servo fan tray); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
   components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
                                     BleEngine (engine.*: every handler), all host-tested;
                                     precision_feeder_ble.* is the thin ESPHome adapter
-  packages/            core, status, controls, schedule_editor, calibration,
+  packages/            core (which includes mechanism_servo), status, controls, schedule_editor, calibration,
                        status_led, web_server, button, hardware, time_homeassistant,
                        diagnostics, network_info, ble_gatt, api_key_on_device
   examples/            basic.yaml, ble.yaml, secrets.example.yaml
   firmware/            full.yaml, no-ble.yaml: the prebuilt binaries (built by tools/build_bins.sh)
   install/             index.html: the install page (ESP Web Tools), published with each release
   .github/workflows/   ci.yml (tools/check.sh), release.yml (binaries, GitHub release, Pages)
-  web/                 the web app: src/ (plain JavaScript and CSS, no dependencies), dist/ (built by
+  web/                 the web app: src/ (plain JavaScript and CSS, no dependencies; mechanisms.js holds each
+                       mechanism's dial, wording and cards), dist/ (built by
                        tools/build_web.py, committed, embedded by packages/web_server.yaml)
-  tests/               host-side C++ tests (core, logic, protocol, BLE engine); test_consistency.py;
+  tests/               host-side C++ tests (core, logic, protocol, BLE engine); servo_golden.h (the servo's
+                       2.0.2 behaviour, which test_core checks); test_consistency.py;
                        test_web.mjs (the web app's parsers, under Node); tz_golden.h (generated by
                        tools/gen_tz_golden.py)
   tools/               Python reference client: precision_feeder_ble.py (entry point) and
@@ -1000,6 +1048,25 @@ precision-feeder/
   - The bins' BLE name is "Feeder" (with the MAC suffix, "Feeder-a1b2c3"): ESPHome refuses more than 13 characters
     before the suffix.
 
+- **Mechanisms (firmware 2.1.0; owner, 2026-10-20; [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md)):**
+  - D1: a Mechanism interface of verbs (section 3.0); one mechanism per firmware, chosen in the YAML (a dual build
+    may be tried later). The servo moved behind it with its behaviour unchanged: a golden trace recorded from 2.0.2
+    (tests/servo_golden.h) must still match exactly.
+  - D1a: the saved position means portions fed since reload, so remaining = capacity − position; no State change.
+  - D1b: the guard limits go up to the mechanism's capacity instead of 6.
+  - D3: no existing YAML, saved setting or servo behaviour breaks (the owner runs a servo feeder).
+  - D4: a non-servo mechanism's motor pins are YAML-only; no Device record change. Reverses, for those pins only,
+    "a pin saved on the device wins" (AGENTS.md).
+  - D5: BLE stays protocol 2 while no packet layout or opcode changes: Info's positions and its calibration and
+    pulse-range capability bits follow the mechanism; Config keys 10 and 11 answer UNSUPPORTED without the servo.
+  - D6: GPIO3 accepted with a warning (section 2.1), after checking Espressif's documentation.
+  - D14: AGENTS.md allows further mechanisms under its "Adding a mechanism" rules; a motor's own encoder is part of
+    the motor, a separate sensor still needs its own decision.
+  - D15: one web app for every build, with a description per mechanism.
+  - Built differently from the plan: the tuning values got their own record instead of a block in a Calibration
+    version 2, so no existing record changes layout; the web app's descriptions are one file, `mechanisms.js`, not a
+    folder, to stay within the 64 KB budget.
+
 ## 14. Open items
 
 1. ~~Polar/no-sun fallback.~~ Decided 2026-10-14: fixed 06:00 / 18:00 fallback (section 5.2).
@@ -1158,8 +1225,17 @@ precision-feeder/
 21. Factory reset: listed among the protected settings (owner, 2026-10-15) but not built in 2.0. Wiping a feeder is
     an erase-and-flash from the install page (docs/INSTALL.md, Recovery). To decide: a protected "factory reset" in
     the web app (erase our records and ESPHome's Wi-Fi slot), or keep erase-and-flash.
+22. 2.1.0 on the bench (servo): host tests only so far. To check on the feeder: an upgrade from 2.0.2 keeps settings,
+    calibration, pins and the tray state; a feed, a multi-portion feed, reload, calibration and a power cut mid-feed
+    behave as before; the web app's Dashboard and Maintenance; the BLE selftest; dump_config shows "Mechanism:
+    servo, 6 portions per load". And GPIO3 as the button pin: boots normally with the button held at power-up.
 
-## 15. Implementation status (v2.0.2)
+## 15. Implementation status (v2.1.0)
+
+2.1.0 (the mechanism interface, section 3.0) is host-tested only: no hardware was attached while it was built. The
+servo's behaviour is checked against a trace recorded from 2.0.2 (every servo command, release and saved tray state,
+with its time), and both examples' resolved ESPHome configuration is unchanged apart from the new `tray_capacity`.
+Still to do on the bench: open item 22.
 
 Everything in sections 3 to 10 is built. On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
@@ -1175,7 +1251,7 @@ upload, the BLE protocol and its cryptography, the web app's parsers and the Pyt
 client. Version history: [CHANGELOG.md](CHANGELOG.md).
 
 Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries, 2.0.2): 61.1% of the
-1.8 MB app partition without BLE, 79.1% with it (section 9.5).
+1.8 MB app partition without BLE, 79.1% with it (section 9.5). 2.1.0, the examples: basic 60.7%, BLE 78.9%.
 
 Deviations from the first draft of this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said
@@ -1194,7 +1270,8 @@ Deviations from the first draft of this design, all deliberate:
 
 Saved data: four records, each with its own preference key and version
 (`feeder_core.h`): settings (schedule, guard, location), calibration (pulse range
-and offsets), tray state, and the device record (section 9.2). A layout change gets a new key and a migration from
+and offsets), tray state, and the device record (section 9.2); and since 2.1.0 a fifth, the mechanism's tuning
+values, written only by a mechanism that has a tuning table (never by the servo). A layout change gets a new key and a migration from
 the old layout; saved data is never simply discarded.
 
 Not yet exercised: a real daylight-saving changeover (event times use wall-clock

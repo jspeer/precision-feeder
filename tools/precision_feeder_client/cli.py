@@ -101,7 +101,10 @@ async def _run(args: argparse.Namespace) -> None:
             resp = await feeder.write_record(PROFILE_UUID, record)
         elif cmd == "calibration":
             if args.action == "get":
-                for i in range(7):
+                if not (await feeder.info()).has_calibration:
+                    print("this feeder's mechanism has no calibration offsets (not the servo)")
+                    return
+                for i in range(CALIBRATION_SLOTS):
                     print(f"position {i}: {await feeder.read_calibration(i) / 10:+.1f} degrees")
                 return
             if args.position is None or args.tenths is None:

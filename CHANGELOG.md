@@ -6,6 +6,28 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.1.0: mechanisms (not released yet)
+
+Nothing changes for a servo feeder: same entities, same behaviour, same saved settings, same BLE protocol. Underneath,
+the firmware no longer assumes a servo, so feeders with other motors and trays can be built
+([docs/MECHANISMS.md](docs/MECHANISMS.md)).
+
+- What moves the tray is now a *mechanism* (DESIGN.md section 3.0). The servo fan tray is the first; its timing,
+  wiggle and angles are unchanged, checked against a recording of what 2.0.2 did.
+- Portions per load come from the mechanism (6 for the servo) instead of a fixed 6: the guard limits, event and
+  one-shot portions, Declare Tray Position and the BLE ranges follow it.
+- New diagnostic entities: **Mechanism** (`servo`) and **Capacity** (6). Faults names a motor fault when a mechanism
+  reports one.
+- GPIO3 can now be chosen for the button or LED, with a warning: on the ESP32-S3 it only selects the JTAG source,
+  and only once an eFuse is burned that is not by default.
+- The servo's YAML settings moved to `packages/mechanism_servo.yaml`, which `core.yaml` includes: your YAML and its
+  substitutions work as before.
+- The web app's update check tells a feeder built from a branch (a variant the releases do not publish) that there
+  are no published updates for it, instead of offering the main firmware.
+- The Python BLE client reads calibration offsets only from a feeder that has them, and checks the tray position
+  against the positions the feeder reports.
+- `AGENTS.md` gains the rules for adding a mechanism; [docs/MECHANISMS.md](docs/MECHANISMS.md) is the walkthrough.
+
 ## 2.0.2: NTP servers (2026-10-16)
 
 - New **NTP Servers** setting (Configuration, the setup wizard, and Home Assistant): up to three host names or IP

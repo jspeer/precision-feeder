@@ -12,7 +12,8 @@ import struct
 
 from .client import FeederClient
 from .protocol import (
-    CHANNEL_COMMAND, CHANNEL_CONFIG, CONFIG_KEYS, CONFIG_UUID, OP_SET_PROFILE, OP_SET_TIMEZONE, PROTOCOL_VERSION,
+    CALIBRATION_SLOTS, CHANNEL_COMMAND, CHANNEL_CONFIG, CONFIG_KEYS, CONFIG_UUID, OP_SET_PROFILE, OP_SET_TIMEZONE,
+    PROTOCOL_VERSION,
     command, config_set, signed,
 )
 
@@ -31,7 +32,7 @@ async def selftest(feeder: FeederClient) -> list[tuple[str, bool, str]]:
           str(info))
     await asyncio.sleep(1.0)  # Status refreshes at most twice a second
     status = await feeder.status()
-    check("Status readable", status.tray_position <= 6, status.describe().splitlines()[0])
+    check("Status readable", status.tray_position < info.positions, status.describe().splitlines()[0])
     values = {}
     for name, key in CONFIG_KEYS.items():
         values[name] = await feeder.read_config(key)
@@ -42,8 +43,9 @@ async def selftest(feeder: FeederClient) -> list[tuple[str, bool, str]]:
     check("out-of-range Config value refused", r.result == 8, r.result_text)
     header = await feeder.read_profile_header(status.active_profile)
     check("Profile header readable", 1 <= header["every_n"] <= 14, str(header))
-    offsets = [await feeder.read_calibration(i) for i in range(7)]
-    check("Calibration readable", all(-150 <= o <= 150 for o in offsets), str(offsets))
+    if info.has_calibration:
+        offsets = [await feeder.read_calibration(i) for i in range(CALIBRATION_SLOTS)]
+        check("Calibration readable", all(-150 <= o <= 150 for o in offsets), str(offsets))
     r = await feeder.command(OP_SET_TIMEZONE)
     check("reserved opcode answered UNSUPPORTED", r.result == 14, r.result_text)
     # Re-selecting the profile that is already active changes nothing, so it is safe to send, retry and replay.

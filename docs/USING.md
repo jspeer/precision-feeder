@@ -70,7 +70,8 @@ Saved on the feeder, changed in the web app or Home Assistant, kept across updat
 **Protected** settings need the settings password in the web app when one is set; Home Assistant and BLE use their
 own keys instead. The time zone and NTP servers are not protected. Pins, the name and the access point password take
 effect at the next restart: **Restart Needed** says so, and nothing restarts by itself. The pin lists offer only pins
-the ESP32-S3 can spare (no flash, PSRAM, USB or strapping pins), and "none" for a button or LED that is not fitted.
+the ESP32-S3 can spare (no flash, PSRAM, USB or boot strapping pins; GPIO3 is offered with a warning), and "none" for a
+button or LED that is not fitted.
 
 ## Safety behaviour
 

@@ -93,8 +93,10 @@ reminds you to update with ESPHome rather than offering the prebuilt images.
 
 ## Settings in your YAML
 
-Set these in your copy's `substitutions:` (defaults in [`packages/core.yaml`](../packages/core.yaml) and
-[`packages/ble_gatt.yaml`](../packages/ble_gatt.yaml)). Many are only **starting values**: the same setting changed
+Set these in your copy's `substitutions:` (defaults in [`packages/core.yaml`](../packages/core.yaml), the servo's in
+[`packages/mechanism_servo.yaml`](../packages/mechanism_servo.yaml), which core.yaml includes, and
+[`packages/ble_gatt.yaml`](../packages/ble_gatt.yaml)). A feeder with another motor uses another mechanism package;
+see [MECHANISMS.md](MECHANISMS.md). Many are only **starting values**: the same setting changed
 on the feeder (web app or Home Assistant) is saved there and wins, as the table says.
 
 | Substitution | Default | What it is |
@@ -114,6 +116,7 @@ on the feeder (web app or Home Assistant) is saved there and wins, as the table 
 | `step_time` | `1s` | the time given to each of the three moves of a feed |
 | `wiggle` | `"true"` | forward, back, forward on each feed to shake food loose |
 | `detach_delay` | `1s` | the servo is released this long after the last move (no buzzing, no heat) |
+| `tray_capacity` | `"6"` | portions per load, set by the mechanism package (6 for the servo tray); the portion input boxes go up to it. Leave it. |
 | `ble_name` | `Precision Feeder` | the name shown to BLE scanners. At most 20 characters; at most 13 with `name_add_mac_suffix` (ESPHome adds the suffix there too). |
 | `ble_time_policy` | `fallback_only` | a clock pushed over BLE: accepted only when network time is stale (recommended), `always`, or `off` |
 | `ble_network_time_stale_after` | `24h` | how long after the last NTP or Home Assistant sync a BLE clock is still refused (`fallback_only`) |
