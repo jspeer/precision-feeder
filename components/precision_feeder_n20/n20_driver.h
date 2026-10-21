@@ -28,7 +28,7 @@
 namespace esphome {
 namespace precision_feeder {
 
-class N20Driver : public Component, protected N20Lock {
+class N20Driver : public Component, protected N20Lock, public MotorPinUser {
  public:
   explicit N20Driver(uint8_t slots) : mech_(slots) { this->mech_.set_lock(this); }
 
@@ -40,6 +40,11 @@ class N20Driver : public Component, protected N20Lock {
     this->enc_b_ = enc_b;
   }
   void set_pwm_frequency(uint32_t hz) { this->pwm_hz_ = hz; }
+  /// The pins to use, from the feeder at boot (the saved ones, or the build's), before setup (D19).
+  void use_pins(const uint8_t *pins, uint8_t n) override {
+    if (n >= 5)
+      this->set_pins(pins[0], pins[1], pins[2], pins[3], pins[4]);
+  }
   /// One of N20Timing's fields by name (from the YAML).
   void set_timing_ms(const char *field, uint32_t value);
   /// Register with the feeder: called before the feeder's setup, so core_start() already sees this mechanism.

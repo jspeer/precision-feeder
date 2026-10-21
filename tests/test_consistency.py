@@ -206,7 +206,9 @@ class Consistency(unittest.TestCase):
         gpio_max = self.c["GPIO_MAX"]
         accepted = [f"GPIO{p}" for p in range(gpio_max + 1) if p not in refused]
         for package, name, extra in (("hardware", "Servo Pin", []), ("button", "Button Pin", ["none"]),
-                                     ("status_led", "LED Pin", ["none"])):
+                                     ("status_led", "LED Pin", ["none"]), ("mechanism_n20", "Motor IN1 Pin", []),
+                                     ("mechanism_n20", "Motor IN2 Pin", []), ("mechanism_n20", "Motor STBY Pin", []),
+                                     ("mechanism_n20", "Encoder A Pin", []), ("mechanism_n20", "Encoder B Pin", [])):
             text = (ROOT / f"packages/{package}.yaml").read_text()
             block = text[text.index(f'name: "{name}"'):]
             options = re.findall(r'"([^"]+)"', re.search(r"options: \[(.*?)\]", block, re.S).group(1))

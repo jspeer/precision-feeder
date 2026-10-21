@@ -10,6 +10,7 @@
 #include "feeder_internal.h"
 
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 
 namespace esphome {
@@ -151,11 +152,121 @@ Pins FeederCore::pins_saved() const {
   return p;
 }
 
+// ---- motor pins chosen on the device (D19) ----
+
+void FeederCore::set_motor_pins_build(const uint8_t *pins, uint8_t n, const char *const *names) {
+  this->motor_count_ = std::min<uint8_t>(n, RESERVED_PINS_MAX);
+  for (uint8_t i = 0; i < this->motor_count_; i++) {
+    this->motor_build_[i] = this->motor_in_use_[i] = pins[i];
+    this->motor_names_[i] = names != nullptr ? names[i] : "motor";
+  }
+  std::memset(&this->motor_saved_, 0, sizeof(this->motor_saved_));
+  this->motor_saved_.version = MOTOR_PINS_VERSION;
+  std::memset(this->motor_saved_.pins, PIN_BUILD, sizeof(this->motor_saved_.pins));
+}
+
+/// Whether a set of motor pins can be used: none refused, none twice.
+static bool motor_pins_ok(const uint8_t *pins, uint8_t n, std::string *problem) {
+  for (uint8_t i = 0; i < n; i++) {
+    if (check_pin(pins[i]) == PinCheck::REFUSED) {
+      if (problem != nullptr)
+        *problem = "saved motor pin " + pin_text(pins[i]) + " not usable (" + pin_note(pins[i]) + ")";
+      return false;
+    }
+    for (uint8_t j = 0; j < i; j++) {
+      if (pins[i] == pins[j]) {
+        if (problem != nullptr)
+          *problem = "saved motor pins clash on " + pin_text(pins[i]);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void FeederCore::apply_motor_pins(const MotorPins *saved, std::string *problem) {
+  if (this->motor_count_ == 0)
+    return;
+  uint8_t use[RESERVED_PINS_MAX];
+  for (uint8_t i = 0; i < this->motor_count_; i++)
+    use[i] = this->motor_build_[i];
+  if (saved != nullptr && saved->version == MOTOR_PINS_VERSION) {
+    this->motor_saved_ = *saved;
+    uint8_t want[RESERVED_PINS_MAX];
+    for (uint8_t i = 0; i < this->motor_count_; i++)
+      want[i] = saved->pins[i] == PIN_BUILD ? this->motor_build_[i] : saved->pins[i];
+    // A damaged record (a refused pin, a clash) must not stop the feeder: the build's pins then.
+    if (motor_pins_ok(want, this->motor_count_, problem))
+      std::memcpy(use, want, this->motor_count_);
+  }
+  for (uint8_t i = 0; i < this->motor_count_; i++) {
+    this->motor_in_use_[i] = use[i];
+    this->reserve_pin(use[i]);
+  }
+  this->motor_runtime_ = true;
+}
+
+uint8_t FeederCore::motor_pin_saved(uint8_t i) const {
+  if (i >= this->motor_count_)
+    return PIN_NONE;
+  const uint8_t s = this->motor_saved_.pins[i];
+  return s == PIN_BUILD ? this->motor_build_[i] : s;
+}
+
+bool FeederCore::motor_pins_restart_needed() const {
+  for (uint8_t i = 0; this->motor_runtime_ && i < this->motor_count_; i++) {
+    if (this->motor_pin_saved(i) != this->motor_in_use_[i])
+      return true;
+  }
+  return false;
+}
+
+Result FeederCore::set_motor_pin(uint8_t i, uint8_t gpio) {
+  if (!this->motor_runtime_ || i >= this->motor_count_)
+    return Result::UNSUPPORTED;
+  const uint8_t pin = gpio == PIN_BUILD ? this->motor_build_[i] : gpio;
+  if (gpio == PIN_NONE || check_pin(pin) == PinCheck::REFUSED) {
+    this->log_(LogLevel::kWarn, "%s refused for %s: %s", pin_text(gpio).c_str(), this->motor_names_[i],
+               gpio == PIN_NONE ? "the motor needs it" : pin_note(pin));
+    return Result::INVALID_ARG;
+  }
+  // As the next restart will see them: another motor pin, the button or the LED on it is refused here, rather than
+  // the whole set falling back to the build's at boot.
+  const Pins others = this->pins_saved();
+  for (uint8_t j = 0; j < this->motor_count_; j++) {
+    if (j != i && this->motor_pin_saved(j) == pin) {
+      this->log_(LogLevel::kWarn, "%s refused for %s: %s uses it", pin_text(pin).c_str(), this->motor_names_[i],
+                 this->motor_names_[j]);
+      return Result::INVALID_ARG;
+    }
+  }
+  if ((this->has_button_ && others.button == pin) || (this->has_led_ && others.led == pin)) {
+    this->log_(LogLevel::kWarn, "%s refused for %s: the %s uses it", pin_text(pin).c_str(), this->motor_names_[i],
+               others.button == pin ? "button" : "LED");
+    return Result::INVALID_ARG;
+  }
+  if (this->motor_saved_.pins[i] == gpio)
+    return Result::OK;
+  if (gpio != PIN_BUILD && check_pin(pin) == PinCheck::WARN)
+    this->log_(LogLevel::kWarn, "%s for %s: %s", pin_text(pin).c_str(), this->motor_names_[i], pin_note(pin));
+  this->motor_saved_.pins[i] = gpio;
+  this->hal_save_motor_pins(this->motor_saved_);
+  this->log_(LogLevel::kInfo, "%s pin set to %s; restart to apply", this->motor_names_[i], pin_text(pin).c_str());
+  return Result::OK;
+}
+
 Result FeederCore::set_pin(PinRole role, uint8_t gpio) {
   const char *name = ROLE_NAMES[static_cast<uint8_t>(role)];
   if (!this->pins_runtime_ || (role == PinRole::SERVO && !this->is_servo()) || (role == PinRole::BUTTON && !this->has_button_) ||
       (role == PinRole::LED && !this->has_led_))
     return Result::UNSUPPORTED;
+  for (uint8_t j = 0; gpio != PIN_BUILD && gpio != PIN_NONE && j < this->motor_count_; j++) {
+    if (this->motor_pin_saved(j) == gpio) {
+      this->log_(LogLevel::kWarn, "%s refused for the %s: the motor's %s uses it", pin_text(gpio).c_str(), name,
+                 this->motor_names_[j]);
+      return Result::INVALID_ARG;
+    }
+  }
   if (gpio != PIN_BUILD && !usable(role, gpio, &this->reserved_pins_)) {
     if (gpio == PIN_NONE)
       this->log_(LogLevel::kWarn, "The servo needs a pin");
@@ -236,7 +347,12 @@ std::string FeederCore::pins_text() const {
   std::string out = "button " + pin_text(p.button) + ", LED " + pin_text(p.led);
   if (this->is_servo())
     return "servo " + pin_text(p.servo) + ", " + out;
-  // Another mechanism: its own pins, set in its YAML.
+  // Another mechanism: its own pins, by name when it named them (D19).
+  if (this->motor_count_ > 0) {
+    for (uint8_t i = 0; i < this->motor_count_; i++)
+      out += std::string(", ") + this->motor_names_[i] + " " + pin_text(this->motor_in_use_[i]);
+    return out;
+  }
   for (uint8_t i = 0; i < this->reserved_pins_.count; i++)
     out += std::string(i == 0 ? ", motor " : " ") + pin_text(this->reserved_pins_.pins[i]);
   return out;

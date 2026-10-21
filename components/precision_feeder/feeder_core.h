@@ -49,6 +49,7 @@ constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
 constexpr uint32_t DEVICE_VERSION = 2;         // 2: NTP servers (firmware 2.0.2)
 constexpr uint32_t TUNING_VERSION = 1;         // firmware 2.1.0
+constexpr uint32_t MOTOR_PINS_VERSION = 1;     // firmware 2.1.0-n20.1 (D19)
 // Setting limits: the single source of truth. Every way of changing a setting (Home Assistant, BLE, loading from
 // flash) goes through the setters below, which check against these. The YAML entities repeat them as min/max for
 // their input boxes; tests/test_consistency.py checks that they agree.
@@ -166,6 +167,15 @@ struct ReservedPins {
     if (this->count < RESERVED_PINS_MAX && !this->has(gpio))
       this->pins[this->count++] = gpio;
   }
+};
+
+/// The pins a mechanism other than the servo drives (the direct-drive disc's five), chosen on the device (D19, owner
+/// 2026-10-21; it replaces D4, which kept them YAML-only). Saved on their own and read at boot before any driver
+/// starts, as the Device record is. PIN_BUILD: the build's (YAML) pin.
+struct MotorPins {
+  uint32_t version;
+  uint8_t pins[RESERVED_PINS_MAX];
+  uint8_t reserved[4];
 };
 
 /// Whether the servo, button or LED may use this GPIO (see PINS_REFUSED and PINS_WARNED).
@@ -582,6 +592,23 @@ class FeederCore : private ServoOutput {
   /// The pins the mechanism drives itself (set in its YAML; none for the servo, whose pin is Pins::servo). Call
   /// before resolving the saved pins.
   void reserve_pin(uint8_t gpio) { this->reserved_pins_.add(gpio); }
+
+  // ---- motor pins chosen on the device (D19): a mechanism other than the servo ----
+  /// The mechanism's pins as the build sets them, with their names ("IN1", ...). Call before apply_motor_pins().
+  void set_motor_pins_build(const uint8_t *pins, uint8_t n, const char *const *names);
+  /// At boot, before the drivers start: the pins to use from the saved record (nullptr: none saved), else the
+  /// build's. A record with a refused pin or a clash is not used (the build's are, and `problem` says why). The pins
+  /// used are reserved, so the button and LED keep off them.
+  void apply_motor_pins(const MotorPins *saved, std::string *problem = nullptr);
+  uint8_t motor_pin_count() const { return this->motor_count_; }
+  const char *motor_pin_name(uint8_t i) const { return i < this->motor_count_ ? this->motor_names_[i] : ""; }
+  /// The pin the drivers started with, and the one the next restart will use.
+  uint8_t motor_pin_in_use(uint8_t i) const { return i < this->motor_count_ ? this->motor_in_use_[i] : PIN_NONE; }
+  uint8_t motor_pin_saved(uint8_t i) const;
+  /// Choose a motor pin: a GPIO, or PIN_BUILD for the build's. INVALID_ARG for a refused pin, or one another motor
+  /// pin, the button or the LED will use; UNSUPPORTED without motor pins. Saved at once; used after a restart.
+  Result set_motor_pin(uint8_t i, uint8_t gpio);
+  bool motor_pins_restart_needed() const;
   const ReservedPins &reserved_pins() const { return this->reserved_pins_; }
   /// What the adapter applied. A build without the button or LED package has none, whatever is saved.
   void set_pins_in_use(const Pins &pins, bool has_button = true, bool has_led = true) {
@@ -596,7 +623,8 @@ class FeederCore : private ServoOutput {
   Pins pins_saved() const;
   /// A saved pin, name or access-point password waits for a restart.
   bool restart_needed() const {
-    return (this->pins_runtime_ && this->pins_saved() != this->pins_in_use_) || this->network_restart_needed();
+    return (this->pins_runtime_ && this->pins_saved() != this->pins_in_use_) || this->network_restart_needed() ||
+           this->motor_pins_restart_needed();
   }
   /// Choose one pin: a GPIO, PIN_NONE (button and LED only) or PIN_BUILD. INVALID_ARG for a refused pin or one
   /// another role already uses; UNSUPPORTED when the build cannot change pins.
@@ -788,6 +816,7 @@ class FeederCore : private ServoOutput {
   virtual void hal_save_state(const State &state, bool flush) = 0;
   virtual void hal_save_device(const Device &device) = 0;  // always written at once
   virtual void hal_save_tuning(const Tuning &tuning, bool flush) = 0;
+  virtual void hal_save_motor_pins(const MotorPins &pins) = 0;  // always written at once
   /// Use this timezone for local time from now on; nullptr goes back to the one in use before any was applied.
   virtual void hal_apply_timezone(const TzRules *rules) = 0;
   /// Ask these NTP servers from now on; nullptr goes back to the build's. A build without SNTP ignores it.
@@ -933,6 +962,13 @@ class FeederCore : private ServoOutput {
   Device dev_{};
   Pins build_pins_{PIN_NONE, PIN_NONE, PIN_NONE};
   ReservedPins reserved_pins_{};
+  // Motor pins chosen on the device (D19).
+  uint8_t motor_count_{0};
+  uint8_t motor_build_[RESERVED_PINS_MAX]{};
+  uint8_t motor_in_use_[RESERVED_PINS_MAX]{};
+  const char *motor_names_[RESERVED_PINS_MAX]{};
+  MotorPins motor_saved_{};
+  bool motor_runtime_{false};  // apply_motor_pins() ran: the pins can be changed
   Pins pins_in_use_{PIN_NONE, PIN_NONE, PIN_NONE};
   bool pins_runtime_{false};  // the adapter applied the saved pins at boot, so changing them means something
   bool has_button_{true};     // the build has the button package

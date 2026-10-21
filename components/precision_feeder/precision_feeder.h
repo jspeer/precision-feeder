@@ -66,6 +66,15 @@ template<typename E> void publish_option(E *e, const std::string &v) {
   e->publish_state(v);
 }
 
+/// A driver that claims its own pins at setup (the direct-drive disc): it is told which ones to use first (D19).
+class MotorPinUser {
+ public:
+  virtual void use_pins(const uint8_t *pins, uint8_t n) = 0;
+
+ protected:
+  ~MotorPinUser() = default;
+};
+
 class PrecisionFeeder : public Component, public FeederCore {
  public:
   // ---- configuration (set from Python) ----
@@ -89,6 +98,13 @@ class PrecisionFeeder : public Component, public FeederCore {
   }
   /// Load the saved pins and give them to the drivers. Runs before any driver's setup().
   void apply_pins();
+  /// A driver offers its pins as the build sets them (before setup); the ones saved on the device win (D19).
+  void offer_motor_pins(MotorPinUser *user, const uint8_t *pins, uint8_t n, const char *const *names) {
+    this->motor_user_ = user;
+    this->set_motor_pins_build(pins, n, names);
+  }
+  /// At boot, before the drivers start (PinLoader): the motor pins from the saved record, told to their driver.
+  void apply_motor_pins_early();
   /// Apply the saved name and access-point password (DESIGN.md section 9.3). Runs before Wi-Fi, mDNS, the API and
   /// BLE start, as they read the name when they do.
   void apply_network();
@@ -167,6 +183,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   void hal_save_state(const State &state, bool flush) override;
   void hal_save_device(const Device &device) override;
   void hal_save_tuning(const Tuning &tuning, bool flush) override;
+  void hal_save_motor_pins(const MotorPins &pins) override;
   void hal_apply_timezone(const TzRules *rules) override;
   void hal_apply_ntp(const std::vector<std::string> *servers) override;
   void hal_log(LogLevel level, const char *message) override;
@@ -196,6 +213,8 @@ class PrecisionFeeder : public Component, public FeederCore {
   ESPPreferenceObject pref_state_;
   ESPPreferenceObject pref_device_;
   ESPPreferenceObject pref_tuning_;
+  ESPPreferenceObject pref_motor_pins_;
+  MotorPinUser *motor_user_{nullptr};
   std::string hostname_build_;
   bool ap_build_open_{false};
   const char *ntp_build_[NTP_SERVERS_MAX]{};  // the build's NTP servers, as the sntp component gave them
@@ -216,6 +235,7 @@ class PinLoader : public Component {
  public:
   explicit PinLoader(PrecisionFeeder *feeder) : feeder_(feeder) {}
   void setup() override {
+    this->feeder_->apply_motor_pins_early();  // first: the button and LED pins are checked against them
     this->feeder_->apply_pins();
     this->feeder_->apply_network();
   }

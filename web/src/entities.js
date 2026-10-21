@@ -113,6 +113,11 @@ const E = {
   buttonPin: 'select/Button Pin',
   ledPin: 'select/LED Pin',
   pinsInUse: 'text_sensor/Pins In Use',
+  motorIn1Pin: 'select/Motor IN1 Pin',  // mechanism_n20.yaml (D19)
+  motorIn2Pin: 'select/Motor IN2 Pin',
+  motorStbyPin: 'select/Motor STBY Pin',
+  encoderAPin: 'select/Encoder A Pin',
+  encoderBPin: 'select/Encoder B Pin',
   restartNeeded: 'binary_sensor/Restart Needed',
   restart: 'button/Restart',
 

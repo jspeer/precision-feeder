@@ -256,6 +256,28 @@ bool PrecisionFeeder::set_wifi(const std::string &ssid, const std::string &passw
 #endif
 }
 
+void PrecisionFeeder::apply_motor_pins_early() {
+  if (this->motor_pin_count() == 0 || this->motor_user_ == nullptr)
+    return;
+  this->pref_motor_pins_ =
+      global_preferences->make_preference<MotorPins>(fnv1_hash("precision_feeder.motor_pins.v1"));
+  MotorPins saved;
+  const bool have = this->pref_motor_pins_.load(&saved);
+  std::string problem;
+  this->apply_motor_pins(have ? &saved : nullptr, &problem);
+  if (!problem.empty())
+    ESP_LOGW(TAG, "Motor pins: %s; the build's used", problem.c_str());
+  uint8_t pins[RESERVED_PINS_MAX];
+  for (uint8_t i = 0; i < this->motor_pin_count(); i++)
+    pins[i] = this->motor_pin_in_use(i);
+  this->motor_user_->use_pins(pins, this->motor_pin_count());
+}
+
+void PrecisionFeeder::hal_save_motor_pins(const MotorPins &pins) {
+  this->pref_motor_pins_.save(&pins);
+  global_preferences->sync();
+}
+
 void PrecisionFeeder::apply_pins() {
   if (this->servo_pin_ == nullptr && this->button_pin_ == nullptr && this->led_output_ == nullptr)
     return;  // a build without runtime pins: every driver keeps its YAML pin

@@ -269,11 +269,20 @@ The first mechanism after the servo, for the owner's own print; it lives on its 
 "Adding a mechanism", rule 8). Plan and decisions: [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md),
 stage 2 (D2, D7 to D18).
 
+**Pins chosen on the device (D19, owner 2026-10-21; replaces D4).** The disc's five pins (IN1, IN2, STBY, encoder A
+and B) are chosen on the feeder like the servo's: the YAML's are the starting values, the MotorPins record
+(`precision_feeder.motor_pins.v1`, read at boot before any driver starts) wins, a change applies at the next restart
+(Restart Needed). The same validator refuses a pin the chip cannot spare, two motor pins on one GPIO, and the button's
+or the LED's; a damaged record falls back to the build's pins. Restart, Restart Needed and Pins In Use moved to
+`packages/restart.yaml`, which hardware.yaml includes and the disc builds include directly.
+**Direction (D17 answered, owner 2026-10-21):** the single binary is the way forward, with selectable pins; how the
+branches come together is still to settle.
+
 **Hardware.** A GA12-N20 gear motor (6 V, 35 rpm) with a two-channel Hall encoder, behind channel A of a DRV8833,
 turns a 3D-printed disc of open slots directly: 15 on the bench print, 24 degrees apart. Wiring: AIN1 GPIO1, AIN2
 GPIO2, STBY GPIO6, encoder C1 GPIO4 and C2 GPIO5, encoder VCC 3V3, VM 5V, grounds common, 100 µF across 5V and GND.
-The button moves to GPIO3 (GPIO2 is AIN2). The pins are YAML-only (D4) and reserved, so the button and LED cannot
-be moved onto them.
+The button moves to GPIO3 (GPIO2 is AIN2). The pins are chosen on the device (D19, above) and reserved, so the button
+and LED cannot be moved onto them.
 
 **Model.** All slots are open and one is always over the chute, so a load holds slots − 1 = 14 portions (D8). The
 disc only turns forward (D7); Tray Reload moves nothing and sets the count back. A feed is one slot forward and the

@@ -33,6 +33,8 @@ struct Flash {
   Device device{};
   bool have_device_v1{false};
   legacy::DeviceV1 device_v1{};
+  bool have_motor_pins{false};
+  MotorPins motor_pins{};
   bool have_tuning{false};
   Tuning tuning{};
   int tuning_saves{0};
@@ -169,6 +171,10 @@ class FakeFeeder : public FeederCore {
     ntp = servers != nullptr ? *servers : std::vector<std::string>{};
   }
 
+  void hal_save_motor_pins(const MotorPins &p) override {
+    flash_.motor_pins = p;
+    flash_.have_motor_pins = true;
+  }
   void hal_save_tuning(const Tuning &t, bool) override {
     flash_.tuning_saves++;
     flash_.tuning = t;

@@ -99,8 +99,9 @@ Set these in your copy's `substitutions:` (defaults in [`packages/core.yaml`](..
 see [MECHANISMS.md](MECHANISMS.md). On the branch `variant/n20-direct-drive`, core.yaml includes the direct-drive
 disc's [`packages/mechanism_n20.yaml`](../packages/mechanism_n20.yaml) instead, with its own substitutions (`disc_slots`,
 `tray_capacity`, `motor_in1_pin`, `motor_in2_pin`, `motor_standby_pin`, `encoder_a_pin`, `encoder_b_pin`,
-`motor_pwm_frequency`), and `button_pin` defaults to GPIO3; leave the servo's `calibration` and `hardware` packages
-out. Many are only **starting values**: the same setting changed
+`motor_pwm_frequency`; starting values: pins chosen on the feeder win), and `button_pin` defaults to GPIO3; leave
+the servo's `calibration` and `hardware` packages out and include `packages/restart.yaml` (Restart, Restart Needed,
+Pins In Use). Many are only **starting values**: the same setting changed
 on the feeder (web app or Home Assistant) is saved there and wins, as the table says.
 
 | Substitution | Default | What it is |

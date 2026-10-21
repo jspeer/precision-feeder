@@ -24,7 +24,8 @@ substitutions:
   # Your timezone: daylight saving and sunrise/sunset events depend on it.
   timezone: America/New_York
   # Pins default to the Waveshare ESP32-S3-Zero. Change them for another board here, or on
-  # the device (hardware package: Board and the pin selects), which then wins:
+  # the device (the pin selects: web app Configuration), which then wins. The disc's motor pins are in
+  # packages/mechanism_n20.yaml (motor_in1_pin ...):
   # servo_pin: GPIO1
   # button_pin: GPIO2
   # NTP is the primary time source. Defaults are the public pool servers; point
@@ -46,6 +47,7 @@ packages:
   # calibration: !include precision-feeder/packages/calibration.yaml  # servo only: not on the direct-drive disc
   # Optional.
   # hardware: !include precision-feeder/packages/hardware.yaml                 # board and pins chosen on the device (pins below are then defaults)  # servo only: not on the direct-drive disc
+  restart: !include precision-feeder/packages/restart.yaml   # Restart, Restart Needed, Pins In Use
   # diagnostics: !include precision-feeder/packages/diagnostics.yaml         # free heap and loop time
   network_info: !include precision-feeder/packages/network_info.yaml       # Wi-Fi network, addresses and signal
   improv_serial: !include precision-feeder/packages/improv_serial.yaml     # set Wi-Fi over USB from an install page (Improv)

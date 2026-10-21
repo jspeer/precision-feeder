@@ -11,7 +11,8 @@
 #
 # Wiring (the defaults below): motor M1 -> DRV8833 AO1, M2 -> AO2; AIN1 -> GPIO1, AIN2 -> GPIO2, STBY -> GPIO6;
 # encoder C1 -> GPIO4, C2 -> GPIO5, encoder VCC -> 3V3; DRV8833 VM -> 5V; all grounds together; 100 uF across 5V
-# and GND. The pins are set here only (DESIGN.md section 2.1, D4): the button and the LED cannot be moved onto them.
+# and GND. These are the starting values: pins chosen on the feeder (the Motor and Encoder Pin selects below, web app
+# Configuration) win from the next restart (D19). The button and the LED can never be moved onto them.
 #
 # Calibrate it before feeding: Maintenance in the web app (or the Calibration buttons below), docs/CALIBRATION.md.
 
@@ -70,6 +71,11 @@ precision_feeder:
     - button/Calibration Next Slot
     - button/Calibration Trim Here
     - number/Disc Slots
+    - select/Motor IN1 Pin
+    - select/Motor IN2 Pin
+    - select/Motor STBY Pin
+    - select/Encoder A Pin
+    - select/Encoder B Pin
 
 # --- Tuning (saved on the feeder; limits from mechanism_n20.cpp's table, which tests/test_consistency.py checks) --
 number:
@@ -224,6 +230,100 @@ switch:
     turn_off_action:
       - lambda: id(feeder).set_tuning(precision_feeder::N20_REVERSE_ENCODER, 0);
 
+# --- Pins (D19): the YAML's pins above are the starting values; ones chosen here are saved on the feeder and win from
+# the next restart (Restart Needed). Only pins the ESP32-S3 can spare are offered; two parts on one pin are refused.
+select:
+  - platform: template
+    id: pf_n20_pin_in1
+    name: "Motor IN1 Pin"
+    icon: mdi:pin
+    entity_category: config
+    # DRV8833 AIN1. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+                "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
+                "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
+                "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_motor_pin(0, pin);
+          publish_option(id(pf_n20_pin_in1), pin_text(id(feeder).motor_pin_saved(0)));
+    update_interval: never
+  - platform: template
+    id: pf_n20_pin_in2
+    name: "Motor IN2 Pin"
+    icon: mdi:pin
+    entity_category: config
+    # DRV8833 AIN2. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+                "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
+                "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
+                "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_motor_pin(1, pin);
+          publish_option(id(pf_n20_pin_in2), pin_text(id(feeder).motor_pin_saved(1)));
+    update_interval: never
+  - platform: template
+    id: pf_n20_pin_stby
+    name: "Motor STBY Pin"
+    icon: mdi:pin
+    entity_category: config
+    # DRV8833 STBY. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+                "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
+                "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
+                "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_motor_pin(2, pin);
+          publish_option(id(pf_n20_pin_stby), pin_text(id(feeder).motor_pin_saved(2)));
+    update_interval: never
+  - platform: template
+    id: pf_n20_pin_enc_a
+    name: "Encoder A Pin"
+    icon: mdi:pin
+    entity_category: config
+    # encoder C1. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+                "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
+                "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
+                "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_motor_pin(3, pin);
+          publish_option(id(pf_n20_pin_enc_a), pin_text(id(feeder).motor_pin_saved(3)));
+    update_interval: never
+  - platform: template
+    id: pf_n20_pin_enc_b
+    name: "Encoder B Pin"
+    icon: mdi:pin
+    entity_category: config
+    # encoder C2. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
+    options: ["GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+                "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
+                "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
+                "GPIO43", "GPIO44", "GPIO47", "GPIO48"]
+    set_action:
+      - lambda: |-
+          using namespace precision_feeder;
+          uint8_t pin;
+          if (parse_pin(x.str(), pin))
+            id(feeder).set_motor_pin(4, pin);
+          publish_option(id(pf_n20_pin_enc_b), pin_text(id(feeder).motor_pin_saved(4)));
+    update_interval: never
+
 # --- The guided calibration (calibration mode on; docs/CALIBRATION.md). Calibration Step says what comes next. ----
 button:
   - platform: template
@@ -354,5 +454,10 @@ interval:
           publish_text(id(pf_n20_fault), f->mechanism_fault()[0] ? f->mechanism_fault() : "none");
           publish_number(id(pf_n20_ticks_now), id(disc).encoder_ticks());
           publish_number(id(pf_n20_gap), id(disc).max_gap_us() / 1000.0f);
+          publish_option(id(pf_n20_pin_in1), pin_text(f->motor_pin_saved(0)));
+          publish_option(id(pf_n20_pin_in2), pin_text(f->motor_pin_saved(1)));
+          publish_option(id(pf_n20_pin_stby), pin_text(f->motor_pin_saved(2)));
+          publish_option(id(pf_n20_pin_enc_a), pin_text(f->motor_pin_saved(3)));
+          publish_option(id(pf_n20_pin_enc_b), pin_text(f->motor_pin_saved(4)));
           publish_number(id(pf_n20_feed_move_ms), id(disc).mechanism().last_feed_move_ms());
           publish_number(id(pf_n20_feed_ms), id(disc).mechanism().last_feed_ms());

@@ -22,6 +22,9 @@ YAML on its branch; there are no prebuilt binaries, and the web app's update che
   wiggle amplitude and cycles, slot trim, calibration turns, reverse motor and encoder.
 - The slot count is a setting (Disc Slots, 3 to 60) in the calibration, so a 14- or 16-slot disc needs no rebuild.
   Slot count, ticks per turn, trim and the direction reversals can only be changed in calibration mode.
+- The disc's five pins can be chosen on the feeder (Configuration, Pins; and Home Assistant), like the servo's: the
+  YAML's are the starting values, a change applies after a restart. The disc build gains Restart and Restart Needed
+  (`packages/restart.yaml`).
 - The calibration's texts say which step you are on and which button to press; Trim here sets the trim from a slot you
   nudged to the centre.
 - The button defaults to GPIO3. Runtime button and LED pins work without a servo pin.

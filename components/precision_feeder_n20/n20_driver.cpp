@@ -69,11 +69,15 @@ void N20Driver::set_timing_ms(const char *field, uint32_t value) {
   }
 }
 
+// The names the motor pins go by (Pins In Use, the log); their order is set_pins()'s.
+static const char *const PIN_NAMES[5] = {"IN1", "IN2", "STBY", "encoder A", "encoder B"};
+
 void N20Driver::attach(PrecisionFeeder *feeder) {
   this->feeder_ = feeder;
   feeder->set_mechanism(&this->mech_);
-  for (uint8_t pin : {this->in1_, this->in2_, this->stby_, this->enc_a_, this->enc_b_})
-    feeder->reserve_pin(pin);
+  // The YAML's pins are the build's; ones saved on the device win, and the feeder reserves the ones used (D19).
+  const uint8_t pins[] = {this->in1_, this->in2_, this->stby_, this->enc_a_, this->enc_b_};
+  feeder->offer_motor_pins(this, pins, sizeof(pins), PIN_NAMES);
 }
 
 void N20Driver::standby_now_() {

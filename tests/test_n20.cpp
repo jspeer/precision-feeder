@@ -797,6 +797,69 @@ static void test_smaller_load_keeps_settings() {
   CHECK(d.f->cfg.daily_cap == 14 && d.f->cfg.max_portions_cmd == 10, "back to 15 slots: still 14 and 10");
 }
 
+// ---- motor pins chosen on the device (D19) ----------------------------------------------------------------
+static const char *const MOTOR_NAMES[5] = {"IN1", "IN2", "STBY", "encoder A", "encoder B"};
+
+/// Boot as the adapter does: the motor pins (the YAML's, then the saved ones), then the button and LED pins.
+static std::unique_ptr<FakeFeeder> boot_pins(Flash &flash, N20Mechanism &disc, std::string *problem = nullptr) {
+  auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+  f->set_mechanism(&disc);
+  const uint8_t build[5] = {1, 2, 6, 4, 5};
+  f->set_motor_pins_build(build, 5, MOTOR_NAMES);
+  f->apply_motor_pins(flash.have_motor_pins ? &flash.motor_pins : nullptr, problem);
+  const Pins build_pins{PIN_NONE, 3, 21};
+  Device saved{};
+  saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
+  if (flash.have_device && flash.device.version == DEVICE_VERSION)
+    saved = flash.device;
+  f->set_build_pins(build_pins);
+  f->set_pins_in_use(resolve_pins(saved, build_pins, nullptr, &f->reserved_pins()));
+  f->start();
+  f->advance(1500);
+  return f;
+}
+
+static void test_motor_pins() {
+  current = "disc: motor pins chosen on the device";
+  Flash flash;
+  {
+    N20Mechanism disc;
+    auto f = boot_pins(flash, disc);
+    CHECK(f->motor_pin_count() == 5 && f->motor_pin_in_use(0) == 1 && f->motor_pin_in_use(4) == 5, "the YAML's pins");
+    CHECK(f->reserved_pins().has(6) && !f->restart_needed(), "reserved; nothing waiting");
+    CHECK(f->pins_text() == "button GPIO3, LED GPIO21, IN1 GPIO1, IN2 GPIO2, STBY GPIO6, encoder A GPIO4, encoder B GPIO5",
+          "Pins In Use names them");
+    CHECK(f->set_motor_pin(0, 0) == Result::INVALID_ARG, "a strapping pin refused");
+    CHECK(f->set_motor_pin(0, 26) == Result::INVALID_ARG, "a flash pin refused");
+    CHECK(f->set_motor_pin(0, 2) == Result::INVALID_ARG, "IN2's pin refused for IN1");
+    CHECK(f->set_motor_pin(0, 3) == Result::INVALID_ARG, "the button's pin refused");
+    CHECK(f->set_motor_pin(0, 21) == Result::INVALID_ARG, "the LED's pin refused");
+    CHECK(f->set_motor_pin(0, PIN_NONE) == Result::INVALID_ARG, "the motor needs every pin");
+    CHECK(f->set_motor_pin(5, 7) == Result::UNSUPPORTED, "only five");
+    CHECK(f->set_motor_pin(0, 7) == Result::OK && flash.have_motor_pins, "IN1 on GPIO7: saved at once");
+    CHECK(f->motor_pin_saved(0) == 7 && f->motor_pin_in_use(0) == 1 && f->restart_needed(), "used after a restart");
+    CHECK(f->set_pin(PinRole::BUTTON, 7) == Result::INVALID_ARG, "the button cannot take a pin the motor will use");
+    CHECK(f->set_motor_pin(1, 1) == Result::OK, "IN2 on GPIO1, which IN1 leaves");
+  }
+  {
+    N20Mechanism disc;
+    auto f = boot_pins(flash, disc);
+    CHECK(f->motor_pin_in_use(0) == 7 && f->motor_pin_in_use(1) == 1 && !f->restart_needed(), "after the restart");
+    CHECK(f->reserved_pins().has(7) && !f->reserved_pins().has(2), "the pins used are reserved, the old ones free");
+    CHECK(f->set_pin(PinRole::BUTTON, 2) == Result::OK, "so the button may take GPIO2 now");
+    CHECK(f->set_motor_pin(0, PIN_BUILD) == Result::INVALID_ARG, "back to the build's GPIO1: IN2 has it now");
+  }
+  {
+    // A damaged record (a refused pin, written by something else) never stops the feeder: the build's pins.
+    flash.motor_pins.pins[2] = 27;
+    N20Mechanism disc;
+    std::string problem;
+    auto f = boot_pins(flash, disc, &problem);
+    CHECK(f->motor_pin_in_use(0) == 1 && f->motor_pin_in_use(2) == 6, "the build's pins");
+    CHECK(problem.find("not usable") != std::string::npos, "and the log says why");
+  }
+}
+
 int main() {
   test_motion_matches_sketch();
   test_mechanism_feeds();
@@ -813,6 +876,7 @@ int main() {
   test_slot_count();
   test_tuning_layout_1_kept();
   test_smaller_load_keeps_settings();
+  test_motor_pins();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

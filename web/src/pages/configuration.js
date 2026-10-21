@@ -131,11 +131,16 @@ PAGES.configuration = {
     this.update();
   },
 
-  /** Board and pins (packages/hardware.yaml): saved at once, used after a restart. Null without the package. */
+  /** Board and pins (packages/hardware.yaml), and the disc's motor pins (mechanism_n20.yaml, D19): saved at once, used
+   *  after a restart. Null with neither. */
   hardwareCard() {
-    if (!store.has(E.board)) return null;
-    const hw = card('Board and pins', h('p', { class: 'hint' }, 'Where the servo, the button and the LED are wired. ' +
-                    'A change is saved at once and used after the next restart.'));
+    // The disc's pins, while the disc is the drive (a firmware with both drives has the selects in servo mode too).
+    const motor = store.has(E.motorIn1Pin) && mechanism() !== MECHANISMS.servo;
+    if (!store.has(E.board) && !motor) return null;
+    const hw = card(store.has(E.board) ? 'Board and pins' : 'Pins', h('p', { class: 'hint' },
+      (motor ? 'Where the motor, its encoder, the button and the LED are wired. '
+             : 'Where the servo, the button and the LED are wired. ') +
+      'A change is saved at once and used after the next restart.'));
     // The board is the device's own select, except that "Custom" is only shown, not chosen: pick the pins instead.
     const board = h('select', { class: 'input', 'aria-label': 'Board', onchange: () => {
       if (board.value === 'Custom') {
@@ -144,16 +149,21 @@ PAGES.configuration = {
         return;
       }
       api.setAndConfirm(E.board, board.value).catch(err => { toastError(err); board._update(true); });
-    } }, (store.get(E.board).option || []).map(o => h('option', { value: o }, o)));
+    } }, ((store.has(E.board) && store.get(E.board).option) || []).map(o => h('option', { value: o }, o)));
     board._update = force => { if (force || document.activeElement !== board) board.value = store.text(E.board); };
-    const boardRow = h('div', { class: 'setting' },
+    const boardRow = !store.has(E.board) ? null : h('div', { class: 'setting' },
       h('div', { class: 'setting-text' }, h('div', { class: 'setting-label' }, 'Board'),
         h('div', { class: 'hint' }, 'Build Default: the pins in your YAML (or the ones the firmware was built with).')),
       h('div', { class: 'setting-control' }, board));
-    boardRow._update = () => board._update();
+    if (boardRow) boardRow._update = () => board._update();
     const pins = [
       boardRow,
       setting('Servo pin', 'The servo signal wire.', E.servoPin),
+      ...(motor ? [setting('Motor IN1', 'DRV8833 AIN1.', E.motorIn1Pin),
+                   setting('Motor IN2', 'DRV8833 AIN2.', E.motorIn2Pin),
+                   setting('Motor STBY', 'DRV8833 STBY: held low keeps the motor off.', E.motorStbyPin),
+                   setting('Encoder A', 'The encoder\'s C1.', E.encoderAPin),
+                   setting('Encoder B', 'The encoder\'s C2.', E.encoderBPin)] : []),
       setting('Button pin', 'The optional push button; none if your build has no button.', E.buttonPin),
       setting('LED pin', 'The status LED (WS2812); none if your board has none.', E.ledPin),
     ].filter(Boolean);

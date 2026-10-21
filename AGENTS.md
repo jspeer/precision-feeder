@@ -76,9 +76,11 @@ substitutions.
 ### Configuration and style
 - Every pin is a substitution with a documented default. No hard-coded GPIOs. Since
   2.0.0 the substitution is the starting value: a pin saved on the device (Device record,
-  DESIGN.md section 2.1) wins, and only pins `check_pin()` accepts can be saved. The one
-  exception (2.1.0, D4): the motor pins of a mechanism other than the servo are YAML-only;
-  the mechanism reserves them (`reserve_pin`) so the button and LED cannot be moved onto them.
+  DESIGN.md section 2.1) wins, and only pins `check_pin()` accepts can be saved. A mechanism
+  that drives its own pins (the direct-drive disc) offers them with `offer_motor_pins()`: they
+  are chosen on the device too (D19, owner 2026-10-21; it replaced D4, which kept them YAML-only),
+  saved in the MotorPins record, applied at the next restart, and reserved so the button and
+  LED cannot be moved onto them.
 - Every feature is a package or build option with comments saying what the
   setting does and when to change it. Optional features (BLE, HA time, button,
   web UI) must compile out cleanly.
@@ -165,7 +167,8 @@ driver and the tray or disc it moves. The servo fan tray (`mechanism_servo.*`,
    `tray_capacity`, pins as substitutions with documented defaults, its tuning and
    calibration entities, protected and in the config category), and an example.
    `core.yaml` includes exactly one mechanism package; a build for another mechanism
-   changes that one line. Its motor pins go through `check_pin()` and `reserve_pin()`.
+   changes that one line. Its motor pins go through `offer_motor_pins()` (chosen on the device,
+   checked by `check_pin()`, reserved from the button and LED) and get pin selects in its package.
 6. **The web app follows the device.** A mechanism adds its description to
    `MECHANISMS` in `web/src/mechanisms.js` under its `name()` (its tray drawing, its
    wording, its calibration cards as data) and lists its entities in

@@ -240,6 +240,9 @@ class Feeder:
             a("sensor", "Motor Loop Max Gap", 1.2, category=DIAGNOSTIC, uom="ms")
             a("number", "Declared Tray Position", 0, icon="mdi:numeric", min_value=0, max_value=14, step=1)
             a("button", "Declare Tray Position")
+            for name, pin in [("Motor IN1 Pin", "GPIO1"), ("Motor IN2 Pin", "GPIO2"), ("Motor STBY Pin", "GPIO6"),
+                              ("Encoder A Pin", "GPIO4"), ("Encoder B Pin", "GPIO5")]:
+                a("select", name, pin, icon="mdi:pin", category=CONFIG, options=PIN_OPTIONS)
         elif not args.no_calibration:  # calibration.yaml
             a("switch", "Calibration Mode", False, icon="mdi:tune")
             a("select", "Calibration Position", "0", icon="mdi:numeric", options=[str(i) for i in range(7)])

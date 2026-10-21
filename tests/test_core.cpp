@@ -822,6 +822,7 @@ class DstFeeder : public FeederCore {
   void hal_save_state(const State &, bool) override {}
   void hal_save_device(const Device &) override {}
   void hal_save_tuning(const Tuning &, bool) override {}
+  void hal_save_motor_pins(const MotorPins &) override {}
   void hal_apply_timezone(const TzRules *) override {}
   void hal_random(uint8_t *out, size_t n) override { std::memset(out, 0, n); }
 

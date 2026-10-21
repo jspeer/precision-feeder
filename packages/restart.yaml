@@ -1,0 +1,48 @@
+# Precision Feeder: Restart, Restart Needed and Pins In Use, for every build whose settings wait for a restart (the
+# pins, the name, the access-point password). hardware.yaml includes it; a build without hardware.yaml (the
+# direct-drive disc's) includes it directly.
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+#   Pins In Use            the pins the drivers started with
+#   Restart Needed         a saved change waits for a restart (pins, or the name or access-point password set in the
+#                          web app)
+#   Restart                restart the feeder; refused while the tray moves (feeding resumes by itself afterwards)
+
+text_sensor:
+  - platform: template
+    id: pf_pins_in_use
+    name: "Pins In Use"
+    icon: mdi:pin-outline
+    entity_category: diagnostic
+    update_interval: never
+
+binary_sensor:
+  - platform: template
+    id: pf_restart_needed
+    name: "Restart Needed"
+    icon: mdi:restart-alert
+    entity_category: diagnostic
+    lambda: return id(feeder).restart_needed();
+
+button:
+  - platform: template
+    name: "Restart"
+    icon: mdi:restart
+    entity_category: config
+    on_press:
+      - lambda: |-
+          // Not in the middle of a feed: an interrupted move would leave the tray position unknown.
+          if (id(feeder).tray_state() == precision_feeder::TrayState::MOVING) {
+            ESP_LOGW("precision_feeder", "Restart refused: the tray is moving");
+            return;
+          }
+          ESP_LOGI("precision_feeder", "Restarting (Restart button)");
+          App.safe_reboot();
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: precision_feeder::publish_text(id(pf_pins_in_use), id(feeder).pins_text());
