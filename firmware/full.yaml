@@ -18,7 +18,7 @@
 #   - The name has the end of the board's MAC address, so several feeders do not clash.
 
 substitutions:
-  fw_variant: "full"
+  fw_variant: "n20-direct"   # a branch variant: the update check offers it nothing (D12)
   # ESPHome adds "-<6 hex digits>" to the BLE name too, and refuses more than 20 characters in all.
   ble_name: Feeder
   name_add_mac_suffix: "true"
@@ -34,8 +34,8 @@ packages:
   status: !include precision-feeder/packages/status.yaml
   controls: !include precision-feeder/packages/controls.yaml
   schedule_editor: !include precision-feeder/packages/schedule_editor.yaml
-  calibration: !include precision-feeder/packages/calibration.yaml
-  hardware: !include precision-feeder/packages/hardware.yaml
+  # calibration: !include precision-feeder/packages/calibration.yaml  # servo only: not on the direct-drive disc
+  # hardware: !include precision-feeder/packages/hardware.yaml  # servo only: not on the direct-drive disc
   diagnostics: !include precision-feeder/packages/diagnostics.yaml
   ble_gatt: !include precision-feeder/packages/ble_gatt.yaml
   network_info: !include precision-feeder/packages/network_info.yaml

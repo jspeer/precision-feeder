@@ -153,7 +153,7 @@ Pins FeederCore::pins_saved() const {
 
 Result FeederCore::set_pin(PinRole role, uint8_t gpio) {
   const char *name = ROLE_NAMES[static_cast<uint8_t>(role)];
-  if (!this->pins_runtime_ || (role == PinRole::BUTTON && !this->has_button_) ||
+  if (!this->pins_runtime_ || (role == PinRole::SERVO && !this->is_servo()) || (role == PinRole::BUTTON && !this->has_button_) ||
       (role == PinRole::LED && !this->has_led_))
     return Result::UNSUPPORTED;
   if (gpio != PIN_BUILD && !usable(role, gpio, &this->reserved_pins_)) {
@@ -233,7 +233,13 @@ Board FeederCore::board() const {
 
 std::string FeederCore::pins_text() const {
   const Pins &p = this->pins_in_use_;
-  return "servo " + pin_text(p.servo) + ", button " + pin_text(p.button) + ", LED " + pin_text(p.led);
+  std::string out = "button " + pin_text(p.button) + ", LED " + pin_text(p.led);
+  if (this->is_servo())
+    return "servo " + pin_text(p.servo) + ", " + out;
+  // Another mechanism: its own pins, set in its YAML.
+  for (uint8_t i = 0; i < this->reserved_pins_.count; i++)
+    out += std::string(i == 0 ? ", motor " : " ") + pin_text(this->reserved_pins_.pins[i]);
+  return out;
 }
 
 }  // namespace precision_feeder

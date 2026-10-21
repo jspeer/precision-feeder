@@ -17,7 +17,7 @@
 #   - The name has the end of the board's MAC address, so several feeders do not clash.
 
 substitutions:
-  fw_variant: "no-ble"
+  fw_variant: "n20-direct-no-ble"   # a branch variant: the update check offers it nothing (D12)
   name_add_mac_suffix: "true"
   timezone: UTC                # the wizard sets the real one (DESIGN.md section 9.4)
 
@@ -31,8 +31,8 @@ packages:
   status: !include precision-feeder/packages/status.yaml
   controls: !include precision-feeder/packages/controls.yaml
   schedule_editor: !include precision-feeder/packages/schedule_editor.yaml
-  calibration: !include precision-feeder/packages/calibration.yaml
-  hardware: !include precision-feeder/packages/hardware.yaml
+  # calibration: !include precision-feeder/packages/calibration.yaml  # servo only: not on the direct-drive disc
+  # hardware: !include precision-feeder/packages/hardware.yaml  # servo only: not on the direct-drive disc
   diagnostics: !include precision-feeder/packages/diagnostics.yaml
   network_info: !include precision-feeder/packages/network_info.yaml
   improv_serial: !include precision-feeder/packages/improv_serial.yaml

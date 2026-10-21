@@ -1,0 +1,313 @@
+# Precision Feeder: the direct-drive disc mechanism (DESIGN.md section 3.0.2). core.yaml includes it on the
+# variant/n20-direct-drive branch; you do not.
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# A GA12-N20 gear motor (6 V, 35 rpm) with a quadrature encoder, behind one channel of a DRV8833, turns a 3D-printed
+# disc of open slots directly: 15 on the bench print, 24 degrees apart. One slot is always over the chute, so a load
+# holds 14 portions. It only turns forward (a feed is one slot and a small wiggle); Tray Reload moves nothing.
+#
+# Wiring (the defaults below): motor M1 -> DRV8833 AO1, M2 -> AO2; AIN1 -> GPIO1, AIN2 -> GPIO2, STBY -> GPIO6;
+# encoder C1 -> GPIO4, C2 -> GPIO5, encoder VCC -> 3V3; DRV8833 VM -> 5V; all grounds together; 100 uF across 5V
+# and GND. The pins are set here only (DESIGN.md section 2.1, D4): the button and the LED cannot be moved onto them.
+#
+# Calibrate it before feeding: Maintenance in the web app (or the Calibration buttons below), docs/CALIBRATION.md.
+
+substitutions:
+  # Slots on the disc and portions per load: tray_capacity is always disc_slots - 1 (tests/test_consistency.py
+  # checks it). Change both together for another print.
+  disc_slots: "15"
+  tray_capacity: "14"
+  # GPIO numbers (Waveshare ESP32-S3-Zero, as wired on the bench).
+  motor_in1_pin: GPIO1         # DRV8833 AIN1
+  motor_in2_pin: GPIO2         # DRV8833 AIN2
+  motor_standby_pin: GPIO6     # DRV8833 STBY: low keeps the motor off
+  encoder_a_pin: GPIO4         # encoder C1
+  encoder_b_pin: GPIO5         # encoder C2
+  motor_pwm_frequency: 20kHz   # above hearing; the DRV8833 takes up to 50 kHz
+
+# The motion's timings and limits are YAML-only (D10); the defaults are the bench sketch's (v7). Add any of these to
+# the block below to change one: start_time, first_brake, creep_brake, final_brake, settle_time, wiggle_first_brake,
+# wiggle_creep_brake, wiggle_turn_brake, stall_time, drive_stall_time, timeout_base, watchdog, direction_test_time,
+# pulse_start, pulse_min, pulse_max, wiggle_pulse_floor, pulse_far_ticks, wiggle_far_ticks, reverse_fault_ticks
+# (components/precision_feeder_n20/__init__.py; what each does: N20Timing in mechanism_n20.h).
+precision_feeder_n20:
+  id: disc
+  slots: ${disc_slots}
+  in1_pin: ${motor_in1_pin}
+  in2_pin: ${motor_in2_pin}
+  standby_pin: ${motor_standby_pin}
+  encoder_a_pin: ${encoder_a_pin}
+  encoder_b_pin: ${encoder_b_pin}
+  pwm_frequency: ${motor_pwm_frequency}
+
+precision_feeder:
+  # With the web server, changing these needs the settings password when one is set (packages/web_server.yaml has
+  # the rest of the list, Calibration Mode included).
+  protected_entities:
+    - number/Ticks Per Turn
+    - number/Drive Power
+    - number/Braking Distance
+    - number/Wiggle Amplitude
+    - number/Wiggle Cycles
+    - number/Slot Trim
+    - number/Calibration Turns
+    - switch/Reverse Motor
+    - switch/Reverse Encoder
+    - button/Calibration Start
+    - button/Calibration Yes
+    - button/Calibration No
+    - button/Calibration Nudge 0.1°
+    - button/Calibration Nudge 1°
+    - button/Calibration Overshot
+    - button/Calibration Zero
+    - button/Calibration Run Turns
+    - button/Calibration Measured
+    - button/Calibration Next Slot
+
+# --- Tuning (saved on the feeder; limits from mechanism_n20.cpp's table, which tests/test_consistency.py checks) --
+number:
+  - platform: template
+    id: pf_n20_ticks
+    name: "Ticks Per Turn"
+    icon: mdi:rotate-360
+    entity_category: config
+    unit_of_measurement: ticks
+    min_value: 1000
+    max_value: 100000
+    step: 1
+    mode: box
+    # Encoder ticks for one turn of the disc. Measured by the calibration (Run Turns, then Measured).
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_TICKS_PER_TURN, (int32_t) x);
+    update_interval: never
+  - platform: template
+    id: pf_n20_power
+    name: "Drive Power"
+    icon: mdi:flash
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 20
+    max_value: 100
+    step: 1
+    mode: box
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_POWER, (int32_t) x);
+    update_interval: never
+  - platform: template
+    id: pf_n20_braking
+    name: "Braking Distance"
+    icon: mdi:car-brake-hold
+    entity_category: config
+    unit_of_measurement: ticks
+    min_value: 10
+    max_value: 2000
+    step: 1
+    mode: box
+    # Where it stops driving and starts braking and creeping, before each target. Longer: gentler, slower.
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_BRAKING_DISTANCE, (int32_t) x);
+    update_interval: never
+  - platform: template
+    id: pf_n20_wiggle_amplitude
+    name: "Wiggle Amplitude"
+    icon: mdi:vibrate
+    entity_category: config
+    unit_of_measurement: "°"
+    min_value: 0.1
+    max_value: 5
+    step: 0.1
+    mode: box
+    # How far each side of the slot the wiggle goes. The wiggle is part of every feed: its last leg centres the slot.
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_WIGGLE_AMPLITUDE, (int32_t) std::lround(x * 10));
+    update_interval: never
+  - platform: template
+    id: pf_n20_wiggle_cycles
+    name: "Wiggle Cycles"
+    icon: mdi:sine-wave
+    entity_category: config
+    min_value: 1
+    max_value: 10
+    step: 1
+    mode: box
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_WIGGLE_CYCLES, (int32_t) x);
+    update_interval: never
+  - platform: template
+    id: pf_n20_trim
+    name: "Slot Trim"
+    icon: mdi:arrow-left-right
+    entity_category: config
+    unit_of_measurement: "°"
+    min_value: -12
+    max_value: 12
+    step: 0.1
+    mode: box
+    # Shifts every slot together, when all of them stop off the hole by the same amount (the calibration's check).
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_TRIM, (int32_t) std::lround(x * 10));
+    update_interval: never
+  - platform: template
+    id: pf_n20_cal_turns
+    name: "Calibration Turns"
+    icon: mdi:counter
+    entity_category: config
+    min_value: 1
+    max_value: 10
+    step: 1
+    mode: box
+    # Turns the calibration measures over: more is more accurate, and takes longer (about 1.7 s a turn).
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_CALIBRATION_TURNS, (int32_t) x);
+    update_interval: never
+
+  # --- Recovery (after a power cut mid-feed): nudge forward in calibration mode, then declare ---------------
+  - platform: template
+    id: declared_position
+    name: "Declared Tray Position"
+    icon: mdi:numeric
+    min_value: 0
+    max_value: ${tray_capacity}
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 0
+
+switch:
+  - platform: template
+    name: "Calibration Mode"
+    icon: mdi:tune
+    lambda: return id(feeder).calibration_mode();
+    turn_on_action:
+      - lambda: id(feeder).set_calibration_mode(true);
+    turn_off_action:
+      - lambda: id(feeder).set_calibration_mode(false);
+  # Set by the calibration's direction test; change by hand only if you rewire.
+  - platform: template
+    name: "Reverse Motor"
+    icon: mdi:swap-horizontal
+    entity_category: config
+    lambda: return id(feeder).tuning_value(precision_feeder::N20_REVERSE_MOTOR) != 0;
+    turn_on_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_REVERSE_MOTOR, 1);
+    turn_off_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_REVERSE_MOTOR, 0);
+  - platform: template
+    name: "Reverse Encoder"
+    icon: mdi:swap-horizontal-variant
+    entity_category: config
+    lambda: return id(feeder).tuning_value(precision_feeder::N20_REVERSE_ENCODER) != 0;
+    turn_on_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_REVERSE_ENCODER, 1);
+    turn_off_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_REVERSE_ENCODER, 0);
+
+# --- The guided calibration (calibration mode on; docs/CALIBRATION.md). Calibration Step says what comes next. ----
+button:
+  - platform: template
+    name: "Calibration Start"
+    icon: mdi:play
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_START);
+  - platform: template
+    name: "Calibration Yes"
+    icon: mdi:check
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_YES);
+  - platform: template
+    name: "Calibration No"
+    icon: mdi:close
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NO);
+  - platform: template
+    name: "Calibration Nudge 0.1°"
+    icon: mdi:chevron-right
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NUDGE, 1);
+  - platform: template
+    name: "Calibration Nudge 1°"
+    icon: mdi:chevron-double-right
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NUDGE, 10);
+  - platform: template
+    name: "Calibration Overshot"
+    icon: mdi:undo
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_OVERSHOT);
+  - platform: template
+    name: "Calibration Zero"
+    icon: mdi:target
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_ZERO);
+  - platform: template
+    name: "Calibration Run Turns"
+    icon: mdi:rotate-right
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_TURNS);
+  - platform: template
+    name: "Calibration Measured"
+    icon: mdi:ruler
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_MEASURED);
+  - platform: template
+    name: "Calibration Next Slot"
+    icon: mdi:skip-next
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NEXT);
+  - platform: template
+    name: "Declare Tray Position"
+    icon: mdi:map-marker-check
+    on_press:
+      - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);
+
+text_sensor:
+  - platform: template
+    id: pf_n20_step
+    name: "Calibration Step"
+    icon: mdi:list-status
+    update_interval: never
+  - platform: template
+    id: pf_n20_fault
+    name: "Motor Fault"
+    icon: mdi:engine-off-outline
+    entity_category: diagnostic
+    update_interval: never
+
+sensor:
+  - platform: template
+    id: pf_n20_ticks_now
+    name: "Encoder Ticks"
+    icon: mdi:counter
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: never
+  # The longest gap between two motor control steps since boot (they should be 1 ms apart): the S2.0 timing check.
+  - platform: template
+    id: pf_n20_gap
+    name: "Motor Loop Max Gap"
+    icon: mdi:timer-alert-outline
+    entity_category: diagnostic
+    unit_of_measurement: ms
+    accuracy_decimals: 1
+    update_interval: never
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace precision_feeder;
+          auto *f = id(feeder);
+          publish_number(id(pf_n20_ticks), f->tuning_value(N20_TICKS_PER_TURN));
+          publish_number(id(pf_n20_power), f->tuning_value(N20_POWER));
+          publish_number(id(pf_n20_braking), f->tuning_value(N20_BRAKING_DISTANCE));
+          publish_number(id(pf_n20_wiggle_amplitude), f->tuning_value(N20_WIGGLE_AMPLITUDE) / 10.0f);
+          publish_number(id(pf_n20_wiggle_cycles), f->tuning_value(N20_WIGGLE_CYCLES));
+          publish_number(id(pf_n20_trim), f->tuning_value(N20_TRIM) / 10.0f);
+          publish_number(id(pf_n20_cal_turns), f->tuning_value(N20_CALIBRATION_TURNS));
+          publish_text(id(pf_n20_step), f->calibration_mode() ? f->calibration_text() : "Calibration mode is off");
+          publish_text(id(pf_n20_fault), f->mechanism_fault()[0] ? f->mechanism_fault() : "none");
+          publish_number(id(pf_n20_ticks_now), id(disc).encoder_ticks());
+          publish_number(id(pf_n20_gap), id(disc).max_gap_us() / 1000.0f);

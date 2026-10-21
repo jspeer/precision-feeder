@@ -166,19 +166,21 @@ async def to_code(config):
     cg.add(var.set_wiggle(config[CONF_WIGGLE]))
     cg.add(var.set_detach_delay(config[CONF_DETACH_DELAY].total_milliseconds))
 
+    # Runtime pins: the servo's (when the mechanism is the servo), the button's and the LED's. A mechanism that drives
+    # its own pins has no servo pin; the button and LED pins still work.
     if CONF_SERVO_PIN_ID in config:
         cg.add(var.set_servo_pin(await cg.get_variable(config[CONF_SERVO_PIN_ID])))
-        if CONF_BUTTON_ID in config:
-            sensor = await cg.get_variable(config[CONF_BUTTON_ID])
-            cg.add(var.set_button(sensor, await cg.get_variable(config[CONF_BUTTON_PIN_ID])))
-        if CONF_STATUS_LED_ID in config:
-            light = await cg.get_variable(config[CONF_STATUS_LED_ID])
-            led = await cg.get_variable(config[CONF_STATUS_LED_OUTPUT_ID])
-            cg.add(var.set_status_led(light, led, config[CONF_STATUS_LED_PIN]))
+    if CONF_BUTTON_ID in config:
+        sensor = await cg.get_variable(config[CONF_BUTTON_ID])
+        cg.add(var.set_button(sensor, await cg.get_variable(config[CONF_BUTTON_PIN_ID])))
+    if CONF_STATUS_LED_ID in config:
+        light = await cg.get_variable(config[CONF_STATUS_LED_ID])
+        led = await cg.get_variable(config[CONF_STATUS_LED_OUTPUT_ID])
+        cg.add(var.set_status_led(light, led, config[CONF_STATUS_LED_PIN]))
     if CONF_OTA_ID in config:
         cg.add(var.set_ota(await cg.get_variable(config[CONF_OTA_ID])))
 
-    loader = cg.new_Pvariable(config[CONF_PIN_LOADER_ID], var)  # does nothing without servo_pin_id
+    loader = cg.new_Pvariable(config[CONF_PIN_LOADER_ID], var)  # does nothing without runtime pins
     await cg.register_component(loader, {})
 
     if CONF_WEB_SERVER_ID in config:

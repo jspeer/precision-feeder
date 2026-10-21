@@ -102,6 +102,10 @@ def main() -> int:
     if version != fw_version():
         print(f"version {version} is not fw_version {fw_version()} in packages/core.yaml")
         return 1
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        # A branch variant ("2.1.0-n20.1", AGENTS.md "Adding a mechanism", rule 8) is never released.
+        print(f"version {version} is a branch variant: variants are not released")
+        return 1
     manifest = make(images, site, version)
     if not (site / "release-notes.md").read_text().strip():
         print(f"warning: no '## {version}' section in CHANGELOG.md")

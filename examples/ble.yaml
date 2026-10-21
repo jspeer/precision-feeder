@@ -44,9 +44,9 @@ packages:
   status: !include precision-feeder/packages/status.yaml
   controls: !include precision-feeder/packages/controls.yaml
   schedule_editor: !include precision-feeder/packages/schedule_editor.yaml
-  calibration: !include precision-feeder/packages/calibration.yaml
+  # calibration: !include precision-feeder/packages/calibration.yaml  # servo only: not on the direct-drive disc
   # Optional.
-  hardware: !include precision-feeder/packages/hardware.yaml                 # board and pins chosen on the device (pins below are then defaults)
+  # hardware: !include precision-feeder/packages/hardware.yaml                 # board and pins chosen on the device (pins below are then defaults)  # servo only: not on the direct-drive disc
   ble_gatt: !include precision-feeder/packages/ble_gatt.yaml                 # BLE GATT control plane (docs/PROTOCOL.md)
   diagnostics: !include precision-feeder/packages/diagnostics.yaml           # free heap and loop time (useful when sizing BLE)
   network_info: !include precision-feeder/packages/network_info.yaml       # Wi-Fi network, addresses and signal

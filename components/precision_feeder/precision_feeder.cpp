@@ -257,9 +257,11 @@ bool PrecisionFeeder::set_wifi(const std::string &ssid, const std::string &passw
 }
 
 void PrecisionFeeder::apply_pins() {
-  if (this->servo_pin_ == nullptr)
+  if (this->servo_pin_ == nullptr && this->button_pin_ == nullptr && this->led_output_ == nullptr)
     return;  // a build without runtime pins: every driver keeps its YAML pin
-  const Pins build{this->servo_pin_->get_pin(), this->button_pin_ != nullptr ? this->button_pin_->get_pin() : PIN_NONE,
+  // No servo pin: a mechanism that drives its own pins (they are reserved, so the button and LED keep off them).
+  const Pins build{this->servo_pin_ != nullptr ? static_cast<uint8_t>(this->servo_pin_->get_pin()) : PIN_NONE,
+                   this->button_pin_ != nullptr ? this->button_pin_->get_pin() : PIN_NONE,
                    this->led_output_ != nullptr ? this->led_build_pin_ : PIN_NONE};
   const Device saved = load_device_early_();
   std::string problem;
@@ -269,10 +271,13 @@ void PrecisionFeeder::apply_pins() {
     use.button = PIN_NONE;  // not in this build, whatever is saved
   if (!has_led)
     use.led = PIN_NONE;
+  if (this->servo_pin_ == nullptr)
+    use.servo = PIN_NONE;  // a servo pin saved by a servo build means nothing here
   if (!problem.empty())
     ESP_LOGW(TAG, "Pins: %s", problem.c_str());
 
-  this->servo_pin_->set_pin(static_cast<gpio_num_t>(use.servo));
+  if (this->servo_pin_ != nullptr)
+    this->servo_pin_->set_pin(static_cast<gpio_num_t>(use.servo));
   if (this->button_pin_ != nullptr) {
     if (use.button == PIN_NONE)
       this->button_->disable_loop();  // before its setup(): ESPHome then never sets it up, so the pin stays free

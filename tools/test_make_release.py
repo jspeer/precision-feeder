@@ -55,7 +55,8 @@ class MakeReleaseTest(unittest.TestCase):
                          f"see [a]({make_release.REPO}/blob/v9.8.7/docs/A.md), [b](https://x.y/z), [c](#top)")
 
     def test_version_matches_the_firmware(self):
-        self.assertRegex(make_release.fw_version(), r"^\d+\.\d+\.\d+$")
+        # A release ("2.1.0"), or a branch variant ("2.1.0-n20.1"), which make_release refuses to publish.
+        self.assertRegex(make_release.fw_version(), r"^\d+\.\d+\.\d+(-[a-z0-9]+\.\d+)?$")
 
 
 if __name__ == "__main__":

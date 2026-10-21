@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '4c51ca80037d';
+const BUILD_ID = '9681c3a5d861';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -80,6 +80,30 @@ const E = {
   restartCycle: 'button/Restart Cycle Today',
   clearOneshots: 'button/Clear One-shot Feeds',
 
+  // packages/mechanism_n20.yaml (the direct-drive disc; only on the variant/n20-direct-drive branch's builds)
+  calStep: 'text_sensor/Calibration Step',
+  calStart: 'button/Calibration Start',
+  calYes: 'button/Calibration Yes',
+  calNo: 'button/Calibration No',
+  calNudgeSmall: 'button/Calibration Nudge 0.1°',
+  calNudgeLarge: 'button/Calibration Nudge 1°',
+  calOvershot: 'button/Calibration Overshot',
+  calZero: 'button/Calibration Zero',
+  calTurns: 'button/Calibration Run Turns',
+  calMeasured: 'button/Calibration Measured',
+  calNext: 'button/Calibration Next Slot',
+  ticksPerTurn: 'number/Ticks Per Turn',
+  calibrationTurns: 'number/Calibration Turns',
+  reverseMotor: 'switch/Reverse Motor',
+  reverseEncoder: 'switch/Reverse Encoder',
+  drivePower: 'number/Drive Power',
+  brakingDistance: 'number/Braking Distance',
+  slotTrim: 'number/Slot Trim',
+  wiggleAmplitude: 'number/Wiggle Amplitude',
+  wiggleCycles: 'number/Wiggle Cycles',
+  motorFault: 'text_sensor/Motor Fault',
+  encoderTicks: 'sensor/Encoder Ticks',
+  motorLoopGap: 'sensor/Motor Loop Max Gap',
   // packages/calibration.yaml
   calibrationMode: 'switch/Calibration Mode',
   calibrationPosition: 'select/Calibration Position',
@@ -1401,6 +1425,67 @@ const MECHANISMS = {
     // E.x, done]], readings: [[label, E.x]]}.
     cards: [],
   },
+};
+
+MECHANISMS['n20-direct'] = {
+  /** The disc as a ring: the slot over the chute at the bottom (always empty), slots with food, and slots used. */
+  dial(position, unknown) {
+    const cap = capacity(), slots = cap + 1;
+    const left = unknown ? null : Math.max(0, cap - position);
+    const svg = svgEl('svg', { viewBox: '0 0 200 170', class: 'dial', role: 'img' });
+    const title = svgEl('title', {});
+    title.textContent = unknown ? 'Disc position unknown' : `${left} of ${cap} portions left`;
+    svg.appendChild(title);
+    svg.appendChild(svgEl('circle', { cx: 100, cy: 85, r: 70, class: 'dial-track', fill: 'none' }));
+    for (let i = 0; i < slots; i++) {
+      // Slot 0 is over the chute; the next feed brings slot 1 there, and so on round the disc.
+      const a = (90 + i * 360 / slots) * Math.PI / 180;
+      const x = 100 + 70 * Math.cos(a), y = 85 + 70 * Math.sin(a);
+      let cls = 'slot-used';
+      if (unknown) cls = 'slot-unknown';
+      else if (i === 0) cls = 'slot-closed';
+      else if (i <= left) cls = 'slot-food';
+      if (i === 0) svg.appendChild(svgEl('circle', { cx: x, cy: y, r: 12, class: 'slot-ring' }));
+      svg.appendChild(svgEl('circle', { cx: x, cy: y, r: 7, class: `slot ${cls}` }));
+    }
+    dialCentre(svg, unknown, left, cap);
+    return svg;
+  },
+  position: p => `${p} fed since reload`,
+  reloadText: cap => 'Press this when you have filled the disc. The disc does not move: fill every slot except the one ' +
+                     `over the chute, and all ${cap} portions count as available again.`,
+  reloadDone: 'Disc reloaded',
+  recoverText: cap => 'Choose how many portions were fed since the disc was last filled (0 to ' + cap + '). First make ' +
+                      'sure a slot is centred over the hole: turn Calibration Mode on and nudge it forward if not.',
+  recoverFallback: 'Not sure? Cancel, empty the disc, and use Tray reload after filling it again.',
+  recoveryHint: 'Turn Calibration Mode on and nudge the disc forward until a slot is over the hole, then declare how ' +
+                'many portions were fed, or refill the disc and reload.',
+  cards: [
+    { title: 'Calibration',
+      hint: 'A guided setup: empty the disc first. Start tests the direction; then Zero on a slot, Run turns, nudge ' +
+            'back onto the same slot and press Measured; then Next slot steps through every slot as a feed does. ' +
+            'Nudges only go forward; Overshot backs off and comes forward again.',
+      settings: [['Calibration mode', 'Feeding is refused while it is on.', E.calibrationMode]],
+      readings: [['Next step', E.calStep]],
+      buttons: [['Start', E.calStart], ['Yes', E.calYes], ['No', E.calNo], ['Nudge 0.1°', E.calNudgeSmall],
+                ['Nudge 1°', E.calNudgeLarge], ['Overshot', E.calOvershot], ['Zero', E.calZero],
+                ['Run turns', E.calTurns], ['Measured', E.calMeasured], ['Next slot', E.calNext]] },
+    { title: 'Encoder',
+      settings: [['Ticks per turn', 'Encoder ticks for one turn of the disc; the calibration measures it.', E.ticksPerTurn],
+                 ['Calibration turns', 'Turns the measurement spans: more is more accurate.', E.calibrationTurns],
+                 ['Reverse motor', 'Set by the direction test.', E.reverseMotor],
+                 ['Reverse encoder', 'Set by the direction test.', E.reverseEncoder]] },
+    { title: 'Motion',
+      settings: [['Drive power', '', E.drivePower],
+                 ['Braking distance', 'Where it starts braking and creeping before each slot.', E.brakingDistance],
+                 ['Slot trim', 'Shifts every slot together, when all stop off the hole the same way.', E.slotTrim]] },
+    { title: 'Wiggle',
+      hint: 'Part of every feed: it shakes the food loose, and its last move centres the slot over the hole.',
+      settings: [['Amplitude', 'How far each side of the slot.', E.wiggleAmplitude],
+                 ['Cycles', '', E.wiggleCycles]] },
+    { title: 'Motor status',
+      readings: [['Last fault', E.motorFault], ['Encoder ticks', E.encoderTicks], ['Longest control gap', E.motorLoopGap]] },
+  ],
 };
 
 /** The description of the mechanism the device reports (the servo's for a firmware that reports none). */

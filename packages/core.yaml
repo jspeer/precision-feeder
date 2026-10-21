@@ -14,7 +14,8 @@
 substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
-  fw_version: "2.1.0"
+  # A variant built from the variant/n20-direct-drive branch (2.1.0 plus the direct-drive disc): never released.
+  fw_version: "2.1.0-n20.1"
   # Which build this is, shown as Firmware Variant: "full" or "no-ble" for the prebuilt binaries (firmware/), "yaml"
   # for a build from your own YAML. The web app's update check (Firmware page) offers the matching prebuilt image only
   # to a prebuilt binary; a YAML build is updated with ESPHome. Leave it.
@@ -28,7 +29,8 @@ substitutions:
   # --- Pins (defaults suit the Waveshare ESP32-S3-Zero) -------------------
   # Starting values only when the hardware package is included: pins chosen there are saved on the feeder and win
   # (DESIGN.md section 2.1). The servo's pin, servo_pin, is in packages/mechanism_servo.yaml.
-  button_pin: GPIO2            # optional push button to GND (button package only)
+  button_pin: GPIO3            # optional push button to GND (button package only). GPIO3 on the direct-drive disc:
+                               # GPIO2 is the bridge's AIN2
   status_led_pin: GPIO21       # onboard WS2812 (status LED package only)
   boot_pin: GPIO0              # the board's BOOT button: held 10 s, clears the settings password (web_server package)
 
@@ -118,6 +120,6 @@ precision_feeder:
   id: feeder
   time_id: feeder_time
 
-# What moves the tray. Exactly one mechanism package.
+# What moves the tray. Exactly one mechanism package. On this branch, the direct-drive disc (main has the servo's).
 packages:
-  mechanism: !include mechanism_servo.yaml
+  mechanism: !include mechanism_n20.yaml

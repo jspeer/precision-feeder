@@ -111,6 +111,28 @@ class Consistency(unittest.TestCase):
         self.check("Servo Max Pulse", c["PULSE_MAX_LO"], c["PULSE_MAX_HI"])
         self.check("Calibration Offset", c["CAL_OFFSET_LO"], c["CAL_OFFSET_HI"], scale=10.0)
 
+    def test_n20_mechanism(self):
+        """The direct-drive disc (packages/mechanism_n20.yaml): its capacity is its slots - 1, each tuning entity's
+        YAML limits are its table's (mechanism_n20.cpp, N20_PARAMS) and every protected entity it lists exists."""
+        sub = mechanism_substitutions("mechanism_n20.yaml")
+        self.assertEqual(int(sub["tray_capacity"]), int(sub["disc_slots"]) - 1)
+        source = (ROOT / "components/precision_feeder/mechanism_n20.cpp").read_text()
+        table = re.findall(r'\{"(\w+)", "([^"]+)", "[^"]*", (-?\d+), (-?\d+), (-?\d+), (\d+)\}', source)
+        self.assertEqual(len(table), 9, "N20_PARAMS not found")
+        yaml = (ROOT / "packages/mechanism_n20.yaml").read_text()
+        for key, name, lo, hi, _default, scale in table:
+            if name.startswith("Reverse"):
+                self.assertIn(f'name: "{name}"', yaml, f"{name}: a switch in mechanism_n20.yaml")
+                continue
+            block = yaml.split(f'name: "{name}"', 1)
+            self.assertEqual(len(block), 2, f"{name} ({key}) has no entity in mechanism_n20.yaml")
+            got = [float(x) for x in re.findall(r"(?:min|max)_value: (-?[\d.]+)", block[1])[:2]]
+            self.assertEqual(got, [int(lo) / int(scale), int(hi) / int(scale)], f"{name}: YAML {got} != table {lo}..{hi}")
+        listed = re.findall(r"^    - (\w+)/(.+)$", yaml.split("protected_entities:", 1)[1].split("\n\n", 1)[0], re.M)
+        self.assertGreater(len(listed), 10)
+        for domain, name in listed:
+            self.assertIn(name, self.e, f"protected {domain}/{name} not defined")
+
     def test_location(self):
         self.check("Latitude", -90, 90)
         self.check("Longitude", -180, 180)
