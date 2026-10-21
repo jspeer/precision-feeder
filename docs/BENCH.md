@@ -599,9 +599,9 @@ The disc firmware (DESIGN.md section 3.3) on the owner's bench rig: Waveshare ES
   in the 120 ms push). Which way the disc turned was not watched; the answer Yes was given on the strength of the
   same wiring and the same forward as the sketch. **To check by eye.**
 - **One full turn: exactly 8344 ticks** (Run Turns from a zero, no error). The sketch's count holds.
-- **Feeds:** seven feeds, each one slot and the wiggle, ended -1, +2, -1 ... ticks from the grid (at most 2 ticks,
-  0.09 degrees; the sketch's endurance run: 5). Results ok, remaining counted down, no faults, the guard's daily cap
-  refused the fifth until it was raised for the bench.
+- **Feeds:** nine feeds, each one slot and the wiggle; the three checked against the grid ended -1, +2 and -1 ticks
+  from it (at most 0.09 degrees; the sketch's endurance run: within 5). All ok, remaining counted down, no faults;
+  the guard's daily cap (4) refused the fifth until it was raised for the bench.
 - **Timing: slower than the sketch.** Slot move about 1.19 s (sketch 0.745 s), whole feed with the wiggle about
   3.93 s (sketch 2.49 s), from the new Last Feed Move Time and Last Feed Time diagnostics. Not yet explained; a
   guess is that the sketch's loop (delay(1) plus its body) ran a little slower than the firmware's exact 1 ms timer,
