@@ -71,6 +71,27 @@ class Mechanism {
     (void) point;
     (void) now_ms;
   }
+  /// A step of the mechanism's own guided calibration (the direct-drive disc's, for example). The core calls it only
+  /// in calibration mode; `action` and `arg` are the mechanism's own. False: not possible now (or no such action).
+  virtual bool calibration_action(uint8_t action, int32_t arg, uint32_t now_ms) {
+    (void) action;
+    (void) arg;
+    (void) now_ms;
+    return false;
+  }
+  /// What the guided calibration expects next, for the user; "" without one.
+  virtual const char *calibration_text() const { return ""; }
+  /// A tuning value the calibration worked out (a measured count, a reversed direction): the core sets it through
+  /// its tuning setter, which checks and saves it. False when there is none waiting.
+  virtual bool take_tuning_update(uint8_t &index, int32_t &value) {
+    (void) index;
+    (void) value;
+    return false;
+  }
+  /// True once the tray moved during calibration in a way restore() does not undo (a disc turned by hand or by the
+  /// guided calibration): the core then marks the position unknown when calibration ends, so the tray is reloaded
+  /// before anything is fed.
+  virtual bool calibration_moved() const { return false; }
 
   /// The tuning table (TuningParam). `layout` numbers the table's order and meaning; change it whenever entries are
   /// added, removed or reordered, so values saved under the old layout are not read as the new one.

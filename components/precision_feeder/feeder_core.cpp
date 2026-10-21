@@ -221,6 +221,12 @@ void FeederCore::save_calibration() {
   this->tuning_dirty_ = false;
 }
 
+Result FeederCore::calibration_action(uint8_t action, int32_t arg) {
+  if (!this->calibrating_)
+    return Result::NOT_CALIBRATING;
+  return this->mech_->calibration_action(action, arg, this->hal_millis()) ? Result::OK : Result::INVALID_ARG;
+}
+
 int FeederCore::tuning_index(const char *key) const {
   for (uint8_t i = 0; i < this->tuning_count(); i++) {
     const TuningParam *p = this->tuning_param(i);
@@ -406,6 +412,11 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
 
 void FeederCore::core_loop() {
   this->run_motion_();
+  // Values the mechanism's calibration worked out go through the same setter as every other change.
+  uint8_t tuning_index;
+  int32_t tuning_value;
+  while (this->mech_->take_tuning_update(tuning_index, tuning_value))
+    this->set_tuning(tuning_index, tuning_value);
   const uint32_t now = this->hal_millis();
   if (this->boot_pressed_ && !this->boot_handled_ && now - this->boot_pressed_ms_ >= BOOT_HOLD_MS) {
     this->boot_handled_ = true;
@@ -648,6 +659,13 @@ void FeederCore::set_calibration_mode(bool on) {
     this->log_(LogLevel::kInfo, "Calibration mode on");
   } else {
     this->calibrating_ = false;
+    if (this->mech_->calibration_moved() && !this->state_.unknown) {
+      // The tray turned during calibration: which slots still hold food is not known. Reload before feeding.
+      this->log_(LogLevel::kWarn, "The tray moved during calibration: reload it before feeding");
+      this->state_.unknown = 1;
+      this->state_.moving_to = NO_MOVE;
+      this->save_state_(true);
+    }
     this->save_calibration();
     if (!this->state_.unknown) {
       this->mech_->restore(this->state_.position, this->hal_millis());

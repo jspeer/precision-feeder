@@ -26,6 +26,10 @@ echo "== C++ host tests"
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder -Icomponents/precision_feeder_ble -Itests \
   tests/test_ble_engine.cpp components/precision_feeder_ble/engine.cpp components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp \
   -o "$OUT/test_ble_engine"
+# The direct-drive disc (mechanism_n20.*) on a simulated motor, against the owner's bench sketch (tests/reference/).
+"$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder -Itests -Itests/reference tests/test_n20.cpp \
+  components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp -o "$OUT/test_n20"
+"$OUT/test_n20"
 "$OUT/test_ble_engine"
 
 echo "== Python tests (client, and limits consistency)"

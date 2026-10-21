@@ -491,6 +491,11 @@ class FeederCore : private ServoOutput {
   Result jog_calibration(uint8_t position, int16_t delta_tenths);
   /// Write the offsets (all settings) to storage now.
   void save_calibration();
+  /// A step of the mechanism's own guided calibration (Mechanism::calibration_action). NOT_CALIBRATING outside
+  /// calibration mode; INVALID_ARG when the mechanism cannot do it now.
+  Result calibration_action(uint8_t action, int32_t arg = 0);
+  /// What the mechanism's guided calibration expects next ("" for the servo).
+  const char *calibration_text() const { return this->mech_->calibration_text(); }
   /// Change the servo pulse range at run time (saved like other settings). In calibration mode the servo
   /// moves to the selected position again so the effect can be seen. INVALID_ARG if out of range; UNSUPPORTED when
   /// the mechanism is not the servo.
