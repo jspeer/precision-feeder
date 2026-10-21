@@ -771,6 +771,32 @@ static void test_tuning_layout_1_kept() {
   CHECK(d.f->tuning_value(N20_SLOTS) == 15, "the new value at its default");
 }
 
+static void test_smaller_load_keeps_settings() {
+  current = "disc: a smaller load never rewrites the guard settings";
+  Disc d;
+  d.f->set_daily_cap(14);
+  d.f->set_max_portions_cmd(10);
+  enable_event(*d.f, 0, 0, Anchor::CLOCK, 8 * 60 + 10, 12);
+  d.run(6000);
+  set_in_calibration(d, N20_SLOTS, 8);  // 7 portions a load
+  d.run(6000);
+  d.boot(15);
+  CHECK(d.f->capacity() == 7, "8 slots");
+  CHECK(d.f->cfg.daily_cap == 14 && d.f->cfg.max_portions_cmd == 10 && d.f->cfg.profiles[0].ev[0].portions == 12,
+        "the settings are as the user set them, after a reboot with the smaller load");
+  CHECK(d.f->request_feed(10, Source::ESPHOME) == Result::INVALID_ARG, "a manual request for more than a load: refused");
+  d.f->tray_reload();
+  d.run(17 * 60 * 1000);  // past 08:10 (the reboot set the clock to 07:55): the event asks for 12
+  CHECK(d.f->position() == 7 && d.f->tray_state() == TrayState::EMPTY, "the scheduled 12 fed the 7 a load holds");
+  if (d.f->position() != 7)
+    std::printf("  position %u, last %s, faults %s, today %s\n", d.f->position(), d.f->last_result_text().c_str(),
+                d.f->faults_text().c_str(), d.f->todays_feeds_text().c_str());
+  set_in_calibration(d, N20_SLOTS, 15);
+  d.run(6000);
+  d.boot(15);
+  CHECK(d.f->cfg.daily_cap == 14 && d.f->cfg.max_portions_cmd == 10, "back to 15 slots: still 14 and 10");
+}
+
 int main() {
   test_motion_matches_sketch();
   test_mechanism_feeds();
@@ -786,6 +812,7 @@ int main() {
   test_capacity_other_disc();
   test_slot_count();
   test_tuning_layout_1_kept();
+  test_smaller_load_keeps_settings();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

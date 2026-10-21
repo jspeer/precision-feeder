@@ -170,7 +170,11 @@ and keeps everything else itself:
   later portions of the feed are uncounted, the position is `UNKNOWN` (Faults says "motor fault: ...").
 - **Portions per load** come from `capacity()`: remaining, EMPTY, the guard limits (daily cap, portions per command,
   event and one-shot portions: 1 to capacity) and the BLE ranges. The YAML repeats it as `${tray_capacity}`, set by
-  the mechanism's package.
+  the mechanism's package. The capacity limits what can be *set*; saved values are never clamped to it at boot (only
+  to CAPACITY_MAX), so a smaller load (another slot count, or another drive in a single binary) never rewrites what
+  the user set. They are held to it when used: a scheduled event asking for more than a load feeds what the load
+  holds; a manual request for more is refused (found on the bench, 2026-10-21: a daily cap of 14 became 6 for good
+  after a round trip through the servo drive).
 - **One mechanism per firmware, chosen in the YAML** (owner, 2026-10-20): `core.yaml` includes the mechanism's
   package (`packages/mechanism_servo.yaml` on main). A build for another mechanism changes that one line.
 - **Tuning values** of a mechanism are saved in their own record (`Tuning`, section 9.2), checked against the

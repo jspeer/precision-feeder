@@ -104,7 +104,9 @@ void FeederCore::clamp_loaded_() {
     p.fast_days &= 0x7F;
     for (auto &e : p.ev) {
       e.anchor = std::min<uint8_t>(e.anchor, static_cast<uint8_t>(Anchor::SUNSET));
-      e.portions = std::min<uint8_t>(std::max<uint8_t>(e.portions, EVENT_PORTIONS_LO), this->capacity());
+      // Up to the most any mechanism holds, not this one's: a drive or slot count with a smaller load must not
+      // rewrite what the user set (it is held to the capacity when it feeds, check_guard_).
+      e.portions = std::min<uint8_t>(std::max<uint8_t>(e.portions, EVENT_PORTIONS_LO), CAPACITY_MAX);
       e.days &= 0x7F;
     }
   }
@@ -119,8 +121,8 @@ void FeederCore::clamp_loaded_() {
       static_cast<uint16_t>(clamp(this->cfg.reload_pause_min, RELOAD_PAUSE_MIN_LO, RELOAD_PAUSE_MIN_HI));
   this->cfg.refill_interval_days =
       static_cast<uint16_t>(clamp(this->cfg.refill_interval_days, REFILL_DAYS_LO, REFILL_DAYS_HI));
-  this->cfg.daily_cap = static_cast<uint8_t>(clamp(this->cfg.daily_cap, DAILY_CAP_LO, this->capacity()));
-  this->cfg.max_portions_cmd = static_cast<uint8_t>(clamp(this->cfg.max_portions_cmd, PORTIONS_CMD_LO, this->capacity()));
+  this->cfg.daily_cap = static_cast<uint8_t>(clamp(this->cfg.daily_cap, DAILY_CAP_LO, CAPACITY_MAX));
+  this->cfg.max_portions_cmd = static_cast<uint8_t>(clamp(this->cfg.max_portions_cmd, PORTIONS_CMD_LO, CAPACITY_MAX));
   this->cfg.scheduler_enabled = this->cfg.scheduler_enabled ? 1 : 0;
   if (!location_ok(this->cfg.latitude, this->cfg.longitude)) {  // also catches NaN
     this->cfg.latitude = 0.0f;
@@ -838,8 +840,15 @@ void FeederCore::record_history_(uint8_t portions, Source source) {
 
 Result FeederCore::check_guard_(uint8_t &portions, Source source) {
   const bool scheduled = source == Source::SCHEDULE || source == Source::ONE_SHOT;
-  if (portions == 0 || portions > this->capacity())
+  if (portions == 0)
     return Result::INVALID_ARG;
+  if (portions > this->capacity()) {
+    // A request for more than a load holds. Manual: refused, as typed. Scheduled: an event saved for a drive or slot
+    // count with a bigger load feeds what this one holds (and then what remains), rather than nothing.
+    if (!scheduled)
+      return Result::INVALID_ARG;
+    portions = this->capacity();
+  }
   if (!scheduled && portions > this->cfg.max_portions_cmd)
     return Result::PORTION_LIMIT;
   if (this->calibrating_)
