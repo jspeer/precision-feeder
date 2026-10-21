@@ -587,3 +587,27 @@ server's `/events`.
 - **Kept across a restart:** set to 192.168.8.1, restarted: the setting was kept and the clock synced from it (the
   only server set).
 - Left on the feeder: the build's servers (as before the test), 2.0.2.
+
+## The direct-drive disc, first run (2026-10-21, firmware 2.1.0-n20.1)
+
+The disc firmware (DESIGN.md section 3.3) on the owner's bench rig: Waveshare ESP32-S3-Zero, DRV8833, GA12-N20
+(35 rpm, encoder), wired as in packages/mechanism_n20.yaml, the 15-slot disc fitted. Built from `examples/basic.yaml`
+(with diagnostics) under its own name, `precision-feeder-disc`, flashed over USB; it replaced the bench sketch.
+
+- **It runs.** Mechanism `n20-direct`, Capacity 14, no faults at boot. The bridge stayed off until asked.
+- **Encoder through PCNT:** counts up when driven forward, as the sketch's interrupts did (direction test: 228 ticks
+  in the 120 ms push). Which way the disc turned was not watched; the answer Yes was given on the strength of the
+  same wiring and the same forward as the sketch. **To check by eye.**
+- **One full turn: exactly 8344 ticks** (Run Turns from a zero, no error). The sketch's count holds.
+- **Feeds:** seven feeds, each one slot and the wiggle, ended -1, +2, -1 ... ticks from the grid (at most 2 ticks,
+  0.09 degrees; the sketch's endurance run: 5). Results ok, remaining counted down, no faults, the guard's daily cap
+  refused the fifth until it was raised for the bench.
+- **Timing: slower than the sketch.** Slot move about 1.19 s (sketch 0.745 s), whole feed with the wiggle about
+  3.93 s (sketch 2.49 s), from the new Last Feed Move Time and Last Feed Time diagnostics. Not yet explained; a
+  guess is that the sketch's loop (delay(1) plus its body) ran a little slower than the firmware's exact 1 ms timer,
+  which lengthens each creep pulse. To try: a longer starting creep pulse (pulse_start in the YAML).
+- **Control loop (S2.0):** Motor Loop Max Gap is about 52 ms at every boot and does not grow afterwards, through
+  moves, a full turn and the web server under load (two threads of requests during a feed). So the one long gap is
+  during start-up, before anything can move; while running, the 25 ms watchdog was never reached.
+- Not run yet: the calibration with a slot lined up by eye, real food, a power cut mid-move, a held disc and an
+  unplugged encoder, STBY at power-up, the 300-cycle endurance run.
