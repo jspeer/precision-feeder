@@ -229,6 +229,45 @@ Result FeederCore::calibration_action(uint8_t action, int32_t arg) {
   return this->mech_->calibration_action(action, arg, this->hal_millis()) ? Result::OK : Result::INVALID_ARG;
 }
 
+uint8_t FeederCore::drive_of(const Mechanism *mechanism) const {
+  for (uint8_t i = 0; i < this->drive_count_; i++) {
+    if (this->drives_[i] == mechanism)
+      return static_cast<uint8_t>(i + 1);
+  }
+  return DRIVE_BUILD;
+}
+
+uint8_t FeederCore::resolve_drive(uint8_t saved) const {
+  if (saved >= DRIVE_SERVO && saved <= this->drive_count_)
+    return saved;
+  return this->drive_of(this->mech_build_ != nullptr ? this->mech_build_ : this->mech_);
+}
+
+uint8_t FeederCore::choose_drive(const Device &saved) {
+  if (this->mech_build_ == nullptr)
+    this->mech_build_ = this->mech_;  // the build's, as set_mechanism() left it
+  const uint8_t use = this->resolve_drive(saved.version == DEVICE_VERSION ? saved.reserved[0] : DRIVE_BUILD);
+  this->set_mechanism(this->drives_[use - 1]);
+  this->drive_in_use_ = use;
+  // The first boot that records a drive (reserved[1] still 0) changes nothing; a different one does.
+  this->drive_changed_ = saved.version == DEVICE_VERSION && saved.reserved[1] != 0 && saved.reserved[1] != use;
+  return use;
+}
+
+Result FeederCore::set_drive(uint8_t drive) {
+  if (drive != DRIVE_BUILD && (drive < DRIVE_SERVO || drive > this->drive_count_))
+    return Result::INVALID_ARG;
+  if (this->drive_count_ < 2)
+    return Result::UNSUPPORTED;
+  if (this->dev_.reserved[0] == drive)
+    return Result::OK;
+  this->dev_.reserved[0] = drive;
+  this->hal_save_device(this->dev_);
+  this->log_(LogLevel::kInfo, "Drive set to %s; restart to apply",
+             drive == DRIVE_BUILD ? "the build's" : this->drives_[drive - 1]->name());
+  return Result::OK;
+}
+
 int FeederCore::tuning_index(const char *key) const {
   for (uint8_t i = 0; i < this->tuning_count(); i++) {
     const TuningParam *p = this->tuning_param(i);
@@ -405,6 +444,17 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
     this->set_history_(i, e);
   }
 
+  if (this->drive_in_use_ != DRIVE_BUILD && this->dev_.reserved[1] != this->drive_in_use_) {
+    // Remember the drive this boot uses. If it is not the one the last boot used, which slots hold food is not known.
+    if (this->drive_changed_ && !this->state_.unknown) {
+      this->log_(LogLevel::kWarn, "The drive changed to %s: reload the tray before feeding", this->mech_->name());
+      this->state_.unknown = 1;
+      this->state_.moving_to = NO_MOVE;
+      this->save_state_(true);
+    }
+    this->dev_.reserved[1] = this->drive_in_use_;
+    this->hal_save_device(this->dev_);
+  }
   if (this->state_.moving_to != NO_MOVE) {
     // Power was lost in the middle of a step: the tray may or may not have advanced.
     this->log_(LogLevel::kWarn, "Unfinished move to position %u found: tray position is now UNKNOWN",

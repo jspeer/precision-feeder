@@ -257,7 +257,8 @@ bool PrecisionFeeder::set_wifi(const std::string &ssid, const std::string &passw
 }
 
 void PrecisionFeeder::apply_motor_pins_early() {
-  if (this->motor_pin_count() == 0 || this->motor_user_ == nullptr)
+  // A drive that claims its own pins, while it is the drive (a single binary running the servo leaves them alone).
+  if (this->motor_pin_count() == 0 || this->motor_user_ == nullptr || this->is_servo())
     return;
   this->pref_motor_pins_ =
       global_preferences->make_preference<MotorPins>(fnv1_hash("precision_feeder.motor_pins.v1"));
@@ -276,6 +277,40 @@ void PrecisionFeeder::apply_motor_pins_early() {
 void PrecisionFeeder::hal_save_motor_pins(const MotorPins &pins) {
   this->pref_motor_pins_.save(&pins);
   global_preferences->sync();
+}
+
+void PrecisionFeeder::offer_drive(Mechanism *mechanism, Component *driver, const uint8_t *pins, uint8_t n,
+                                  bool with_servo) {
+  (void) pins;  // its pins are offered with offer_motor_pins(): reserved while it is the drive (D19)
+  (void) n;
+  if (!with_servo) {
+    this->set_mechanism(mechanism);  // the only mechanism
+    return;
+  }
+  // The servo is here too: a second drive, chosen on the device. This build's default is the one offered last.
+  const uint8_t drive = this->add_drive(mechanism);
+  if (drive < 2)
+    return;
+  this->offers_[drive - 2].driver = driver;
+  this->set_mechanism(mechanism);
+}
+
+void PrecisionFeeder::apply_drive() {
+  if (this->drive_count() < 2)
+    return;
+  const uint8_t use = this->choose_drive(load_device_early_());
+  for (uint8_t d = 2; d <= this->drive_count(); d++) {
+    DriveOffer &o = this->offers_[d - 2];
+    if (d != use && o.driver != nullptr)
+      o.driver->disable_loop();  // before its setup(): never set up, so its pins stay free (and are not reserved)
+  }
+  if (use != DRIVE_SERVO) {
+    if (this->servo_driver_ != nullptr)
+      this->servo_driver_->disable_loop();  // the servo's LEDC is never set up: its pin is free for this drive
+    this->servo_pin_ = nullptr;             // and it has no pin to choose
+  }
+  ESP_LOGI(TAG, "Drive: %s (chosen on the device: %s)", this->mechanism().name(),
+           this->drive_saved() == DRIVE_BUILD ? "no, the build's" : "yes");
 }
 
 void PrecisionFeeder::apply_pins() {

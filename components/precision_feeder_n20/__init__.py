@@ -14,7 +14,8 @@ reviewed by a human, but it may still contain mistakes.
 import esphome.codegen as cg
 from esphome.components import precision_feeder
 import esphome.config_validation as cv
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_OUTPUT
+from esphome.core import CORE
 
 CODEOWNERS = []
 DEPENDENCIES = ["precision_feeder"]
@@ -116,5 +117,7 @@ async def to_code(config):
         cg.add(var.set_timing_ms(field, config[key].total_milliseconds))
     for key, (field, _, _, _) in {**PULSES, **TICKS}.items():
         cg.add(var.set_timing_ms(field, config[key]))
-    # Emitted before App.setup(): the feeder's own setup (core_start) then already finds this mechanism.
-    cg.add(var.attach(feeder))
+    # Emitted before App.setup(): the feeder's own setup (core_start) then already finds this mechanism. A build whose
+    # feeder also has the servo's output carries both: the drive is chosen on the device (experiment/single-binary).
+    with_servo = CONF_OUTPUT in CORE.config.get("precision_feeder", {})
+    cg.add(var.attach(feeder, with_servo))

@@ -1,0 +1,37 @@
+# Precision Feeder: choose the drive on the device, in a build that carries two (experiment/single-binary, plan S2.0b).
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Only for a firmware that includes both the servo (mechanism_servo.yaml) and the direct-drive disc
+# (mechanism_n20.yaml): firmware/dual-test.yaml. The choice applies at the next restart (Restart Needed turns on); the
+# drive not chosen is never set up, so its pins stay free. Changing the drive marks the tray position unknown: reload
+# before feeding. Needs the settings password when one is set.
+
+select:
+  - platform: template
+    id: pf_drive
+    name: "Drive"
+    icon: mdi:cog-transfer-outline
+    entity_category: config
+    options: ["Build Default", "Servo", "Direct-drive disc"]
+    set_action:
+      - lambda: |-
+          const char *names[] = {"Build Default", "Servo", "Direct-drive disc"};
+          for (uint8_t i = 0; i < 3; i++)
+            if (x == names[i])
+              id(feeder).set_drive(i);
+    update_interval: never
+
+precision_feeder:
+  protected_entities:
+    - select/Drive
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          const char *names[] = {"Build Default", "Servo", "Direct-drive disc"};
+          const uint8_t d = id(feeder).drive_saved();
+          precision_feeder::publish_option(id(pf_drive), d < 3 ? names[d] : names[0]);

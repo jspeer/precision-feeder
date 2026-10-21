@@ -79,6 +79,14 @@ class PrecisionFeeder : public Component, public FeederCore {
  public:
   // ---- configuration (set from Python) ----
   void set_output(output::FloatOutput *output) { this->output_ = output; }
+  /// The servo output's component (its LEDC), so a build that also carries another drive can leave it unset up.
+  void set_servo_driver(Component *driver) { this->servo_driver_ = driver; }
+  /// A mechanism component offers itself (before setup). `with_servo` false: it is this build's mechanism. True (the
+  /// build has the servo's output too): a second drive, chosen on the device (experiment/single-binary), and this
+  /// build's default. `pins`: the GPIOs it drives.
+  void offer_drive(Mechanism *mechanism, Component *driver, const uint8_t *pins, uint8_t n, bool with_servo);
+  /// At boot, before the drivers start (PinLoader): use the saved drive; the others are never set up.
+  void apply_drive();
   void set_time(time::RealTimeClock *time) { this->time_ = time; }
 
   // ---- runtime pins (DESIGN.md section 2.1; set from Python) ----
@@ -105,6 +113,12 @@ class PrecisionFeeder : public Component, public FeederCore {
   }
   /// At boot, before the drivers start (PinLoader): the motor pins from the saved record, told to their driver.
   void apply_motor_pins_early();
+  // The drives a single binary carries, besides the servo (index = drive number - 2).
+  struct DriveOffer {
+    Component *driver{nullptr};  // left unset up while another drive is in use
+  };
+  DriveOffer offers_[DRIVES_MAX]{};
+  Component *servo_driver_{nullptr};
   /// Apply the saved name and access-point password (DESIGN.md section 9.3). Runs before Wi-Fi, mDNS, the API and
   /// BLE start, as they read the name when they do.
   void apply_network();
@@ -235,7 +249,8 @@ class PinLoader : public Component {
  public:
   explicit PinLoader(PrecisionFeeder *feeder) : feeder_(feeder) {}
   void setup() override {
-    this->feeder_->apply_motor_pins_early();  // first: the button and LED pins are checked against them
+    this->feeder_->apply_drive();            // first: which drive this boot uses, and its drivers
+    this->feeder_->apply_motor_pins_early();  // then that drive's pins (none for the servo)
     this->feeder_->apply_pins();
     this->feeder_->apply_network();
   }

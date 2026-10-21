@@ -300,6 +300,8 @@ struct Device {
   char ap_password[AP_PASSWORD_SIZE];
   uint8_t ble_key[DEVICE_KEY_SIZE];  // all zero = no key set on the device
   uint8_t password_scheme;           // 0 = no settings password
+  // reserved[0]: the drive chosen on the device (experiment/single-binary, DRIVE_*); reserved[1]: the drive the last
+  // boot used (DRIVE_*), so a change can mark the tray position unknown. 0 in every record before: the build's.
   uint8_t reserved[3];
   uint8_t password_salt[PASSWORD_SALT_SIZE];
   uint8_t password_hash[PASSWORD_HASH_SIZE];
@@ -414,6 +416,34 @@ class FeederCore : private ServoOutput {
   // ---- mechanism (mechanism.h) ----
   /// Use another mechanism instead of the servo. Call before core_start(); the core does not own it.
   void set_mechanism(Mechanism *mechanism) { this->mech_ = mechanism != nullptr ? mechanism : &this->servo_; }
+
+  // ---- the drive chosen on the device (experiment/single-binary: plan S2.0b, D17) ----
+  // A build may carry more than one mechanism. Each is an option (the servo is always option 1); the one the device
+  // saved (Device::reserved[0]) is used from the next boot, else the build's (the one set_mechanism() gave). The
+  // adapter picks it before any driver starts and never sets up the others, so their pins stay free.
+  static constexpr uint8_t DRIVE_BUILD = 0, DRIVE_SERVO = 1, DRIVES_MAX = 3;
+  /// Register another mechanism as option 2, 3, ... (call before choose_drive()). Returns its number.
+  uint8_t add_drive(Mechanism *mechanism) {
+    if (this->drive_count_ >= DRIVES_MAX)
+      return DRIVE_BUILD;
+    this->drives_[this->drive_count_++] = mechanism;
+    return this->drive_count_;
+  }
+  uint8_t drive_count() const { return this->drive_count_; }
+  /// Which option `saved` (a DRIVE_* number) means for this build: itself if it is one, else the build's.
+  uint8_t resolve_drive(uint8_t saved) const;
+  /// The option a mechanism is (DRIVE_BUILD if it is none).
+  uint8_t drive_of(const Mechanism *mechanism) const;
+  /// At boot, from the saved record the adapter read: use the chosen drive (set_mechanism) and return its number.
+  /// If it differs from the one the last boot used, the tray position is marked unknown at core_start().
+  uint8_t choose_drive(const Device &saved);
+  /// Save a choice (DRIVE_BUILD or an option): applies at the next restart. INVALID_ARG for no such option.
+  Result set_drive(uint8_t drive);
+  uint8_t drive_saved() const { return this->dev_.reserved[0]; }
+  uint8_t drive_in_use() const { return this->drive_in_use_; }
+  bool drive_restart_needed() const {
+    return this->drive_count_ > 1 && this->resolve_drive(this->dev_.reserved[0]) != this->drive_in_use_;
+  }
   Mechanism &mechanism() { return *this->mech_; }
   const Mechanism &mechanism() const { return *this->mech_; }
   /// True while the servo fan tray is the mechanism (its calibration and pulse range then apply).
@@ -621,10 +651,10 @@ class FeederCore : private ServoOutput {
   const Pins &pins_in_use() const { return this->pins_in_use_; }
   /// The pins the next restart will use.
   Pins pins_saved() const;
-  /// A saved pin, name or access-point password waits for a restart.
+  /// A saved pin, name, access-point password or drive waits for a restart.
   bool restart_needed() const {
     return (this->pins_runtime_ && this->pins_saved() != this->pins_in_use_) || this->network_restart_needed() ||
-           this->motor_pins_restart_needed();
+           this->motor_pins_restart_needed() || this->drive_restart_needed();
   }
   /// Choose one pin: a GPIO, PIN_NONE (button and LED only) or PIN_BUILD. INVALID_ARG for a refused pin or one
   /// another role already uses; UNSUPPORTED when the build cannot change pins.
@@ -914,6 +944,11 @@ class FeederCore : private ServoOutput {
 
   ServoMechanism servo_{*this, this->calib.offsets};
   Mechanism *mech_{&this->servo_};
+  Mechanism *drives_[DRIVES_MAX]{&this->servo_, nullptr, nullptr};
+  uint8_t drive_count_{1};
+  uint8_t drive_in_use_{DRIVE_BUILD};  // set by choose_drive(); DRIVE_BUILD when the adapter never chose
+  Mechanism *mech_build_{nullptr};      // the build's mechanism, before choose_drive()
+  bool drive_changed_{false};
   Tuning tuning_{};
   bool tuning_dirty_{false};
   uint16_t default_min_pulse_us_{544};

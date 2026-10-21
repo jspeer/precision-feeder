@@ -362,6 +362,21 @@ driver is ours, so it can do the same. Throwaway build on this branch, before an
 - Exit: a recorded yes or no, with the measurements. Yes: the question of main (D17). No: S2.1 onward as planned,
   YAML chooses the drive.
 
+**S2.0b, build half (2026-10-21, branch `experiment/single-binary`; the bench half needs the feeder):**
+- Built: `firmware/dual-test.yaml` carries the servo and the disc; **Drive** (`packages/drive_select.yaml`) chooses at
+  the next restart. The choice is in a reserved byte of the Device record (no layout change), with the drive the last
+  boot used beside it, so a change marks the tray position unknown. At boot the pin loader picks the drive before any
+  driver starts and puts the other one's driver (the servo's LEDC, or the disc's component) in ESPHome's "never set
+  up" state, so its pins stay free; only the chosen drive's pins are reserved. Host-tested (`test_single_binary`).
+- Cost, the full BLE firmware, ESPHome 2026.9.1: servo only 1,455,927 bytes flash (79.3%), 151,787 RAM; disc only
+  1,474,079 (80.3%), 153,735; both 1,478,471 (80.6%), 154,327. Both cost 4.4 KB more than the disc alone and 22.5 KB
+  more than the servo alone; about 357 KB of the app partition stays free. No compiler warnings.
+- Left for a real single binary: the servo's slot calibration package and the disc's both define Calibration Mode and
+  the recovery entities, so `dual-test.yaml` leaves the servo's calibration out; they would be split into a shared
+  package first. Home Assistant lists both drives' entities.
+- Still to do on the bench: boot each way and switch servo -> disc -> servo; the servo feeder unchanged in servo mode;
+  the disc's pins free in servo mode (GPIO1 is both the servo signal and AIN1 by default).
+
 ### S2.1 `DirectDriveMechanism` in core (pure, host-tested)
 
 - The stage 1 verbs: `feed_one()` = forward one slot, then `wiggle()`; `reload()` and `restore()` move nothing.

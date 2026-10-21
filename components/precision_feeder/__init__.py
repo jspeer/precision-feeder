@@ -151,6 +151,7 @@ async def to_code(config):
     if CONF_OUTPUT in config:
         out = await cg.get_variable(config[CONF_OUTPUT])
         cg.add(var.set_output(out))
+        cg.add(var.set_servo_driver(out))
     clock = await cg.get_variable(config[CONF_TIME_ID])
     cg.add(var.set_time(clock))
 

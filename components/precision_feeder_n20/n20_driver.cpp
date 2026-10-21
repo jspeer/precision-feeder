@@ -72,15 +72,19 @@ void N20Driver::set_timing_ms(const char *field, uint32_t value) {
 // The names the motor pins go by (Pins In Use, the log); their order is set_pins()'s.
 static const char *const PIN_NAMES[5] = {"IN1", "IN2", "STBY", "encoder A", "encoder B"};
 
-void N20Driver::attach(PrecisionFeeder *feeder) {
+void N20Driver::attach(PrecisionFeeder *feeder, bool with_servo) {
   this->feeder_ = feeder;
-  feeder->set_mechanism(&this->mech_);
-  // The YAML's pins are the build's; ones saved on the device win, and the feeder reserves the ones used (D19).
+  // The YAML's pins are the build's; ones saved on the device win (D19). With the servo in the build too, this is a
+  // second drive, chosen on the device; its pins are reserved only while it is the drive.
   const uint8_t pins[] = {this->in1_, this->in2_, this->stby_, this->enc_a_, this->enc_b_};
+  feeder->offer_drive(&this->mech_, this, pins, sizeof(pins), with_servo);
   feeder->offer_motor_pins(this, pins, sizeof(pins), PIN_NAMES);
 }
 
 void N20Driver::standby_now_() {
+  // A driver that was never set up (a single binary running the servo) owns no pins: touch none.
+  if (!this->stby_set_up_)
+    return;
   // Bridge off first, whatever else happens: STBY low, both inputs low.
   gpio_set_level(static_cast<gpio_num_t>(this->stby_), 0);
   if (this->ready_) {
@@ -159,6 +163,7 @@ void N20Driver::setup() {
   gpio_reset_pin(stby);
   gpio_set_direction(stby, GPIO_MODE_OUTPUT);
   gpio_set_level(stby, 0);
+  this->stby_set_up_ = true;
   for (uint8_t pin : {this->in1_, this->in2_, this->stby_, this->enc_a_, this->enc_b_}) {
     if (check_pin(pin) == PinCheck::REFUSED) {
       ESP_LOGE(TAG, "GPIO%u cannot be used (%s): the motor stays off and nothing feeds", pin, pin_note(pin));

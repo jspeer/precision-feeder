@@ -48,7 +48,8 @@ class N20Driver : public Component, protected N20Lock, public MotorPinUser {
   /// One of N20Timing's fields by name (from the YAML).
   void set_timing_ms(const char *field, uint32_t value);
   /// Register with the feeder: called before the feeder's setup, so core_start() already sees this mechanism.
-  void attach(PrecisionFeeder *feeder);
+  /// `with_servo`: the build also has the servo (a single binary: the drive is chosen on the device).
+  void attach(PrecisionFeeder *feeder, bool with_servo);
 
   void setup() override;
   void loop() override;
@@ -86,6 +87,7 @@ class N20Driver : public Component, protected N20Lock, public MotorPinUser {
   esp_timer_handle_t timer_{nullptr};
   Bridge applied_{};
   bool ready_{false};
+  bool stby_set_up_{false};  // setup() ran and owns STBY (not in a single binary running the servo)
   std::atomic<int64_t> last_step_us_{0};
   std::atomic<uint32_t> max_gap_us_{0};
   std::atomic<bool> driving_{false};

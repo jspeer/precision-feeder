@@ -819,6 +819,20 @@ static std::unique_ptr<FakeFeeder> boot_pins(Flash &flash, N20Mechanism &disc, s
   return f;
 }
 
+// ---- one binary, the drive chosen on the device (experiment/single-binary, plan S2.0b) -------------------
+static std::unique_ptr<FakeFeeder> boot_dual(Flash &flash, N20Mechanism &disc) {
+  auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+  f->add_drive(&disc);     // option 2
+  f->set_mechanism(&disc);  // the build's default
+  Device saved{};
+  if (flash.have_device)
+    saved = flash.device;
+  f->choose_drive(saved);   // as the adapter does at boot, before any driver starts
+  f->start();
+  f->advance(1500);
+  return f;
+}
+
 static void test_motor_pins() {
   current = "disc: motor pins chosen on the device";
   Flash flash;
@@ -860,6 +874,43 @@ static void test_motor_pins() {
   }
 }
 
+static void test_single_binary() {
+  current = "single binary: the drive chosen on the device";
+  Flash flash;
+  {
+    N20Mechanism disc;
+    auto f = boot_dual(flash, disc);
+    CHECK(f->drive_count() == 2 && f->drive_in_use() == 2 && !f->is_servo(), "a fresh device: the build's drive");
+    CHECK(flash.device.reserved[1] == 2, "the drive in use is remembered");
+    CHECK(!f->position_unknown(), "the first boot that records it changes nothing");
+    CHECK(f->set_drive(4) == Result::INVALID_ARG, "no such drive");
+    CHECK(f->set_drive(FeederCore::DRIVE_SERVO) == Result::OK && f->restart_needed(), "servo: at the next restart");
+    CHECK(f->drive_in_use() == 2 && !f->is_servo(), "still the disc until then");
+  }
+  {
+    N20Mechanism disc;
+    auto f = boot_dual(flash, disc);
+    CHECK(f->is_servo() && f->drive_in_use() == 1 && f->capacity() == 6, "after the restart: the servo");
+    CHECK(f->position_unknown(), "a different drive: the tray is reloaded before feeding");
+    CHECK(flash.device.reserved[1] == 1 && !f->restart_needed(), "remembered");
+    f->tray_reload();
+    CHECK(!f->position_unknown(), "reloaded");
+    CHECK(f->set_drive(FeederCore::DRIVE_BUILD) == Result::OK && f->restart_needed(), "back to the build's");
+  }
+  {
+    N20Mechanism disc;
+    auto f = boot_dual(flash, disc);
+    CHECK(!f->is_servo() && f->capacity() == 14 && f->position_unknown(), "the disc again; unknown again");
+  }
+  {
+    // A build with one drive never offers a choice.
+    Flash one;
+    auto f = boot(one, T0);
+    CHECK(f->drive_count() == 1 && f->set_drive(FeederCore::DRIVE_SERVO) == Result::UNSUPPORTED, "nothing to choose");
+    CHECK(!one.device.reserved[0] && !one.device.reserved[1], "and nothing recorded");
+  }
+}
+
 int main() {
   test_motion_matches_sketch();
   test_mechanism_feeds();
@@ -877,6 +928,7 @@ int main() {
   test_tuning_layout_1_kept();
   test_smaller_load_keeps_settings();
   test_motor_pins();
+  test_single_binary();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;
