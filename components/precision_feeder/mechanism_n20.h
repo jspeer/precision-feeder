@@ -1,7 +1,7 @@
 // Precision Feeder: the direct-drive disc mechanism. A GA12-N20 gear motor with a quadrature encoder, behind one
 // channel of a DRV8833, turns a disc of open slots directly (15 on the bench print, 24 degrees apart). One slot is
 // always over the chute, so a load holds slots - 1 portions. It only ever turns forward, except inside a wiggle.
-// Reload moves nothing. DESIGN.md section 3.0.2; the plan is docs/plans/drive-decoupling.md, stage 2.
+// Reload moves nothing. DESIGN.md section 3.3; the plan is docs/plans/drive-decoupling.md, stage 2.
 //
 // Two parts, both plain C++ (no ESPHome), so the host tests can run them:
 // - N20Motion: closed-loop moves to an encoder count and the wiggle about it, written from the owner's bench sketch
@@ -160,7 +160,7 @@ enum N20Tuning : uint8_t {
 };
 constexpr uint8_t N20_TUNING_LAYOUT = 1;
 
-/// The guided calibration's actions (Mechanism::calibration_action; DESIGN.md section 3.0.2).
+/// The guided calibration's actions (Mechanism::calibration_action; DESIGN.md section 3.3).
 enum N20Action : uint8_t {
   N20_CAL_START = 0,     // begin (or begin again): the direction test
   N20_CAL_YES = 1,       // the direction test turned the feeding way / this slot is centred

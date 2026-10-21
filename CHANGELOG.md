@@ -6,6 +6,23 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.1.0-n20.1: direct-drive disc (branch `variant/n20-direct-drive`, never released)
+
+A variant for a feeder whose disc is turned directly by a DC gear motor with an encoder, on top of 2.1.0. Built from
+YAML on its branch; there are no prebuilt binaries, and the web app's update check offers it nothing.
+
+- New mechanism (DESIGN.md section 3.3): a GA12-N20 gear motor with encoder behind a DRV8833 turns a disc of open
+  slots (15 on the bench print); 14 portions per load; it only turns forward, and Tray Reload moves nothing.
+- Its motion is the owner's tuned bench sketch, rewritten as firmware and checked against it on a simulated motor,
+  with extra safety limits: a short stall window at full power, a travel limit, a timeout from the distance and a
+  watchdog on the control loop.
+- A guided calibration (docs/CALIBRATION.md): direction test, zero, a full-turn measurement, a check of every slot, a
+  global trim.
+- Tuning on the device (web app Maintenance, and Home Assistant): ticks per turn, drive power, braking distance,
+  wiggle amplitude and cycles, slot trim, calibration turns, reverse motor and encoder.
+- The button defaults to GPIO3. Runtime button and LED pins work without a servo pin.
+- Host-tested only: nothing of this has run on hardware yet (DESIGN.md open item 23).
+
 ## 2.1.0: mechanisms (not released yet)
 
 Nothing changes for a servo feeder: same entities, same behaviour, same saved settings, same BLE protocol. Underneath,

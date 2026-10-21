@@ -13,3 +13,6 @@ examples/local*.yaml
 *.stl
 *.STL
 *.step
+
+# A local work folder (the owner's); not part of the repository.
+output/

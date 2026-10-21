@@ -259,6 +259,59 @@ States: `LOADED(n)` (position n, 0 to 5), `EMPTY` (position 6), `UNKNOWN`
 - Calibration mode: jog the servo, save per-position offsets. Scheduled and
   remote feeds are rejected while calibrating.
 
+### 3.3 The direct-drive disc (branch `variant/n20-direct-drive`)
+
+The first mechanism after the servo, for the owner's own print; it lives on its branch and is not released (AGENTS.md,
+"Adding a mechanism", rule 8). Plan and decisions: [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md),
+stage 2 (D2, D7 to D18).
+
+**Hardware.** A GA12-N20 gear motor (6 V, 35 rpm) with a two-channel Hall encoder, behind channel A of a DRV8833,
+turns a 3D-printed disc of open slots directly: 15 on the bench print, 24 degrees apart. Wiring: AIN1 GPIO1, AIN2
+GPIO2, STBY GPIO6, encoder C1 GPIO4 and C2 GPIO5, encoder VCC 3V3, VM 5V, grounds common, 100 µF across 5V and GND.
+The button moves to GPIO3 (GPIO2 is AIN2). The pins are YAML-only (D4) and reserved, so the button and LED cannot
+be moved onto them.
+
+**Model.** All slots are open and one is always over the chute, so a load holds slots − 1 = 14 portions (D8). The
+disc only turns forward (D7); Tray Reload moves nothing and sets the count back. A feed is one slot forward and the
+wiggle: the wiggle is part of positioning, because the bench showed the slot is centred over the hole only after the
+wiggle's last leg (D13). Slot k is at origin + round(k × ticks per turn / slots) + trim, counted from the origin each
+time, so stopping and rounding errors never add up (15 slots land on exactly one turn).
+
+**Motion** (`mechanism_n20.*`, `N20Motion`): the owner's bench sketch (tests/reference/motor-test.cpp, v7) as a state
+machine with no I/O. Full power to the braking distance (160 ticks), brake 100 ms, creep with adaptive pulses (2 to
+12 ms; longer after a pulse that moved nothing, shorter after one that moved more than 6 ticks) and 15 ms brakes,
+stop on crossing the target, brake 100 ms, release, settle 100 ms. The wiggle: ± its amplitude (2°) four times with
+faster brakes, then back to the centre. `tests/test_n20.cpp` runs the sketch itself and the firmware on the same
+simulated motor and checks they drive the bridge identically, change for change and millisecond for millisecond.
+
+**Faults** (each stops the motor; the core then marks the position unknown, the portion counting as fed): the encoder
+counting more than 32 ticks the wrong way; no encoder edge for 500 ms (50 ms while driving at full power, so an encoder
+that stops counting cannot let the motor run on: at most about 240 ticks, under half a slot); a move taking longer
+than 3 s plus three times its expected time at 35 rpm; ending more than half a slot past its target; the control step
+running late (more than 25 ms between steps while driving). The adapter's main loop also cuts STBY if the control
+timer stops while driving.
+
+**On the device** (`components/precision_feeder_n20`): the component claims its GPIOs through ESP-IDF itself (LEDC
+timer 3, channels 6 and 7, 8-bit at 20 kHz; PCNT in quadrature x4 with pull-ups and a 1 µs glitch filter; STBY a
+GPIO, driven low first thing at setup and on every shutdown), so the YAML claims none. An esp_timer runs the control
+every millisecond under a spinlock shared with the main loop. Motor Loop Max Gap reports the longest gap between two
+control steps (the S2.0 timing check, open item 23).
+
+**Tuning** (the Tuning record, runtime, D10): ticks per turn (8344, the sketch's estimate, until measured), drive
+power, braking distance, wiggle amplitude and cycles (at least one), slot trim (± half a slot), calibration turns,
+reverse motor and reverse encoder. The motion's timings and limits are YAML-only (`precision_feeder_n20:`).
+
+**Calibration** (D16; docs/CALIBRATION.md): a guided flow in calibration mode. A direction test (a short open-loop push;
+the user says which way it turned and the firmware checks the encoder counted up, then offers Reverse Motor and
+Reverse Encoder rather than a rewire), Zero on a slot over the hole, a full-turn measurement of ticks per turn (an
+error spread over the slots of a turn, not repeated on each; refused if more than 20% from the value it turned by),
+a check pass that moves to every slot exactly as a feed does, and one global trim. Nudges go forward only; Overshot
+backs off 5° and comes forward 4°, so every stop is approached from the same side (gearbox backlash). A disc moved in
+calibration leaves the position unknown when calibration ends, so it is reloaded before anything is fed.
+
+**Recovery** after a power cut mid-move: in calibration mode, nudge forward until a slot is over the hole, then
+Declare Tray Position (portions fed since the last reload); the grid restarts from where the disc is.
+
 ## 4. Feed guard (source-agnostic)
 
 Every feed request, whatever its source, goes through one gate:
@@ -1229,6 +1282,12 @@ precision-feeder/
     calibration, pins and the tray state; a feed, a multi-portion feed, reload, calibration and a power cut mid-feed
     behave as before; the web app's Dashboard and Maintenance; the BLE selftest; dump_config shows "Mechanism:
     servo, 6 portions per load". And GPIO3 as the button pin: boots normally with the button held at power-up.
+
+23. The direct-drive disc on the bench (section 3.3, plan S2.0 and S2.8): host-tested only so far. To check: the
+    control timer's gaps with Wi-Fi, the API and the web server busy (Motor Loop Max Gap, and the grid error over
+    15 slots); the guided calibration end to end; 300 feed cycles; feeds from every source; the wiggle with real food;
+    a power cut mid-move; a held disc and an unplugged encoder; the STBY level at power-up (and whether a pull-down is
+    needed); the encoder's count direction under PCNT (the direction test handles either).
 
 ## 15. Implementation status (v2.1.0)
 

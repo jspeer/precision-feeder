@@ -17,7 +17,7 @@ position. [WEB_UI.md](WEB_UI.md) walks through every page.
 | To | Use |
 |---|---|
 | Feed now | **Feed One Portion**, or **Manual Portions** + **Feed Selected Portions**, or a short press of the button |
-| Refill | **Tray Reload**, then fill the tray. Scheduled feeding pauses for the **Reload Pause** (default 10 minutes) while you load. |
+| Refill | **Tray Reload**, then fill the tray. Scheduled feeding pauses for the **Reload Pause** (default 10 minutes) while you load. On the direct-drive disc (branch `variant/n20-direct-drive`) Tray Reload moves nothing: fill every slot except the one over the chute (food there falls straight out), then press it. |
 | Pause the schedule | **Hold Duration** (hours; 0 = until cancelled) + **Hold Scheduled Feeding**; **Cancel Hold** ends it. Manual feeds still work. |
 | Switch plans | **Active Profile** |
 | Feed once at a set time | **One-shot Portions** + **Add One-shot Feed** (`2026-10-20 18:00`) |

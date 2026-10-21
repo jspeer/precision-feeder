@@ -1,7 +1,8 @@
 # Plan: a feeder mechanism interface, then a direct-drive N20 variant
 
 Status: **stage 1 built on `release/2.1.0-mechanism` (2026-10-21), host-tested; not merged, not on hardware.**
-Stage 2 not started. D6 checked (GPIO3: Espressif's ESP-IDF JTAG guide for the ESP32-S3). Nothing replaces a
+**Stage 2 built on `variant/n20-direct-drive` (2026-10-21), host-tested and compiled; not on hardware, not pushed.**
+S2.1 to S2.7 and S2.9's docs are done; S2.0, S2.0b and S2.8 need the feeder on the bench. D6 checked (GPIO3: Espressif's ESP-IDF JTAG guide for the ESP32-S3). Nothing replaces a
 working binary before it has been on its own branch.
 
 Stage 1 validation (2026-10-21, host only; no hardware attached):

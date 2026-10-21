@@ -1,5 +1,13 @@
 # Precision Feeder for ESPHome
 
+> **Branch `variant/n20-direct-drive`: a community variant, not a release.** This branch builds the firmware for a
+> direct-drive disc (a DRV8833 driving a GA12-N20 gear motor with an encoder, turning a 15-slot printed disc) instead
+> of the servo tray. Build it from YAML ([docs/BUILDING.md](docs/BUILDING.md)); there are no prebuilt binaries for it.
+> For another motor or disc, change `disc_slots`, `tray_capacity` and the pins in
+> [packages/mechanism_n20.yaml](packages/mechanism_n20.yaml), then calibrate
+> ([docs/CALIBRATION.md](docs/CALIBRATION.md)); for a different kind of mechanism, see
+> [docs/MECHANISMS.md](docs/MECHANISMS.md). The servo firmware is on `main`. Not yet tested on hardware.
+
 ESPHome firmware for the
 [Automated Precision Fish Feeder with WiFi (Rev2)](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2),
 a 3D-printed fish feeder that drops one measured portion at a time from a servo-driven tray.

@@ -108,3 +108,40 @@ From the first calibrated feeder ([BENCH.md](BENCH.md), 2026-10-14):
 - No servo twitch at power-up, so the 10 kΩ pull-down was not needed there.
 - The tray stays put once the servo is released (checked with an empty tray; recheck with
   food in it). Still to watch in daily use: whether the servo strains at position 6.
+
+## The direct-drive disc (branch `variant/n20-direct-drive`)
+
+A disc of open slots turned directly by a gear motor with an encoder (DESIGN.md section 3.3). The servo steps above do
+not apply: there are no slot offsets and no pulse range. Instead the firmware measures how many encoder ticks one turn
+of the disc takes, and checks every slot.
+
+**Empty the disc first.** The calibration turns it, and every open slot passes over the hole.
+
+In the web app: **Maintenance → Calibration** (or the Calibration buttons in Home Assistant). Turn **Calibration
+mode** on (feeding is refused until you turn it off), then follow **Next step**:
+
+1. **Start.** The disc gives a short push forward. Did it turn the way it feeds? Press **Yes** or **No**. The firmware
+   also checks the encoder counted up while it turned. If the motor or the encoder is the wrong way round it sets
+   Reverse Motor or Reverse Encoder for you; press **Start** again to test once more. If the encoder did not count at
+   all, check its C1, C2 and 3V3 wires.
+2. **Zero.** Put one empty slot exactly over the hole with the nudges (**Nudge 0.1°**, **Nudge 1°**). They only go
+   forward, so the gearbox's play never comes into it; if you go too far, press **Overshot**: it backs off about 5° and
+   comes forward again. Then press **Zero**.
+3. **Run turns.** The disc turns once (or Calibration Turns times: three is more accurate) and stops near the same
+   slot. Nudge it until that slot is centred over the hole again, then press **Measured**. Ticks Per Turn is now what
+   it really took. A measurement more than 20% off is refused (a slipped disc, not a calibration): zero and try again.
+4. **Next slot.** The disc moves to each slot exactly as a feed does, wiggle included, and asks whether it is centred.
+   Press **Next slot** (or **Yes**) for each, all the way round.
+   - If every slot stops off the hole by the same amount, change **Slot Trim** (± up to half a slot): it shifts them
+     all together.
+   - If they are off by different amounts, the print is uneven; per-slot offsets would be needed, and the firmware has
+     none yet (open a discussion).
+5. Turn **Calibration mode** off. The disc has turned, so the feeder no longer knows which slots hold food: fill the
+   disc (every slot except the one over the chute) and press **Tray reload**.
+
+The other tuning values (Maintenance → Motion and Wiggle) start at the bench's: Drive Power 100%, Braking Distance 160
+ticks, Wiggle 2° × 4. Leave them unless the disc overshoots, stalls or the food sticks.
+
+**After a power cut mid-feed** the position is unknown and feeding stops. Turn calibration mode on, nudge until a slot
+is centred over the hole, turn calibration mode off, then **Declare position** (portions fed since the last reload), or
+refill the disc and reload.

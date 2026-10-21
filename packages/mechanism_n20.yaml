@@ -1,4 +1,4 @@
-# Precision Feeder: the direct-drive disc mechanism (DESIGN.md section 3.0.2). core.yaml includes it on the
+# Precision Feeder: the direct-drive disc mechanism (DESIGN.md section 3.3). core.yaml includes it on the
 # variant/n20-direct-drive branch; you do not.
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
