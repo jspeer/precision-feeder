@@ -588,6 +588,26 @@ server's `/events`.
   only server set).
 - Left on the feeder: the build's servers (as before the test), 2.0.2.
 
+## Firmware 2.1.0 on the servo (2026-10-21)
+
+The mechanism interface (DESIGN.md section 3.0) on a servo test rig: Waveshare ESP32-S3-Zero, MG90S with its horn, no
+printed tray. The board ran the prebuilt 2.0.2 `full` binary; 2.1.0 was built exactly as its prebuilt binary
+(`firmware/full.yaml`, ESPHome 2026.9.1) and flashed over USB, which leaves the settings partition as it is: an
+upgrade of the saved data, not a fresh device.
+
+- **Upgrade: everything kept.** Every entity's state was recorded from the web server's event stream before and
+  after. The only differences: Firmware Version 2.0.2 -> 2.1.0, the two new diagnostics (Mechanism `servo`,
+  Capacity 6), and the time zone the clock was shown in (UTC before, the local -06:00 after the restart, as Home
+  Assistant's time zone arrived; no time zone is saved on this device). Kept: tray position 2, the pulse range
+  637-2675 us, all seven slot offsets (0, -0.7, 0, +2.5, +3.3, +2.3, 0 degrees, read one by one before and after),
+  daily cap 2, minimum gap 60 s, the scheduler and its 18:00 event, the pins.
+- **Feeding:** a feed moved slot 2 -> 3 (result ok, remaining 3). Tray Reload went back to slot 0 (remaining 6).
+- **Calibration:** calibration mode on, slot 3 shown with its +2.5 degree offset, a feed refused (calibrating);
+  mode off left the tray loaded at slot 0 (the servo returns to its slot, so the position stays known).
+- **Guard:** a feed straight after another refused (too soon); after 60 s a second one fed; a third refused (daily
+  cap reached, cap 2).
+- Not run this time: the BLE selftest (it needs the Terminal panel), a power cut mid-feed, the web app on the device.
+
 ## The direct-drive disc, first run (2026-10-21, firmware 2.1.0-n20.1)
 
 The disc firmware (DESIGN.md section 3.3) on the owner's bench rig: Waveshare ESP32-S3-Zero, DRV8833, GA12-N20
