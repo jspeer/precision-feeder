@@ -101,6 +101,19 @@ class Mechanism {
     (void) index;
     return nullptr;
   }
+  /// True if values saved under the older table layout `older` are this table's first ones, unchanged (entries were
+  /// only added at the end): they are then kept, and the new ones start at their defaults. False (the default): values
+  /// saved under another layout are never used.
+  virtual bool tuning_layout_extends(uint8_t older) const {
+    (void) older;
+    return false;
+  }
+  /// True if a value may only be changed in calibration mode, because it moves where the tray's slots are (so it must
+  /// not change with food loaded).
+  virtual bool tuning_needs_calibration(uint8_t index) const {
+    (void) index;
+    return false;
+  }
   /// Use a value. The core has already checked it against the table and only calls this while nothing moves.
   virtual void apply_tuning(uint8_t index, int32_t value) {
     (void) index;

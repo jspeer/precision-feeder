@@ -348,10 +348,21 @@ struct Disc {
   Result cal(uint8_t action, int32_t arg = 0) {
     const Result r = this->f->calibration_action(action, arg);
     this->until_idle();
+    // Home Assistant keeps at most 255 characters of a state.
+    CHECK(std::strlen(this->f->calibration_text()) < 255, "every step's text fits Home Assistant");
     return r;
   }
   int32_t ticks() const { return static_cast<int32_t>(this->sim.count()); }
 };
+
+/// Set a value that may only change in calibration mode (where the slots are, which way is forward), as a user must.
+static Result set_in_calibration(Disc &d, uint8_t index, int32_t value) {
+  d.f->set_calibration_mode(true);
+  const Result r = d.f->set_tuning(index, value);
+  d.f->set_calibration_mode(false);
+  d.run(10);
+  return r;
+}
 
 static int32_t grid(int k, int32_t origin = 0, int32_t tpr = 8344, int slots = 15) {
   return origin + static_cast<int32_t>((2LL * k * tpr + slots) / (2LL * slots));
@@ -471,8 +482,8 @@ static void test_mechanism_faults() {
   {
     current = "disc fault: encoder counting the wrong way";
     Disc d;
-    d.f->set_tuning(N20_REVERSE_ENCODER, 1);
-    d.run(10);
+    CHECK(d.f->set_tuning(N20_REVERSE_ENCODER, 1) == Result::NOT_CALIBRATING, "not outside calibration mode");
+    CHECK(set_in_calibration(d, N20_REVERSE_ENCODER, 1) == Result::OK, "in calibration mode");
     d.f->request_feed(1, Source::ESPHOME);
     d.settle();
     CHECK(d.f->position_unknown() && d.f->faults_text().find("wrong way") != std::string::npos, "a fault");
@@ -541,17 +552,19 @@ static void test_calibration_flow() {
   Disc d;
   CHECK(d.f->calibration_action(N20_CAL_START) == Result::NOT_CALIBRATING, "only in calibration mode");
   d.f->set_calibration_mode(true);
-  CHECK(std::strstr(d.f->calibration_text(), "Empty the disc") != nullptr, "first: empty the disc");
+  CHECK(std::strstr(d.f->calibration_text(), "Step 1 of 5: check Disc slots (15)") != nullptr &&
+            std::strstr(d.f->calibration_text(), "empty every slot") != nullptr,
+        "first: the slot count, and empty the disc");
   CHECK(d.cal(N20_CAL_ZERO) == Result::INVALID_ARG, "no zero before the direction test");
   CHECK(d.cal(N20_CAL_START) == Result::OK, "direction test");
-  CHECK(std::strstr(d.f->calibration_text(), "Did the disc turn the way it feeds") != nullptr, "asks the user");
+  CHECK(std::strstr(d.f->calibration_text(), "turn the way it should when it feeds") != nullptr, "asks the user");
   CHECK(d.cal(N20_CAL_YES) == Result::OK, "yes, and the encoder counted up");
   CHECK(std::strstr(d.f->calibration_text(), "then press Zero") != nullptr, "now zero");
   CHECK(d.cal(N20_CAL_OVERSHOT) == Result::OK, "overshot: back and forward again");
   CHECK(d.cal(N20_CAL_NUDGE, 3) == Result::OK, "nudge");
   CHECK(d.cal(N20_CAL_ZERO) == Result::OK, "zero");
   const int32_t zero = d.ticks();
-  CHECK(std::strstr(d.f->calibration_text(), "Press Turns") != nullptr, "now turns");
+  CHECK(std::strstr(d.f->calibration_text(), "Step 3 of 5: press Run turns") != nullptr, "now turns");
   CHECK(d.cal(N20_CAL_TURNS) == Result::OK, "one turn");
   CHECK(std::abs(d.ticks() - (zero + 8344)) <= 4, "turned 8344 ticks");
   // This disc really needs 8400 ticks a turn: the user nudges on to the mark (2.4 degrees), then Measured.
@@ -567,7 +580,7 @@ static void test_calibration_flow() {
     CHECK(d.cal(k % 2 ? N20_CAL_NEXT : N20_CAL_YES) == Result::OK, "next slot");
     CHECK(std::abs(d.ticks() - grid(k, origin, moved)) <= 4, "each slot on the new grid, as a feed would put it");
   }
-  CHECK(std::strstr(d.f->calibration_text(), "All 15 slots checked") != nullptr, "done");
+  CHECK(std::strstr(d.f->calibration_text(), "all 15 slots checked") != nullptr, "done");
   CHECK(d.cal(N20_CAL_NEXT) == Result::INVALID_ARG, "nothing after the last slot");
   d.f->set_calibration_mode(false);
   CHECK(d.f->position_unknown(), "the disc turned: reload before feeding");
@@ -575,20 +588,62 @@ static void test_calibration_flow() {
   CHECK(!d.f->position_unknown() && d.f->remaining() == 14, "reloaded");
 }
 
+static void test_calibration_trim_here() {
+  current = "disc calibration: Trim here";
+  Disc d;
+  d.f->set_calibration_mode(true);
+  d.cal(N20_CAL_START);
+  d.cal(N20_CAL_YES);
+  d.cal(N20_CAL_ZERO);
+  d.cal(N20_CAL_TURNS);
+  d.cal(N20_CAL_MEASURED);
+  d.run(10);
+  const int32_t tpr = d.f->tuning_value(N20_TICKS_PER_TURN);
+  const int32_t origin = d.ticks();
+  CHECK(d.cal(N20_CAL_TRIM_HERE) == Result::INVALID_ARG, "not before the first slot is checked");
+  CHECK(d.cal(N20_CAL_NEXT) == Result::OK, "slot 1");
+  CHECK(std::strstr(d.f->calibration_text(), "then press Trim here") != nullptr, "says what to do if it is off");
+  // Every slot stops 1 degree short of the hole: nudge this one on by 1 degree, then Trim here.
+  CHECK(d.cal(N20_CAL_NUDGE, 10) == Result::OK, "nudge 1 degree");
+  CHECK(d.cal(N20_CAL_TRIM_HERE) == Result::OK, "trim here");
+  d.run(10);
+  CHECK(std::abs(d.f->tuning_value(N20_TRIM) - 10) <= 1, "trim +1.0 degree, from the nudge");
+  CHECK(std::strstr(d.f->calibration_text(), "trim set to +1.0 degrees") != nullptr ||
+            std::strstr(d.f->calibration_text(), "trim set to +0.9") != nullptr ||
+            std::strstr(d.f->calibration_text(), "trim set to +1.1") != nullptr,
+        "and says so, with its sign");
+  CHECK(d.cal(N20_CAL_NEXT) == Result::OK, "slot 2");
+  const int32_t want = grid(2, origin, tpr) + static_cast<int32_t>(std::lround(d.f->tuning_value(N20_TRIM) * tpr / 3600.0));
+  CHECK(std::abs(d.ticks() - want) <= 4, "the next slot stops a degree further on, like the one nudged");
+  d.run(6000);
+  CHECK(d.flash.have_tuning && d.flash.tuning.values[N20_TRIM] == d.f->tuning_value(N20_TRIM), "saved");
+  // The other way: slot 3 goes past by about 2 degrees. Overshot backs up 5 and comes forward 4 (net -1 degree).
+  CHECK(d.cal(N20_CAL_NEXT) == Result::OK, "slot 3");
+  const int32_t before = d.f->tuning_value(N20_TRIM);
+  CHECK(d.cal(N20_CAL_OVERSHOT) == Result::OK, "overshot");
+  CHECK(d.cal(N20_CAL_TRIM_HERE) == Result::OK, "trim here");
+  d.run(10);
+  CHECK(std::abs(d.f->tuning_value(N20_TRIM) - (before - 10)) <= 2, "trim back by about a degree");
+  CHECK(std::strstr(d.f->calibration_text(), "trim set to +0.") != nullptr ||
+            std::strstr(d.f->calibration_text(), "trim set to -0.") != nullptr ||
+            std::strstr(d.f->calibration_text(), "trim set to +0.0") != nullptr,
+        "close to zero again");
+}
+
 static void test_calibration_direction() {
   {
     current = "disc calibration: motor wired the other way";
     Disc d;
+    d.f->set_calibration_mode(true);
     d.f->set_tuning(N20_REVERSE_MOTOR, 1);  // as if M1 and M2 were swapped
     d.run(10);
-    d.f->set_calibration_mode(true);
     d.cal(N20_CAL_START);
     // It turned backwards, and the encoder (seeing it go backwards) counted down.
     CHECK(d.cal(N20_CAL_NO) == Result::OK, "no");
     d.run(10);
     CHECK(d.f->tuning_value(N20_REVERSE_MOTOR) == 0 && d.f->tuning_value(N20_REVERSE_ENCODER) == 0,
           "the motor reversed back; the encoder already agrees");
-    CHECK(std::strstr(d.f->calibration_text(), "test it again") != nullptr, "test again");
+    CHECK(std::strstr(d.f->calibration_text(), "test once more") != nullptr, "test again");
     CHECK(d.cal(N20_CAL_YES) == Result::INVALID_ARG, "not without testing again");
     d.cal(N20_CAL_START);
     CHECK(d.cal(N20_CAL_YES) == Result::OK && std::strstr(d.f->calibration_text(), "Zero") != nullptr, "now right");
@@ -596,9 +651,9 @@ static void test_calibration_direction() {
   {
     current = "disc calibration: encoder wired the other way";
     Disc d;
+    d.f->set_calibration_mode(true);
     d.f->set_tuning(N20_REVERSE_ENCODER, 1);
     d.run(10);
-    d.f->set_calibration_mode(true);
     d.cal(N20_CAL_START);
     CHECK(d.cal(N20_CAL_YES) == Result::OK, "it turned the feeding way, but counted down");
     d.run(10);
@@ -616,7 +671,7 @@ static void test_calibration_direction() {
     d.cal(N20_CAL_START);
     const int32_t raw = d.ticks();
     (void) raw;
-    CHECK(std::strstr(d.f->calibration_text(), "Did the disc turn") != nullptr, "and it counted up again");
+    CHECK(std::strstr(d.f->calibration_text(), "turn the way it should") != nullptr, "and it counted up again");
   }
   {
     current = "disc calibration: encoder not counting";
@@ -655,7 +710,9 @@ static void test_tuning_values() {
         "the bench sketch's values");
   CHECK(d.f->set_tuning(N20_WIGGLE_CYCLES, 0) == Result::INVALID_ARG, "at least one wiggle (D13)");
   CHECK(d.f->set_tuning(N20_TRIM, 121) == Result::INVALID_ARG, "trim at most half a slot");
-  CHECK(d.f->set_tuning(N20_TRIM, 15) == Result::OK, "a 1.5 degree trim");
+  CHECK(d.f->set_tuning(N20_TRIM, 15) == Result::NOT_CALIBRATING, "trim only in calibration mode");
+  CHECK(d.f->set_tuning(N20_POWER, 90) == Result::OK, "drive power at any time");
+  CHECK(set_in_calibration(d, N20_TRIM, 15) == Result::OK, "a 1.5 degree trim");
   d.run(6000);
   CHECK(d.flash.have_tuning && std::strcmp(d.flash.tuning.mechanism, "n20-direct") == 0, "saved for this mechanism");
   d.boot();
@@ -675,6 +732,45 @@ static void test_capacity_other_disc() {
   CHECK(std::abs(d.ticks() - grid(1, 0, 8344, 8)) <= 4, "45 degrees");
 }
 
+static void test_slot_count() {
+  current = "disc: the slot count";
+  Disc d;
+  CHECK(d.f->tuning_value(N20_SLOTS) == 15 && d.f->capacity() == 14, "the build's 15 slots");
+  CHECK(d.f->set_tuning(N20_SLOTS, 16) == Result::NOT_CALIBRATING, "never with food loaded");
+  d.f->set_calibration_mode(true);
+  CHECK(d.f->set_tuning(N20_SLOTS, 2) == Result::INVALID_ARG && d.f->set_tuning(N20_SLOTS, 61) == Result::INVALID_ARG,
+        "3 to 60");
+  CHECK(d.f->set_tuning(N20_SLOTS, 16) == Result::OK, "16 slots");
+  CHECK(d.f->capacity() == 15, "15 portions a load");
+  CHECK(std::strstr(d.f->calibration_text(), "Disc slots (16)") != nullptr, "the wizard shows it");
+  d.f->set_calibration_mode(false);
+  CHECK(d.f->position_unknown(), "another slot count: reload before feeding");
+  d.f->tray_reload();
+  CHECK(d.f->remaining() == 15, "a full load of 15");
+  const int32_t origin = d.ticks();
+  d.f->request_feed(1, Source::ESPHOME);
+  d.settle();
+  CHECK(std::abs(d.ticks() - grid(1, origin, 8344, 16)) <= 4, "22.5 degrees a slot");
+  d.run(6000);
+  d.boot(15);  // the build still says 15: the saved 16 wins
+  CHECK(d.f->tuning_value(N20_SLOTS) == 16 && d.f->capacity() == 15, "kept across a reboot");
+}
+
+static void test_tuning_layout_1_kept() {
+  current = "disc: tuning saved before Disc Slots existed";
+  Disc d;
+  set_in_calibration(d, N20_TRIM, 7);
+  d.f->set_tuning(N20_POWER, 80);
+  d.run(6000);
+  // As layout 1 saved it: nine values, no slot count.
+  d.flash.tuning.layout = 1;
+  d.flash.tuning.count = 9;
+  d.flash.tuning.values[N20_SLOTS] = 0;
+  d.boot(15);
+  CHECK(d.f->tuning_value(N20_TRIM) == 7 && d.f->tuning_value(N20_POWER) == 80, "layout 1's values kept");
+  CHECK(d.f->tuning_value(N20_SLOTS) == 15, "the new value at its default");
+}
+
 int main() {
   test_motion_matches_sketch();
   test_mechanism_feeds();
@@ -683,10 +779,13 @@ int main() {
   test_mechanism_faults();
   test_mechanism_recovery_and_boot();
   test_calibration_flow();
+  test_calibration_trim_here();
   test_calibration_direction();
   test_calibration_measure_rejected();
   test_tuning_values();
   test_capacity_other_disc();
+  test_slot_count();
+  test_tuning_layout_1_kept();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

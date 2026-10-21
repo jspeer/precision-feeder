@@ -256,16 +256,21 @@ static const TuningParam N20_PARAMS[N20_TUNING_COUNT] = {
     {"calibration_turns", "Calibration Turns", "", 1, 10, 1, 1},
     {"reverse_motor", "Reverse Motor", "", 0, 1, 0, 1},
     {"reverse_encoder", "Reverse Encoder", "", 0, 1, 0, 1},
+    // Slots on the disc, all open, one over the chute (portions per load: slots - 1). The default is the build's.
+    {"disc_slots", "Disc Slots", "", N20Mechanism::SLOTS_MIN, N20Mechanism::SLOTS_MAX, 15, 1},
 };
 
 N20Mechanism::N20Mechanism(uint8_t slots) : slots_(std::min<uint8_t>(std::max<uint8_t>(slots, SLOTS_MIN), SLOTS_MAX)) {
-  for (uint8_t i = 0; i < N20_TUNING_COUNT; i++)
+  for (uint8_t i = 0; i < N20_TUNING_COUNT; i++) {
+    this->params_[i] = N20_PARAMS[i];
     this->value_[i] = N20_PARAMS[i].def;
+  }
+  this->params_[N20_SLOTS].def = this->value_[N20_SLOTS] = this->slots_;
   this->configure_motion_();
 }
 
 const TuningParam *N20Mechanism::tuning_param(uint8_t index) const {
-  return index < N20_TUNING_COUNT ? &N20_PARAMS[index] : nullptr;
+  return index < N20_TUNING_COUNT ? &this->params_[index] : nullptr;
 }
 
 void N20Mechanism::apply_tuning(uint8_t index, int32_t value) {
@@ -273,6 +278,14 @@ void N20Mechanism::apply_tuning(uint8_t index, int32_t value) {
   if (index >= N20_TUNING_COUNT)
     return;
   this->value_[index] = value;
+  if (index == N20_SLOTS && value != this->slots_) {
+    // Another slot count: the grid starts again from where the disc is, and which slots hold food is no longer known
+    // (calibration mode is on: the core marks the position unknown when it ends).
+    this->slots_ = static_cast<uint8_t>(value);
+    this->origin_ = this->ticks_ - this->degrees_to_ticks_(this->value_[N20_TRIM]);
+    this->k_ = 0;
+    this->cal_moved_ = true;
+  }
   this->configure_motion_();
 }
 
@@ -451,6 +464,7 @@ bool N20Mechanism::calibration_action(uint8_t action, int32_t arg, uint32_t now_
       this->checked_ = 0;
       this->measure_rejected_ = 0;
       this->direction_from_ = this->ticks_;
+      this->trim_was_set_ = false;
       if (!this->motion_.start_open(1, this->motion_.timing().direction_test_ms, this->ticks_, now_ms))
         return false;
       this->cal_moved_ = true;
@@ -536,7 +550,24 @@ bool N20Mechanism::calibration_action(uint8_t action, int32_t arg, uint32_t now_
       return true;
     }
     case N20_CAL_NEXT:
+      this->trim_was_set_ = false;
       return this->calibration_action_next_(now_ms);
+    case N20_CAL_TRIM_HERE: {
+      // The user nudged this slot until it was centred: the difference from where the grid put it is the trim, for
+      // every slot alike. Forward nudges make it larger; Overshot (back, then forward) smaller.
+      if (this->cal_ != Cal::CHECK || this->checked_ == 0)
+        return false;
+      const int32_t off_ticks = this->ticks_ - this->slot_target_(this->k_);
+      const double tenths = off_ticks * 3600.0 / this->value_[N20_TICKS_PER_TURN];
+      const TuningParam &p = N20_PARAMS[N20_TRIM];
+      const int32_t trim = std::min(p.max, std::max(p.min, this->value_[N20_TRIM] + static_cast<int32_t>(std::lround(tenths))));
+      this->value_[N20_TRIM] = trim;  // used at once; the core saves it (take_tuning_update)
+      this->configure_motion_();
+      this->queue_tuning_(N20_TRIM, trim);
+      this->trimmed_ = trim;
+      this->trim_was_set_ = true;
+      return true;
+    }
     default:
       return false;
   }
@@ -562,46 +593,55 @@ const char *N20Mechanism::calibration_text() const {
   } else if (this->cal_fault_[0] != '\0') {
     std::snprintf(b, n, "Motor fault: %s. Press Start to begin again.", this->cal_fault_);
   } else {
+    // Each under 255 characters (Home Assistant's limit), and each says which step, what to look at, which button.
     switch (this->cal_) {
       case Cal::OFF:
-        std::snprintf(b, n, "Empty the disc, then press Start. Nudge and Declare Tray Position are for recovery.");
+        std::snprintf(b, n, "Step 1 of 5: check Disc slots (%u) matches your disc, empty every slot, then press Start: "
+                      "the disc gives a short push forward. (After a power cut: Nudge, then Declare.)", this->slots_);
         break;
       case Cal::DIRECTION:
         if (!this->direction_done_)
-          std::snprintf(b, n, "Testing the direction...");
+          std::snprintf(b, n, "Step 1 of 5: testing the direction...");
         else if (this->direction_flipped_)
-          std::snprintf(b, n, "Direction reversed. Press Start to test it again.");
+          std::snprintf(b, n, "Step 1 of 5: direction reversed (Reverse Motor / Reverse Encoder). Press Start to "
+                        "test once more.");
         else if (std::abs(this->direction_delta_) < DIRECTION_MIN_TICKS)
-          std::snprintf(b, n, "The encoder did not count (%ld ticks): check its C1, C2 and 3V3 wires, then Start.",
-                        static_cast<long>(this->direction_delta_));
+          std::snprintf(b, n, "Step 1 of 5: the encoder did not count (%ld ticks). Check its C1, C2 and 3V3 wires, "
+                        "then press Start.", static_cast<long>(this->direction_delta_));
         else
-          std::snprintf(b, n, "Did the disc turn the way it feeds? Yes or No.");
+          std::snprintf(b, n, "Step 1 of 5: did the disc just turn the way it should when it feeds? Press Yes or No.");
         break;
       case Cal::ZERO:
         if (this->measure_rejected_ != 0)
-          std::snprintf(b, n, "That measured %ld ticks per turn, too far from %ld: put a slot over the hole, Zero and "
-                        "try again.", static_cast<long>(this->measure_rejected_),
+          std::snprintf(b, n, "Step 2 of 5: that turn measured %ld ticks, too far from %ld (a slipped disc?). Centre "
+                        "a slot over the hole again, then press Zero.", static_cast<long>(this->measure_rejected_),
                         static_cast<long>(this->value_[N20_TICKS_PER_TURN]));
         else
-          std::snprintf(b, n, "Put one empty slot exactly over the hole (Nudge, Overshot), then press Zero.");
+          std::snprintf(b, n, "Step 2 of 5: centre one empty slot exactly over the hole with Nudge (forward only; "
+                        "too far? Overshot backs up), then press Zero.");
         break;
       case Cal::TURNS:
-        std::snprintf(b, n, "Zeroed. Press Turns: the disc turns %ld time(s) and stops near the same slot.",
-                      static_cast<long>(this->value_[N20_CALIBRATION_TURNS]));
+        std::snprintf(b, n, "Step 3 of 5: press Run turns. The disc makes %ld full turn(s) and stops close to the same "
+                      "slot.", static_cast<long>(this->value_[N20_CALIBRATION_TURNS]));
         break;
       case Cal::MEASURE:
-        std::snprintf(b, n, "Nudge until the same slot is centred over the hole again, then press Measured.");
+        std::snprintf(b, n, "Step 3 of 5: nudge until that same slot is centred over the hole again (too far? "
+                      "Overshot), then press Measured.");
         break;
       case Cal::CHECK:
         if (this->checked_ == 0)
-          std::snprintf(b, n, "%ld ticks per turn. Press Next: the disc moves to each slot as a feed does.",
-                        static_cast<long>(this->value_[N20_TICKS_PER_TURN]));
+          std::snprintf(b, n, "Step 4 of 5: %ld ticks per turn. Press Next slot: the disc moves one slot exactly as a "
+                        "feed does, then you check it.", static_cast<long>(this->value_[N20_TICKS_PER_TURN]));
+        else if (this->trim_was_set_)
+          std::snprintf(b, n, "Step 4 of 5: trim set to %+.1f degrees; every slot moves with it. Press Next slot to "
+                        "check the next one.", this->trimmed_ / 10.0);
         else
-          std::snprintf(b, n, "Slot %u of %u: centred over the hole? Next if so. If every slot is off the same way, "
-                        "change Slot Trim.", this->checked_, this->slots_);
+          std::snprintf(b, n, "Step 4 of 5, slot %u of %u: centred over the hole? Yes: Next slot. No: nudge it to the "
+                        "centre (too far? Overshot), then press Trim here.", this->checked_, this->slots_);
         break;
       case Cal::DONE:
-        std::snprintf(b, n, "All %u slots checked. Turn calibration off to finish, then reload the tray.", this->slots_);
+        std::snprintf(b, n, "Step 5 of 5: all %u slots checked. Turn Calibration mode off, fill every slot except the "
+                      "one over the hole, then press Tray reload.", this->slots_);
         break;
     }
   }

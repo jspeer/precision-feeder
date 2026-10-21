@@ -16,10 +16,12 @@
 # Calibrate it before feeding: Maintenance in the web app (or the Calibration buttons below), docs/CALIBRATION.md.
 
 substitutions:
-  # Slots on the disc and portions per load: tray_capacity is always disc_slots - 1 (tests/test_consistency.py
-  # checks it). Change both together for another print.
+  # Slots on the disc for a new feeder: the starting value of Disc Slots, which you set in the calibration (step 1)
+  # and which is saved on the feeder from then on.
   disc_slots: "15"
-  tray_capacity: "14"
+  # The most portions any disc may hold (60 slots - 1): the input boxes for portions go up to this, and the feeder
+  # refuses more than the disc it has. tests/test_consistency.py checks it. Leave it.
+  tray_capacity: "59"
   # GPIO numbers (Waveshare ESP32-S3-Zero, as wired on the bench).
   motor_in1_pin: GPIO1         # DRV8833 AIN1
   motor_in2_pin: GPIO2         # DRV8833 AIN2
@@ -66,6 +68,8 @@ precision_feeder:
     - button/Calibration Run Turns
     - button/Calibration Measured
     - button/Calibration Next Slot
+    - button/Calibration Trim Here
+    - number/Disc Slots
 
 # --- Tuning (saved on the feeder; limits from mechanism_n20.cpp's table, which tests/test_consistency.py checks) --
 number:
@@ -146,9 +150,24 @@ number:
     max_value: 12
     step: 0.1
     mode: box
-    # Shifts every slot together, when all of them stop off the hole by the same amount (the calibration's check).
+    # Shifts every slot together: + moves every stop further forward (the feeding way), - moves it back. The
+    # calibration's Trim here sets it for you from a slot you nudged to the centre.
     set_action:
       - lambda: id(feeder).set_tuning(precision_feeder::N20_TRIM, (int32_t) std::lround(x * 10));
+    update_interval: never
+  - platform: template
+    id: pf_n20_slots
+    name: "Disc Slots"
+    icon: mdi:circle-slice-8
+    entity_category: config
+    min_value: 3
+    max_value: 60
+    step: 1
+    mode: box
+    # Slots on your disc, all open, one always over the chute (a load holds one fewer). Only in calibration mode:
+    # changing it moves every slot, so the disc is reloaded afterwards.
+    set_action:
+      - lambda: id(feeder).set_tuning(precision_feeder::N20_SLOTS, (int32_t) x);
     update_interval: never
   - platform: template
     id: pf_n20_cal_turns
@@ -257,6 +276,12 @@ button:
     icon: mdi:skip-next
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NEXT);
+  # In step 4: this slot was nudged to the centre of the hole; every slot shifts by the same amount (Slot Trim).
+  - platform: template
+    name: "Calibration Trim Here"
+    icon: mdi:crosshairs
+    on_press:
+      - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_TRIM_HERE);
   - platform: template
     name: "Declare Tray Position"
     icon: mdi:map-marker-check
@@ -324,6 +349,7 @@ interval:
           publish_number(id(pf_n20_wiggle_cycles), f->tuning_value(N20_WIGGLE_CYCLES));
           publish_number(id(pf_n20_trim), f->tuning_value(N20_TRIM) / 10.0f);
           publish_number(id(pf_n20_cal_turns), f->tuning_value(N20_CALIBRATION_TURNS));
+          publish_number(id(pf_n20_slots), f->tuning_value(N20_SLOTS));
           publish_text(id(pf_n20_step), f->calibration_mode() ? f->calibration_text() : "Calibration mode is off");
           publish_text(id(pf_n20_fault), f->mechanism_fault()[0] ? f->mechanism_fault() : "none");
           publish_number(id(pf_n20_ticks_now), id(disc).encoder_ticks());

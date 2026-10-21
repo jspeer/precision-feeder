@@ -115,10 +115,15 @@ class Consistency(unittest.TestCase):
         """The direct-drive disc (packages/mechanism_n20.yaml): its capacity is its slots - 1, each tuning entity's
         YAML limits are its table's (mechanism_n20.cpp, N20_PARAMS) and every protected entity it lists exists."""
         sub = mechanism_substitutions("mechanism_n20.yaml")
-        self.assertEqual(int(sub["tray_capacity"]), int(sub["disc_slots"]) - 1)
+        header = (ROOT / "components/precision_feeder/mechanism_n20.h").read_text()
+        lo, hi = map(int, re.search(r"SLOTS_MIN = (\d+), SLOTS_MAX = (\d+);", header).groups())
+        # The input boxes go up to the most portions any disc may hold; the feeder holds each to its own.
+        self.assertEqual(int(sub["tray_capacity"]), hi - 1)
+        self.assertTrue(lo <= int(sub["disc_slots"]) <= hi)
         source = (ROOT / "components/precision_feeder/mechanism_n20.cpp").read_text()
+        source = source.replace("N20Mechanism::SLOTS_MIN", str(lo)).replace("N20Mechanism::SLOTS_MAX", str(hi))
         table = re.findall(r'\{"(\w+)", "([^"]+)", "[^"]*", (-?\d+), (-?\d+), (-?\d+), (\d+)\}', source)
-        self.assertEqual(len(table), 9, "N20_PARAMS not found")
+        self.assertEqual(len(table), 10, "N20_PARAMS not found")
         yaml = (ROOT / "packages/mechanism_n20.yaml").read_text()
         for key, name, lo, hi, _default, scale in table:
             if name.startswith("Reverse"):

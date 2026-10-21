@@ -20,6 +20,10 @@ YAML on its branch; there are no prebuilt binaries, and the web app's update che
   global trim.
 - Tuning on the device (web app Maintenance, and Home Assistant): ticks per turn, drive power, braking distance,
   wiggle amplitude and cycles, slot trim, calibration turns, reverse motor and encoder.
+- The slot count is a setting (Disc Slots, 3 to 60) in the calibration, so a 14- or 16-slot disc needs no rebuild.
+  Slot count, ticks per turn, trim and the direction reversals can only be changed in calibration mode.
+- The calibration's texts say which step you are on and which button to press; Trim here sets the trim from a slot you
+  nudged to the centre.
 - The button defaults to GPIO3. Runtime button and LED pins work without a servo pin.
 - Host-tested only: nothing of this has run on hardware yet (DESIGN.md open item 23).
 

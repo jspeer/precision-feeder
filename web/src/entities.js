@@ -84,6 +84,8 @@ const E = {
   calTurns: 'button/Calibration Run Turns',
   calMeasured: 'button/Calibration Measured',
   calNext: 'button/Calibration Next Slot',
+  calTrimHere: 'button/Calibration Trim Here',
+  discSlots: 'number/Disc Slots',
   ticksPerTurn: 'number/Ticks Per Turn',
   calibrationTurns: 'number/Calibration Turns',
   reverseMotor: 'switch/Reverse Motor',

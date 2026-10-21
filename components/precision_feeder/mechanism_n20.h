@@ -159,9 +159,10 @@ enum N20Tuning : uint8_t {
   N20_CALIBRATION_TURNS,
   N20_REVERSE_MOTOR,
   N20_REVERSE_ENCODER,
+  N20_SLOTS,  // layout 2: added at the end, so layout 1's values are kept (tuning_layout_extends)
   N20_TUNING_COUNT,
 };
-constexpr uint8_t N20_TUNING_LAYOUT = 1;
+constexpr uint8_t N20_TUNING_LAYOUT = 2;
 
 /// The guided calibration's actions (Mechanism::calibration_action; DESIGN.md section 3.3).
 enum N20Action : uint8_t {
@@ -174,6 +175,7 @@ enum N20Action : uint8_t {
   N20_CAL_TURNS = 6,     // turn the calibration turns, to the same slot
   N20_CAL_MEASURED = 7,  // centred again after the turns: work out ticks per turn
   N20_CAL_NEXT = 8,      // move to the next slot exactly as a feed does
+  N20_CAL_TRIM_HERE = 9, // in the check: the slot was nudged until centred; trim every slot by that much
 };
 
 class N20Mechanism : public Mechanism {
@@ -182,7 +184,8 @@ class N20Mechanism : public Mechanism {
   static constexpr double RATED_RPM = 35.0;  // GA12-N20, 6 V, 35 rpm: only for the time limits
   static constexpr int32_t DIRECTION_MIN_TICKS = 20;  // the direction test must count at least this many
 
-  /// `slots`: slots on the disc (all open; one over the chute). Clamped to SLOTS_MIN to SLOTS_MAX.
+  /// `slots`: slots on the disc (all open; one over the chute) for a new device: the default of the Disc Slots tuning
+  /// value, which the calibration can change. Clamped to SLOTS_MIN to SLOTS_MAX.
   explicit N20Mechanism(uint8_t slots = 15);
   void set_lock(N20Lock *lock) { this->lock_ = lock; }
   void set_timing(const N20Timing &timing) { this->motion_.set_timing(timing); }
@@ -214,6 +217,12 @@ class N20Mechanism : public Mechanism {
 
   uint8_t tuning_count() const override { return N20_TUNING_COUNT; }
   uint8_t tuning_layout() const override { return N20_TUNING_LAYOUT; }
+  bool tuning_layout_extends(uint8_t older) const override { return older == 1; }
+  /// Where the slots are (count, ticks per turn, trim) and which way is forward: never with food loaded.
+  bool tuning_needs_calibration(uint8_t index) const override {
+    return index == N20_TICKS_PER_TURN || index == N20_TRIM || index == N20_REVERSE_MOTOR ||
+           index == N20_REVERSE_ENCODER || index == N20_SLOTS;
+  }
   const TuningParam *tuning_param(uint8_t index) const override;
   void apply_tuning(uint8_t index, int32_t value) override;
 
@@ -246,6 +255,7 @@ class N20Mechanism : public Mechanism {
 
   N20Lock *lock_{nullptr};
   N20Motion motion_{};
+  TuningParam params_[N20_TUNING_COUNT];  // the table, with Disc Slots' default from the build
   uint8_t slots_;
   int32_t value_[N20_TUNING_COUNT]{};
   int32_t ticks_{0};       // encoder count, after Reverse Encoder
@@ -269,7 +279,10 @@ class N20Mechanism : public Mechanism {
   int32_t measure_turns_{0};
   int32_t measure_rejected_{0};    // a measurement too far from the expected one, or 0
   uint8_t checked_{0};             // slots stepped through in the check pass
-  mutable char text_[192]{};       // calibration_text(), built from the state above when asked
+  int32_t trimmed_{0};             // the trim Trim here just set (tenths of a degree), shown until the next action
+  bool trim_was_set_{false};
+  mutable char text_[256]{};       // calibration_text(), built from the state above when asked (under 255 characters:
+                                   // Home Assistant's limit for a state)
   // Tuning values the calibration worked out, for the core to set (take_tuning_update).
   uint8_t pending_index_[3]{};
   int32_t pending_value_[3]{};

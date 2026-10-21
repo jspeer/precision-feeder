@@ -226,12 +226,13 @@ class Feeder:
                                                    ("Wiggle Amplitude", 2.0, 0.1, 5, 0.1, "°"),
                                                    ("Wiggle Cycles", 4, 1, 10, 1, None),
                                                    ("Slot Trim", 0.0, -12, 12, 0.1, "°"),
-                                                   ("Calibration Turns", 1, 1, 10, 1, None)]:
+                                                   ("Calibration Turns", 1, 1, 10, 1, None),
+                                                   ("Disc Slots", 15, 3, 60, 1, None)]:
                 a("number", name, value, category=CONFIG, uom=uom, min_value=lo, max_value=hi, step=step)
             a("switch", "Reverse Motor", False, category=CONFIG)
             a("switch", "Reverse Encoder", False, category=CONFIG)
             for name in ["Start", "Yes", "No", "Nudge 0.1°", "Nudge 1°", "Overshot", "Zero", "Run Turns", "Measured",
-                         "Next Slot"]:
+                         "Next Slot", "Trim Here"]:
                 a("button", f"Calibration {name}")
             a("text_sensor", "Calibration Step", "Calibration mode is off")
             a("text_sensor", "Motor Fault", "none", category=DIAGNOSTIC)
@@ -522,15 +523,20 @@ class Feeder:
                 self.feed(int(self.get("number", "Manual Portions")))
             elif self.disc and name.startswith("Calibration "):
                 # A plausible next step only: the device's own flow is mechanism_n20.cpp (tests/test_n20.cpp).
-                step = {"Calibration Start": "Did the disc turn the way it feeds? Yes or No.",
-                        "Calibration Yes": "Put one empty slot exactly over the hole (Nudge, Overshot), then press Zero.",
-                        "Calibration Zero": "Zeroed. Press Turns: the disc turns 1 time(s) and stops near the same slot.",
-                        "Calibration Run Turns": "Nudge until the same slot is centred over the hole again, then "
-                                                 "press Measured.",
-                        "Calibration Measured": "8351 ticks per turn. Press Next: the disc moves to each slot as a "
-                                                "feed does.",
-                        "Calibration Next Slot": "Slot 1 of 15: centred over the hole? Next if so. If every slot is "
-                                                 "off the same way, change Slot Trim."}.get(name)
+                step = {"Calibration Start": "Step 1 of 5: did the disc just turn the way it should when it feeds? "
+                                             "Press Yes or No.",
+                        "Calibration Yes": "Step 2 of 5: centre one empty slot exactly over the hole with Nudge "
+                                           "(forward only; too far? Overshot backs up), then press Zero.",
+                        "Calibration Zero": "Step 3 of 5: press Run turns. The disc makes 1 full turn(s) and stops "
+                                            "close to the same slot.",
+                        "Calibration Run Turns": "Step 3 of 5: nudge until that same slot is centred over the hole "
+                                                 "again (too far? Overshot), then press Measured.",
+                        "Calibration Measured": "Step 4 of 5: 8351 ticks per turn. Press Next slot: the disc moves "
+                                                "one slot exactly as a feed does, then you check it.",
+                        "Calibration Next Slot": "Step 4 of 5, slot 1 of 15: centred over the hole? Yes: Next slot. "
+                                                 "No: nudge it to the centre (too far? Overshot), then press Trim here.",
+                        "Calibration Trim Here": "Step 4 of 5: trim set to +0.8 degrees; every slot moves with it. "
+                                                 "Press Next slot to check the next one."}.get(name)
                 if self.calibrating and step:
                     self.set("text_sensor", "Calibration Step", step)
             elif name == "Tray Reload":

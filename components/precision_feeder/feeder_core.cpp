@@ -246,6 +246,10 @@ Result FeederCore::set_tuning(uint8_t index, int32_t value) {
   }
   if (this->moving_())
     return Result::BUSY;
+  if (this->mech_->tuning_needs_calibration(index) && !this->calibrating_) {
+    this->log_(LogLevel::kWarn, "%s can only be changed in calibration mode", p->name);
+    return Result::NOT_CALIBRATING;
+  }
   if (this->tuning_.values[index] == value)
     return Result::OK;
   // From the first change on, the record is this mechanism's (one saved for another mechanism is replaced only now).
@@ -273,7 +277,12 @@ void FeederCore::load_tuning_(const Tuning *saved) {
     char name[MECHANISM_NAME_SIZE];
     std::memcpy(name, saved->mechanism, MECHANISM_NAME_SIZE);
     name[MECHANISM_NAME_SIZE - 1] = '\0';
-    usable = std::strcmp(name, this->tuning_.mechanism) == 0 && saved->layout == this->tuning_.layout;
+    usable = std::strcmp(name, this->tuning_.mechanism) == 0 &&
+             (saved->layout == this->tuning_.layout ||
+              (saved->layout < this->tuning_.layout && this->mech_->tuning_layout_extends(saved->layout)));
+    if (usable && saved->layout != this->tuning_.layout)
+      this->log_(LogLevel::kInfo, "Tuning from layout %u kept (layout %u only adds values)", saved->layout,
+                 this->tuning_.layout);
     if (!usable)
       this->log_(LogLevel::kWarn, "Saved tuning is for %s (layout %u), not %s (layout %u): using the defaults", name,
                  saved->layout, this->tuning_.mechanism, this->tuning_.layout);

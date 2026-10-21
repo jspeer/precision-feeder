@@ -305,9 +305,18 @@ reverse motor and reverse encoder. The motion's timings and limits are YAML-only
 the user says which way it turned and the firmware checks the encoder counted up, then offers Reverse Motor and
 Reverse Encoder rather than a rewire), Zero on a slot over the hole, a full-turn measurement of ticks per turn (an
 error spread over the slots of a turn, not repeated on each; refused if more than 20% from the value it turned by),
-a check pass that moves to every slot exactly as a feed does, and one global trim. Nudges go forward only; Overshot
-backs off 5° and comes forward 4°, so every stop is approached from the same side (gearbox backlash). A disc moved in
-calibration leaves the position unknown when calibration ends, so it is reloaded before anything is fed.
+a check pass that moves to every slot exactly as a feed does, and one global trim, set by **Trim here** from a slot
+the user nudged to the centre (no typed value, no sign to get wrong). Nudges go forward only; Overshot backs off 5° and
+comes forward 4°, so every stop is approached from the same side (gearbox backlash). A disc moved in calibration, or
+given another slot count, leaves the position unknown when calibration ends, so it is reloaded before anything is fed.
+Every step's text names the step (1 to 5) and the button to press, under 255 characters (Home Assistant's limit).
+
+**Slot count** (Disc Slots, 3 to 60, owner 2026-10-21): a tuning value, the YAML's `disc_slots` only its starting
+value, so a 14- or 16-slot print needs no rebuild; capacity follows it at run time, and the portion input boxes go up
+to 59. Values that move where the slots are or which way is forward (Disc Slots, Ticks Per Turn, Slot Trim, Reverse
+Motor, Reverse Encoder) can only be changed in calibration mode (`Mechanism::tuning_needs_calibration`). Adding Disc
+Slots made the tuning table layout 2; it only appends, so values saved under layout 1 are kept
+(`Mechanism::tuning_layout_extends`).
 
 **Recovery** after a power cut mid-move: in calibration mode, nudge forward until a slot is over the hole, then
 Declare Tray Position (portions fed since the last reload); the grid restarts from where the disc is.
