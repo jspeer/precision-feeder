@@ -55,7 +55,8 @@ select:
           uint8_t pin;
           if (parse_pin(x.str(), pin))
             id(feeder).set_pin(PinRole::SERVO, pin);
-          publish_option(id(pf_servo_pin), pin_text(id(feeder).pins_saved().servo));
+          if (id(feeder).is_servo())
+            publish_option(id(pf_servo_pin), pin_text(id(feeder).pins_saved().servo));
     update_interval: never
 
 interval:
@@ -64,7 +65,10 @@ interval:
       - lambda: |-
           using namespace precision_feeder;
           publish_option(id(pf_board), board_name(id(feeder).board()));
-          publish_option(id(pf_servo_pin), pin_text(id(feeder).pins_saved().servo));
+          // Only while the servo is the drive: with another (a single binary running the disc) there is no servo pin,
+          // and "none" is not one of this select's options.
+          if (id(feeder).is_servo())
+            publish_option(id(pf_servo_pin), pin_text(id(feeder).pins_saved().servo));
 
 # Restart, Restart Needed and Pins In Use (packages/restart.yaml): in every build with runtime settings.
 packages:
