@@ -249,8 +249,9 @@ uint8_t FeederCore::choose_drive(const Device &saved) {
   const uint8_t use = this->resolve_drive(saved.version == DEVICE_VERSION ? saved.reserved[0] : DRIVE_BUILD);
   this->set_mechanism(this->drives_[use - 1]);
   this->drive_in_use_ = use;
-  // The first boot that records a drive (reserved[1] still 0) changes nothing; a different one does.
-  this->drive_changed_ = saved.version == DEVICE_VERSION && saved.reserved[1] != 0 && saved.reserved[1] != use;
+  // A different drive from the one the last boot used, or none recorded yet (the first boot after a firmware with one
+  // drive, which never recorded it: found on the bench). core_start() marks a saved tray position unknown then.
+  this->drive_changed_ = saved.version != DEVICE_VERSION || saved.reserved[1] != use;
   return use;
 }
 
@@ -446,7 +447,7 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
 
   if (this->drive_in_use_ != DRIVE_BUILD && this->dev_.reserved[1] != this->drive_in_use_) {
     // Remember the drive this boot uses. If it is not the one the last boot used, which slots hold food is not known.
-    if (this->drive_changed_ && !this->state_.unknown) {
+    if (this->drive_changed_ && state != nullptr && state->version == STATE_VERSION && !this->state_.unknown) {
       this->log_(LogLevel::kWarn, "The drive changed to %s: reload the tray before feeding", this->mech_->name());
       this->state_.unknown = 1;
       this->state_.moving_to = NO_MOVE;

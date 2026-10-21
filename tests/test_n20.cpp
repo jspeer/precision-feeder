@@ -882,7 +882,7 @@ static void test_single_binary() {
     auto f = boot_dual(flash, disc);
     CHECK(f->drive_count() == 2 && f->drive_in_use() == 2 && !f->is_servo(), "a fresh device: the build's drive");
     CHECK(flash.device.reserved[1] == 2, "the drive in use is remembered");
-    CHECK(!f->position_unknown(), "the first boot that records it changes nothing");
+    CHECK(!f->position_unknown(), "a new device (no saved tray) starts as usual");
     CHECK(f->set_drive(4) == Result::INVALID_ARG, "no such drive");
     CHECK(f->set_drive(FeederCore::DRIVE_SERVO) == Result::OK && f->restart_needed(), "servo: at the next restart");
     CHECK(f->drive_in_use() == 2 && !f->is_servo(), "still the disc until then");
@@ -901,6 +901,18 @@ static void test_single_binary() {
     N20Mechanism disc;
     auto f = boot_dual(flash, disc);
     CHECK(!f->is_servo() && f->capacity() == 14 && f->position_unknown(), "the disc again; unknown again");
+  }
+  {
+    // From a firmware with one drive (it never recorded which): the tray position is not trusted.
+    Flash old;
+    {
+      auto f = boot(old, T0);  // the servo alone, as 2.1.0
+      f->declare_position(2);
+      f->advance(1000);
+    }
+    N20Mechanism disc;
+    auto f = boot_dual(old, disc);
+    CHECK(!f->is_servo() && f->position_unknown(), "the first boot with two drives: reload before feeding");
   }
   {
     // A build with one drive never offers a choice.
