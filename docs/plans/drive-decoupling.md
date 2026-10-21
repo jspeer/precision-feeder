@@ -4,6 +4,20 @@ Status: **stage 1 built on `release/2.1.0-mechanism` (2026-10-21), host-tested; 
 Stage 2 not started. D6 checked (GPIO3: Espressif's ESP-IDF JTAG guide for the ESP32-S3). Nothing replaces a
 working binary before it has been on its own branch.
 
+Stage 1 validation (2026-10-21, host only; no hardware attached):
+- The golden servo trace (S1.0, recorded from 2.0.2) matches exactly.
+- 2.0.2's own tests, run unchanged against 2.1.0 (only an empty `hal_save_tuning` added to its fakes): every one
+  passes except two assertions that encode intended changes, GPIO3 refused (D6) and an unpublished variant's
+  update state (`unknown`, now `unlisted`).
+- A differential test, outside the repository: 2,000 random sessions of 400 steps (feeds from every source and of
+  every size, stops, reloads, declares, calibration, pulse ranges, guard settings, holds, the 24 h edit, events,
+  power cuts with and without a clock) through the 2.0.2 core and the 2.1.0 core. Every servo command, release,
+  saved record (byte for byte), log line and status text was identical: 2.8 million lines, 3,352 feeds. The same
+  test catches a 1 ms change in the servo's step time in 95 of 100 sessions.
+- Both examples' resolved ESPHome configuration is unchanged apart from `tray_capacity`.
+- Both examples compile without warnings. Flash: basic 1,111,391 to 1,115,419 bytes (+4.0 KB), BLE 1,445,435 to
+  1,449,807 (+4.3 KB); RAM +256 bytes each.
+
 Stage 1 as built, where it differs from the steps below (DESIGN.md section 13 has the same list):
 - S1.4: the tuning values got their own record, `Tuning` (`precision_feeder.tuning.v1`), instead of a block in a
   Calibration version 2. No existing record changes layout, and a servo build never writes the new one.
