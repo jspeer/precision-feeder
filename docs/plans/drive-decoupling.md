@@ -319,7 +319,10 @@ endurance 300 cycles of move + wiggle over 20 revolutions, max grid error 5 tick
 | D10 | Runtime (saved, on the Calibration cards and in HA): ticks per revolution, calibration turns, drive power, braking distance, wiggle amplitude, wiggle cycles. YAML-only: brake and pulse timings, fault limits, PWM frequency | owner, 2026-10-20 |
 | D11 | The bench sketch is committed as `tests/reference/motor-test.cpp` (from `src/main.cpp`; the zip and the rest of the bench folder stay out of the repo) and used as a reference in a test (S2.2) | owner, 2026-10-20 |
 | D12 | 2.1.0 is the decoupling on main. The branch is `2.1.0-n20.1` (`-n20.N` counts branch changes on top of a main release; after a rebase onto 2.2.0 it becomes `2.2.0-n20.1`), `Firmware Variant` `n20-direct`, and `Mechanism` reports `n20-direct`. Check the web app's version parser (`parse.js`) accepts the suffix | owner, 2026-10-20 |
-| D13 | No alignment control and no per-slot offsets. Position comes from counting encoder ticks as the tuned sketch does. A feed is 24° **plus the wiggle**: without the wiggle the bench left a sub-1° error, and the wiggle's last leg returns to the planned centre, which put the opening over the hole every time. So on the disc the wiggle is part of positioning: always on, at least 1 cycle | owner, 2026-10-20 |
+| D13 | No alignment control and no per-slot offsets. Position comes from counting encoder ticks as the tuned sketch does. A feed is 24° **plus the wiggle**: without the wiggle the bench left a sub-1° error, and the wiggle's last leg returns to the planned centre, which put the opening over the hole every time. So on the disc the wiggle is part of positioning: always on, at least 1 cycle. Refined by D16: one global trim (all slots shift together) is allowed; per-slot offsets are still out | owner, 2026-10-20 |
+| D16 | Calibration is a guided flow (S2.5): slot count, direction check, zero, a full-turn measurement of ticks per revolution, a check pass that moves exactly as a feed does, and one global trim. Nudges forward only, with an "overshot" button that backs off and comes forward again. Claude's design, the owner's go-ahead | owner, 2026-10-21 |
+| D17 | Test a single binary with a choosable drive early (S2.0b), on this branch. The disc driver claims its GPIOs itself (ESP-IDF, WLED-style) from saved settings at boot, so the YAML claims none; changing the drive or its pins applies at the next restart, which marks the tray position unknown. If the test passes, Claude brings the owner the question of moving the disc driver to main and into releases (that would revisit D1 and AGENTS.md rule 8); if it fails, the single binary is dropped for now and revisited later | owner, 2026-10-21 |
+| D18 | No rewind version in this plan: neither a 360° servo drive nor a rewind mode for the disc. To revisit | owner, 2026-10-21 |
 
 ## Stage 2 steps
 
@@ -337,6 +340,26 @@ stalls on flash writes and Wi-Fi. Test on hardware with a throwaway build:
 - Measure endpoint error over 15 forward slots with Wi-Fi, API and the web server active, and with a flash write
   just before the move (the core saves State before every feed).
 - Exit: the approach chosen and recorded in DESIGN.md with the measured jitter.
+
+### S2.0b Test: one binary, the drive chosen on the device (D17; gates the single-binary option only)
+
+ESPHome makes every pin a build-time constant, sets each component's pin up once at boot, and refuses two components
+on one GPIO (unless `allow_other_uses`). Since 2.0 `PinLoader` already rewrites the servo, button and LED pins from the
+Device record before those components start. WLED changes pins at run time because it owns its drivers; the disc
+driver is ours, so it can do the same. Throwaway build on this branch, before any disc logic:
+- A drive setting (servo or disc) in a small new record, protected, applied at the next restart; switching marks the
+  tray position unknown, so nothing feeds until a reload.
+- A stub disc driver that claims its five GPIOs through ESP-IDF (LEDC, GPIO, PCNT) from saved pins at boot. The servo's
+  output stays as today in servo mode; in disc mode it is never set up (ESPHome's "loop done" state before setup, as
+  the button and LED use for "none"), so its GPIO is free.
+- Measure: flash and RAM of the BLE build (2.1.0 is at 79.0%); both layouts boot from saved settings with no
+  build-time claim; a pin clash between the drives' saved pins is refused by `check_pin()` and the clash check.
+- On the owner's servo feeder: the servo behaves as before in servo mode (the golden trace and the differential test
+  cover the logic; this covers the pins).
+- Entities of both drives exist in the build (Home Assistant fixes them at build time); the web app shows only the
+  active drive's (Mechanism); Home Assistant lists both, in the config category, named for their drive.
+- Exit: a recorded yes or no, with the measurements. Yes: the question of main (D17). No: S2.1 onward as planned,
+  YAML chooses the drive.
 
 ### S2.1 `DirectDriveMechanism` in core (pure, host-tested)
 
@@ -370,6 +393,9 @@ stalls on flash writes and Wi-Fi. Test on hardware with a throwaway build:
 
 - Hooks: `hal_bridge(cmd, duty)` (forward, reverse, brake, coast, standby), `hal_encoder_ticks()`,
   `hal_encoder_set(value)`; fakes in `fake_feeder.h`.
+- Left over from stage 1: register the mechanism from YAML (`set_mechanism()` from the disc component's code
+  generation, before the feeder's setup) and runtime button and LED pins in a build with no servo pin
+  (`apply_pins()` returns early without one today).
 - `precision_feeder.cpp`: the S2.0 approach; STBY low at the earliest setup priority; bridge to coast and STBY low on
   any fault, on `stop()`, and before a restart or firmware upload (both already wait until the tray is idle).
 
@@ -379,7 +405,7 @@ stalls on flash writes and Wi-Fi. Test on hardware with a throwaway build:
   of the current slot.
 - An unfinished intent at boot means `UNKNOWN`, as now. Recovery: in Calibration mode, jog forward until a slot sits
   over the chute, then declare how many portions are left (or reload); declaring takes the current encoder count as
-  the slot's planned position, so the next feed counts from there.
+  the slot's planned position (the same as Zero in S2.5), so the next feed counts from there.
 - Reload: no motion, remaining set back to slots − 1, the reload pause as today. USING.md says the slot over the chute must stay empty
   when loading.
 
@@ -387,17 +413,35 @@ stalls on flash writes and Wi-Fi. Test on hardware with a throwaway build:
 
 - `packages/mechanism_n20.yaml`: config-category numbers for the runtime tuning values (protected, refused while
   moving), from the mechanism's tuning table; YAML substitutions for the rest, each with a comment saying what it
-  does and when to change it. Saved in the Calibration v2 tuning block.
-- Calibration controls: Calibration Mode (feeds refused), Jog Forward (degrees, for recovery), **Run Calibration
-  Turns** and Ticks Per Revolution, with the procedure from the sketch's README: align to a mark, run N
-  turns, jog forward to the mark, then ticks ÷ N. Jog is forward only, so gearbox backlash doesn't enter.
+  does and when to change it. Saved in the Tuning record (stage 1).
+- **The calibration flow (D16)**, in calibration mode (feeds refused), as a step-by-step card on the Maintenance page
+  and the same entities in Home Assistant:
+  1. **Slots:** how many the disc has (15); degrees per slot follow (24°). With a fixed-geometry build this is shown,
+     not asked; with the single binary (S2.0b) it is a setting.
+  2. **Direction:** the disc turns forward a few degrees; "did it turn the feeding way?" The firmware also checks
+     the encoder counted upward. If either is wrong it offers Reverse Motor and Reverse Encoder (tuning values) rather
+     than a rewire. Nothing else runs until this passes.
+  3. **Zero:** "put one empty slot exactly over the hole", nudging forward; then Zero. That slot is the grid's origin.
+  4. **Full turn:** the disc turns one revolution (or three: an Accuracy choice) on the current ticks-per-revolution
+     value and stops near the same slot; the user nudges forward until it is centred again and presses Done. Ticks
+     per revolution = the counted ticks ÷ turns. One revolution, not one slot: an error in one slot would repeat 15
+     times a turn, while over a turn it is shared across 15. About 1.7 s per turn at 35 rpm.
+  5. **Check pass:** the disc steps through every slot exactly as a feed does, wiggle and final approach included
+     (the bench shows it is centred only after the wiggle, so calibration must stop where feeding stops), and asks
+     "centred?" at each. All yes: saved.
+  6. **Trim:** if the slots are off by the same amount, one global trim (tenths of a degree, a tuning value) shifts
+     the grid. If they are off by different amounts, the flow says so: the print is uneven, which per-slot offsets
+     would need (a new decision, D13).
+  - **Nudges:** forward only (+0.1°, +1°), so gearbox backlash never enters. **Overshot** backs off about 5° and
+    comes forward again, so every stop is approached from the same side.
+  - Every move in the flow has the S2.6 limits (travel, timeout, watchdog); Stop works throughout.
 - Diagnostics: `Motor Fault` (last reason and when), `Encoder Ticks`.
-- Web app (D9, D15): `web/src/mechanisms/n20.js`, picked when `Mechanism` is `n20-direct`, with:
+- Web app (D9, D15): an `n20-direct` entry in `MECHANISMS` (`web/src/mechanisms.js`), with:
   - `dial(state)`: a ring of 15 slots with the chute marked, used slots, slots with food, "5 of 14 left".
-  - Calibration cards on the Maintenance page, in this order: **Recovery** (Calibration Mode, Jog Forward), **Encoder** (Ticks Per Revolution, Calibration Turns, Run Calibration Turns, with the mark
-    procedure as the hint), **Motion** (Drive Power, Braking Distance), **Wiggle** (Wiggle Amplitude, Wiggle
-    Cycles), **Motor status** (Motor Fault, Encoder Ticks, read-only).
-  - Its entities added to `entities.js`. One line in `mechanisms/index.js` registers it; no shared page changes.
+  - The calibration flow above as its first card (the card renderer gains a step-by-step card type, shared, so the
+    next mechanism can use it), then **Motion** (Drive Power, Braking Distance), **Wiggle** (Wiggle Amplitude,
+    Wiggle Cycles), **Motor status** (Motor Fault, Encoder Ticks, read-only).
+  - Its entities added to `entities.js`; no shared page changes.
   The YAML-only values (D10) are not shown; the app only shows and requests, the firmware enforces limits.
 - CALIBRATION.md: a direct-drive section.
 
@@ -423,16 +467,19 @@ A servo cannot pass its end stop; a DC motor can keep turning and empty the disc
 ### S2.8 Bench on the real feeder
 
 Recorded in docs/BENCH.md on the branch:
-1. Ticks per revolution by the 10-turn mark procedure (confirms or replaces 8344).
+1. The calibration flow end to end (D16), from a fresh device: direction check (with the motor leads swapped once,
+   to see Reverse Motor offered), zero, one-turn and three-turn measurements (compared with the sketch's 8344 and a
+   10-turn mark run), check pass, trim.
 2. 300 feed cycles over 20 revolutions inside ESPHome, with Wi-Fi and Home Assistant connected; grid error.
 3. Feeds from every source (schedule, HA, web, BLE, button on GPIO3) through the guard: min gap, daily cap, empty
    after 14, reload.
 4. Wiggle with real food: it releases and doesn't jam; amplitude and cycles tuned.
-5. Power cut mid-move → `UNKNOWN` at boot; jog and declare recover it.
-9. 15 feeds with the wiggle: the opening sits over the hole every time (D13); with 1 wiggle cycle as well as 4.
-6. Stall (hold the disc) and an unplugged encoder → fault, no runaway.
-7. Restart and firmware upload wait while moving.
-8. No movement at power-up; with and without a pull-down on STBY. GPIO3 button held at power-up boots normally.
+5. 15 feeds with the wiggle: the opening sits over the hole every time (D13); with 1 wiggle cycle as well as 4.
+6. Power cut mid-move → `UNKNOWN` at boot; jog and declare recover it.
+7. Stall (hold the disc) and an unplugged encoder → fault, no runaway.
+8. Restart and firmware upload wait while moving.
+9. No movement at power-up; with and without a pull-down on STBY. GPIO3 button held at power-up boots normally.
+10. If S2.0b passed: the single binary switched servo → disc → servo on the bench, the servo feeder unchanged.
 
 ### S2.9 Publish the branch
 
@@ -458,6 +505,7 @@ Recorded in docs/BENCH.md on the branch:
 |---|---|
 | ESPHome too slow or jittery for 2 to 15 ms pulses | S2.0 gates stage 2; control in its own task |
 | Runaway motor empties the disc | S2.6 travel limit, timeout, watchdog; faults never retry |
+| A single binary costs too much flash, or runtime pins misbehave | S2.0b measures it first; it is dropped for now if it fails |
 | 8344 ticks/rev is wrong and the error adds up each revolution | Measured with the mark procedure; the plan accumulator stops per-move rounding from adding up |
 | Brownout on motor start (5 V shared with the ESP32) | 100 µF fitted; watch the bench log for brownout resets |
 | Stage 1 breaks servo builds | S1.0 golden trace; servo bench check before 2.1.0 |
