@@ -1625,7 +1625,115 @@ static void test_firmware_upload() {
   }
 }
 
+// ---- golden servo trace (firmware 2.1.0, plan S1.0) -------------------------------------------
+// A scripted session through every motion path: boot, feeds of one and three portions (with and without the wiggle),
+// reload, calibration, stop mid-step and mid-gap, declare, a power cut mid-step, the button, a scheduled feed and an
+// empty tray. Every servo command, release and tray-state save is recorded with its time. tests/servo_golden.h holds
+// the trace recorded from firmware 2.0.2, before the mechanism interface; the servo must still produce it exactly.
+// To record it again (only when a behaviour change is intended): build with -DPRINT_SERVO_TRACE and run.
+static std::string servo_session() {
+  Flash flash;
+  std::string out;
+  auto result = [&](FakeFeeder &f, const char *what, Result r) { f.note("%s -> %s", what, FeederCore::result_name(r)); };
+  auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+  f->tracing = true;
+  f->start();
+  f->advance(1500);
+  result(*f, "feed 1", f->request_feed(1, Source::ESPHOME));
+  f->advance(5000);
+  f->set_max_portions_cmd(3);
+  f->set_min_gap_s(10);
+  f->set_daily_cap(6);
+  f->advance(61000);
+  result(*f, "feed 3", f->request_feed(3, Source::ESPHOME));
+  f->advance(30000);
+  f->set_wiggle(false);
+  f->advance(11000);
+  result(*f, "feed 1 no wiggle", f->request_feed(1, Source::BLE));
+  f->advance(3000);
+  f->set_wiggle(true);
+  f->tray_reload();
+  f->note("reload");
+  f->advance(2000);
+  f->set_calibration_mode(true);
+  f->note("calibration on");
+  f->calibration_select(2);
+  f->set_calibration_offset(15);
+  result(*f, "jog 3 -7", f->jog_calibration(3, -7));
+  result(*f, "pulse 600-2300", f->set_pulse_range(600, 2300));
+  result(*f, "feed while calibrating", f->request_feed(1, Source::ESPHOME));
+  f->advance(1000);
+  f->set_calibration_mode(false);
+  f->note("calibration off");
+  f->advance(12000);
+  f->set_portions_24h(0);
+  result(*f, "feed 1 then stop", f->request_feed(1, Source::ESPHOME));
+  f->advance(500);
+  f->stop();
+  f->advance(2000);
+  result(*f, "feed while unknown", f->request_feed(1, Source::ESPHOME));
+  f->declare_position(2);
+  f->note("declared 2");
+  f->advance(11000);
+  f->set_portions_24h(0);
+  result(*f, "feed 2 then stop in gap", f->request_feed(2, Source::ESPHOME));
+  f->advance(4000);
+  f->stop();
+  f->advance(12000);
+  f->set_portions_24h(0);
+  result(*f, "feed 1 then power cut", f->request_feed(1, Source::ESPHOME));
+  f->advance(1250);
+  f->note("power cut");
+  out += f->trace;
+  f = std::make_unique<FakeFeeder>(flash, (T0 + 300) * 1000, true);
+  f->tracing = true;
+  f->start();
+  f->advance(1500);
+  f->button_press();
+  f->note("button (reload)");
+  f->advance(2000);
+  f->set_reload_pause_min(0);
+  f->set_daily_cap(6);
+  f->set_min_gap_s(10);
+  enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60 + 10, 2);
+  f->advance(12 * 60 * 1000);
+  f->note("after the 08:10 event");
+  f->declare_position(5);
+  f->advance(11000);
+  f->set_portions_24h(0);
+  result(*f, "feed last", f->request_feed(1, Source::BUTTON));
+  f->advance(11000);
+  result(*f, "feed empty", f->request_feed(1, Source::ESPHOME));
+  f->button_press();
+  f->note("button (empty: reload)");
+  f->advance(2000);
+  out += f->trace;
+  return out;
+}
+
+#include "servo_golden.h"
+
+static void test_servo_golden_trace() {
+  current = "golden servo trace";
+  const std::string got = servo_session();
+  if (got != SERVO_GOLDEN) {
+    // Say where it first differs, so a failure is quick to read.
+    size_t i = 0;
+    while (i < got.size() && i < sizeof(SERVO_GOLDEN) - 1 && got[i] == SERVO_GOLDEN[i])
+      i++;
+    const size_t line_start = got.rfind('\n', i == 0 ? 0 : i - 1);
+    const size_t from = line_start == std::string::npos ? 0 : line_start + 1;
+    std::printf("trace differs at byte %zu: got \"%s\"\n", i, got.substr(from, 80).c_str());
+  }
+  CHECK(got == SERVO_GOLDEN, "the servo does exactly what firmware 2.0.2 did");
+}
+
 int main() {
+#ifdef PRINT_SERVO_TRACE
+  std::fputs(servo_session().c_str(), stdout);
+  return 0;
+#endif
+  test_servo_golden_trace();
   test_feed_motion();
   test_guard();
   test_power_loss_mid_step_and_button();

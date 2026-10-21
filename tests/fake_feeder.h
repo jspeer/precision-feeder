@@ -6,7 +6,9 @@
 // reviewed by a human, but it may still contain mistakes.
 #pragma once
 
+#include <cstdarg>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -86,6 +88,21 @@ class FakeFeeder : public FeederCore {
 
   std::vector<FeedRecord> records;
   std::vector<float> angles;
+  // Every servo command, release and tray-state save, with its time, when `tracing` is on (the golden servo trace).
+  bool tracing{false};
+  std::string trace;
+  void note(const char *fmt, ...) __attribute__((format(printf, 2, 3))) {
+    if (!this->tracing)
+      return;
+    char buf[160];
+    int n = std::snprintf(buf, sizeof(buf), "%lld ", static_cast<long long>(this->uptime_ms_));
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(buf + n, sizeof(buf) - n, fmt, args);
+    va_end(args);
+    this->trace += buf;
+    this->trace += '\n';
+  }
   int releases{0};
   std::vector<std::string> logs;
   int tz_applies{0};         // calls to hal_apply_timezone
@@ -117,8 +134,14 @@ class FakeFeeder : public FeederCore {
                      static_cast<int>(rem % 3600 / 60), static_cast<int>(rem % 60)};
   }
   int64_t hal_local_to_epoch(int y, int mo, int d, int h, int mi) override { return local_epoch(y, mo, d, h, mi); }
-  void hal_servo_write(float angle) override { this->angles.push_back(angle); }
-  void hal_servo_release() override { this->releases++; }
+  void hal_servo_write(float angle) override {
+    this->angles.push_back(angle);
+    this->note("servo %.3f", angle);
+  }
+  void hal_servo_release() override {
+    this->releases++;
+    this->note("release");
+  }
   void hal_save_settings(const Settings &s, bool flush) override {
     flash_.settings_saves++;
     flash_.settings_flushed = flush;
@@ -126,10 +149,13 @@ class FakeFeeder : public FeederCore {
     flash_.have_settings = true;
   }
   void hal_save_calibration(const Calibration &c, bool) override {
+    this->note("calibration %d %d %d %d %d %d %d pulse %u-%u", c.offsets[0], c.offsets[1], c.offsets[2], c.offsets[3],
+               c.offsets[4], c.offsets[5], c.offsets[6], c.min_pulse_us, c.max_pulse_us);
     flash_.calibration = c;
     flash_.have_calibration = true;
   }
   void hal_save_state(const State &s, bool flush) override {
+    this->note("state pos=%u to=%u unknown=%u flush=%d", s.position, s.moving_to, s.unknown, flush ? 1 : 0);
     flash_.state_flushed = flush;
     flash_.state = s;
     flash_.have_state = true;
