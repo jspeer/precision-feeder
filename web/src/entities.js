@@ -118,6 +118,7 @@ const E = {
   motorStbyPin: 'select/Motor STBY Pin',
   encoderAPin: 'select/Encoder A Pin',
   encoderBPin: 'select/Encoder B Pin',
+  drive: 'select/Drive',  // packages/drive_select.yaml: only in a firmware with two drives
   restartNeeded: 'binary_sensor/Restart Needed',
   restart: 'button/Restart',
 

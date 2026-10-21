@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '3230bdca5b36';
+const BUILD_ID = '2f8ecdcc9ce5';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -126,6 +126,7 @@ const E = {
   motorStbyPin: 'select/Motor STBY Pin',
   encoderAPin: 'select/Encoder A Pin',
   encoderBPin: 'select/Encoder B Pin',
+  drive: 'select/Drive',  // packages/drive_select.yaml: only in a firmware with two drives
   restartNeeded: 'binary_sensor/Restart Needed',
   restart: 'button/Restart',
 
@@ -1459,23 +1460,18 @@ MECHANISMS['n20-direct'] = {
     return svg;
   },
   position: p => `${p} fed since reload`,
-  reloadText: cap => 'Press this when you have filled the disc. The disc does not move: fill every slot except the one ' +
-                     `over the chute, and all ${cap} portions count as available again.`,
+  reloadText: cap => `Fill every slot except the one over the chute, then press this: all ${cap} portions count again.`,
   reloadDone: 'Disc reloaded',
-  recoverText: cap => 'Choose how many portions were fed since the disc was last filled (0 to ' + cap + '). First make ' +
-                      'sure a slot is centred over the hole: turn Calibration Mode on and nudge it forward if not.',
-  recoverFallback: 'Not sure? Cancel, empty the disc, and use Tray reload after filling it again.',
-  recoveryHint: 'Turn Calibration Mode on and nudge the disc forward until a slot is over the hole, then declare how ' +
-                'many portions were fed, or refill the disc and reload.',
+  recoverText: cap => `Portions fed since the disc was filled (0 to ${cap}). Centre a slot over the hole first.`,
+  recoverFallback: 'Not sure? Cancel, refill the disc, then Tray reload.',
+  recoveryHint: 'In calibration mode, nudge a slot over the hole, then declare the portions fed, or refill and reload.',
   cards: [
     { title: 'Calibration',
-      hint: 'Turn Calibration mode on and follow Next step; it names the button to press each time. Empty the disc ' +
-            'first. Nudge only turns forward; if a slot goes past the hole, Overshot backs it up a little and you ' +
-            'nudge forward again.',
+      hint: 'Turn Calibration mode on and follow Next step: it names each button. Empty the disc first.',
       settings: [['Calibration mode', 'Feeding is refused while it is on.', E.calibrationMode],
                  ['Disc slots', 'Slots on your disc, all open (a load holds one fewer). Calibration mode only.',
                   E.discSlots],
-                 ['Slot trim', 'Set by Trim here in step 4: + puts every slot further forward, − further back.',
+                 ['Slot trim', 'Set by Trim here (step 4): + further forward, − further back.',
                   E.slotTrim]],
       readings: [['Next step', E.calStep]],
       buttons: [['Start', E.calStart], ['Yes', E.calYes], ['No', E.calNo], ['Nudge 0.1°', E.calNudgeSmall],
@@ -1491,7 +1487,7 @@ MECHANISMS['n20-direct'] = {
       settings: [['Drive power', '', E.drivePower],
                  ['Braking distance', 'Where it starts braking and creeping before each slot.', E.brakingDistance]] },
     { title: 'Wiggle',
-      hint: 'Part of every feed: it shakes the food loose, and its last move centres the slot over the hole.',
+      hint: 'Part of every feed: it shakes food loose and centres the slot.',
       settings: [['Amplitude', 'How far each side of the slot.', E.wiggleAmplitude],
                  ['Cycles', '', E.wiggleCycles]] },
     { title: 'Motor status',
@@ -2536,10 +2532,12 @@ PAGES.configuration = {
   hardwareCard() {
     // The disc's pins, while the disc is the drive (a firmware with both drives has the selects in servo mode too).
     const motor = store.has(E.motorIn1Pin) && mechanism() !== MECHANISMS.servo;
-    if (!store.has(E.board) && !motor) return null;
-    const hw = card(store.has(E.board) ? 'Board and pins' : 'Pins', h('p', { class: 'hint' },
-      (motor ? 'Where the motor, its encoder, the button and the LED are wired. '
-             : 'Where the servo, the button and the LED are wired. ') +
+    // A firmware carrying more than one drive (packages/drive_select.yaml) chooses it here too.
+    const drives = store.has(E.drive);
+    if (!store.has(E.board) && !motor && !drives) return null;
+    const hw = card(drives ? 'Drive, board and pins' : store.has(E.board) ? 'Board and pins' : 'Pins',
+      h('p', { class: 'hint' },
+      (drives ? 'What moves the tray, and where things are wired. ' : 'Where things are wired. ') +
       'A change is saved at once and used after the next restart.'));
     // The board is the device's own select, except that "Custom" is only shown, not chosen: pick the pins instead.
     const board = h('select', { class: 'input', 'aria-label': 'Board', onchange: () => {
@@ -2557,8 +2555,10 @@ PAGES.configuration = {
       h('div', { class: 'setting-control' }, board));
     if (boardRow) boardRow._update = () => board._update();
     const pins = [
+      drives ? setting('Drive', 'After the restart, reload the tray before feeding.', E.drive) : null,
       boardRow,
-      setting('Servo pin', 'The servo signal wire.', E.servoPin),
+      // The servo's pin while the servo is the drive; the disc's five while the disc is (D19).
+      mechanism() === MECHANISMS.servo ? setting('Servo pin', 'The servo signal wire.', E.servoPin) : null,
       ...(motor ? [setting('Motor IN1', 'DRV8833 AIN1.', E.motorIn1Pin),
                    setting('Motor IN2', 'DRV8833 AIN2.', E.motorIn2Pin),
                    setting('Motor STBY', 'DRV8833 STBY: held low keeps the motor off.', E.motorStbyPin),

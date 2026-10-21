@@ -136,10 +136,12 @@ PAGES.configuration = {
   hardwareCard() {
     // The disc's pins, while the disc is the drive (a firmware with both drives has the selects in servo mode too).
     const motor = store.has(E.motorIn1Pin) && mechanism() !== MECHANISMS.servo;
-    if (!store.has(E.board) && !motor) return null;
-    const hw = card(store.has(E.board) ? 'Board and pins' : 'Pins', h('p', { class: 'hint' },
-      (motor ? 'Where the motor, its encoder, the button and the LED are wired. '
-             : 'Where the servo, the button and the LED are wired. ') +
+    // A firmware carrying more than one drive (packages/drive_select.yaml) chooses it here too.
+    const drives = store.has(E.drive);
+    if (!store.has(E.board) && !motor && !drives) return null;
+    const hw = card(drives ? 'Drive, board and pins' : store.has(E.board) ? 'Board and pins' : 'Pins',
+      h('p', { class: 'hint' },
+      (drives ? 'What moves the tray, and where things are wired. ' : 'Where things are wired. ') +
       'A change is saved at once and used after the next restart.'));
     // The board is the device's own select, except that "Custom" is only shown, not chosen: pick the pins instead.
     const board = h('select', { class: 'input', 'aria-label': 'Board', onchange: () => {
@@ -157,8 +159,10 @@ PAGES.configuration = {
       h('div', { class: 'setting-control' }, board));
     if (boardRow) boardRow._update = () => board._update();
     const pins = [
+      drives ? setting('Drive', 'After the restart, reload the tray before feeding.', E.drive) : null,
       boardRow,
-      setting('Servo pin', 'The servo signal wire.', E.servoPin),
+      // The servo's pin while the servo is the drive; the disc's five while the disc is (D19).
+      mechanism() === MECHANISMS.servo ? setting('Servo pin', 'The servo signal wire.', E.servoPin) : null,
       ...(motor ? [setting('Motor IN1', 'DRV8833 AIN1.', E.motorIn1Pin),
                    setting('Motor IN2', 'DRV8833 AIN2.', E.motorIn2Pin),
                    setting('Motor STBY', 'DRV8833 STBY: held low keeps the motor off.', E.motorStbyPin),
