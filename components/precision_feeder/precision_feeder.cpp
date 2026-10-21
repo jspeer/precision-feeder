@@ -38,6 +38,12 @@ static const char *const TAG = "precision_feeder";
 static constexpr float SERVO_PERIOD_US = 20000.0f;  // 50 Hz
 
 void PrecisionFeeder::setup() {
+  if (this->is_servo() && this->output_ == nullptr) {
+    // Neither the servo's output nor another mechanism: nothing could move the tray, so nothing may feed.
+    ESP_LOGE(TAG, "No mechanism: give precision_feeder an output (the servo) or include a mechanism package");
+    this->mark_failed();
+    return;
+  }
   // Each record layout has its own key (see SETTINGS_VERSION in feeder_core.h), so an older record can still be
   // loaded and migrated after an update instead of failing to load and being replaced by defaults.
   this->pref_settings_ = global_preferences->make_preference<Settings>(fnv1_hash("precision_feeder.settings.v4"));

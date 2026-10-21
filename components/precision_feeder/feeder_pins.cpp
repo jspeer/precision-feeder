@@ -114,9 +114,11 @@ static bool usable(PinRole role, uint8_t gpio, const ReservedPins *reserved = nu
   return check_pin(gpio) != PinCheck::REFUSED;
 }
 
-/// Two roles on one GPIO (no button and no LED never clash).
+/// Two roles on one GPIO. "None" never clashes: no button, no LED, and no servo pin (a build whose mechanism is not
+/// the servo).
 static bool clash(const Pins &p) {
-  return p.servo == p.button || p.servo == p.led || (p.button != PIN_NONE && p.button == p.led);
+  auto same = [](uint8_t a, uint8_t b) { return a != PIN_NONE && a == b; };
+  return same(p.servo, p.button) || same(p.servo, p.led) || same(p.button, p.led);
 }
 
 Pins resolve_pins(const Device &device, const Pins &build, std::string *problem, const ReservedPins *reserved) {

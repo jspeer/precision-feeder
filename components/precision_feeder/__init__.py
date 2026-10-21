@@ -65,8 +65,10 @@ def protected_entity(value):
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(PrecisionFeeder),
-        # A float output driving the servo. Use the ledc platform at 50 Hz.
-        cv.Required(CONF_OUTPUT): cv.use_id(output.FloatOutput),
+        # A float output driving the servo (ledc at 50 Hz; packages/mechanism_servo.yaml sets it). Left out only by a
+        # build whose mechanism is another component that registers itself with the feeder (AGENTS.md, "Adding a
+        # mechanism"); a build with neither fails at boot with an error in the log.
+        cv.Optional(CONF_OUTPUT): cv.use_id(output.FloatOutput),
         # The clock the scheduler follows (sntp, homeassistant, ...).
         cv.Required(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
         # Angle the tray's 7 slots span (7 x 25 degrees on the Rev2 print); the pitch is
@@ -146,8 +148,9 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    out = await cg.get_variable(config[CONF_OUTPUT])
-    cg.add(var.set_output(out))
+    if CONF_OUTPUT in config:
+        out = await cg.get_variable(config[CONF_OUTPUT])
+        cg.add(var.set_output(out))
     clock = await cg.get_variable(config[CONF_TIME_ID])
     cg.add(var.set_time(clock))
 

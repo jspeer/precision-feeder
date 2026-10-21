@@ -1235,6 +1235,11 @@ static void test_reserved_pins() {
   auto g = boot_with_pins(flash, Pins{1, 3, 21}, &problem, true, true, {2, 4, 5, 6});
   CHECK(g->pins_in_use().button == 3 && problem.find("not usable") != std::string::npos,
         "a saved button pin on a motor pin is not used");
+  // A build with no servo pin (its mechanism drives its own): no button and no LED are not a clash with it.
+  Flash none;
+  auto n = boot_with_pins(none, Pins{PIN_NONE, 3, 21}, nullptr, true, true, {2, 4, 5, 6});
+  CHECK(n->set_pin(PinRole::BUTTON, PIN_NONE) == Result::OK, "button none with no servo pin");
+  CHECK(n->set_pin(PinRole::LED, PIN_NONE) == Result::OK, "and the LED none too");
 }
 
 static void test_settings_password() {
