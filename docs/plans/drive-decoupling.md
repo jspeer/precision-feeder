@@ -374,8 +374,25 @@ driver is ours, so it can do the same. Throwaway build on this branch, before an
 - Left for a real single binary: the servo's slot calibration package and the disc's both define Calibration Mode and
   the recovery entities, so `dual-test.yaml` leaves the servo's calibration out; they would be split into a shared
   package first. Home Assistant lists both drives' entities.
-- Still to do on the bench: boot each way and switch servo -> disc -> servo; the servo feeder unchanged in servo mode;
-  the disc's pins free in servo mode (GPIO1 is both the servo signal and AIN1 by default).
+
+**S2.0b, bench half (2026-10-21):** the single binary on both rigs.
+- Disc rig: booted as the disc (the build's default) and fed; Drive -> Servo and Restart: the servo, capacity 6,
+  position unknown (a feed refused until reload), the disc's driver never set up (encoder 0, its loop gap 0 ms);
+  a reload and a feed in servo mode sent servo pulses on GPIO1 (= AIN1) with the bridge left asleep; back to the
+  disc: capacity 14, its tuning kept (8349 ticks per turn from the owner's calibration), unknown until reload, then
+  a feed ok (2,312 ms).
+- Servo rig (from 2.1.0): booted as the disc, then Drive -> Servo: servo on GPIO1 again, unknown until reload, a feed
+  ok (slot 0 -> 1).
+- Found and fixed on the way: (1) boot clamped the saved guard limits to the current capacity, so a round trip
+  through the servo turned a daily cap of 14 into 6 for good (fixed on variant/n20-direct-drive: limits are kept and
+  held to the capacity when used; the round trip then kept 14 and 3); (2) the hardware package published Servo Pin
+  "none" every second in disc mode (a log warning; published only in servo mode now); (3) the first boot after a
+  one-drive firmware trusted the old tray position (no drive was recorded; now it counts as a change).
+- Answer: **yes, a single binary works** for these two drives at +4.4 KB, with the drive changed on the device and
+  each drive's pins left free while it is not in use. Still needed for a real one: split the calibration and
+  recovery entities the servo's and the disc's packages both define (the test firmware leaves the servo's
+  calibration out, so its pulse range and offsets are not shown, though they are kept); then the question of main
+  (D17).
 
 ### S2.1 `DirectDriveMechanism` in core (pure, host-tested)
 
