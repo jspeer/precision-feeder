@@ -38,8 +38,10 @@ const char *pin_note(uint8_t gpio) {
     return "used by the SPI flash and PSRAM";
   if (gpio == 19 || gpio == 20)
     return "the USB port";
-  if (gpio == 0 || gpio == 3 || gpio == 45 || gpio == 46)
+  if (gpio == 0 || gpio == 45 || gpio == 46)
     return "a strapping pin (it decides how the chip boots)";
+  if (gpio == 3)
+    return "a strapping pin for the JTAG source, read only if the STRAP_JTAG_SEL eFuse is burned (not by default)";
   if (gpio >= 33 && gpio <= 37)
     return "used by the octal flash or PSRAM of some modules (for example N8R8); fine on boards without";
   if (gpio == 43 || gpio == 44)
@@ -103,10 +105,12 @@ static uint8_t &pin_of(Pins &p, PinRole role) {
   return role == PinRole::SERVO ? p.servo : role == PinRole::BUTTON ? p.button : p.led;
 }
 
-/// A saved pin a role can use: the servo needs one, and none may be refused.
-static bool usable(PinRole role, uint8_t gpio) {
+/// A saved pin a role can use: the servo needs one, none may be refused, and none may be one the mechanism drives.
+static bool usable(PinRole role, uint8_t gpio, const ReservedPins *reserved = nullptr) {
   if (gpio == PIN_NONE)
     return role != PinRole::SERVO;
+  if (reserved != nullptr && reserved->has(gpio))
+    return false;
   return check_pin(gpio) != PinCheck::REFUSED;
 }
 
@@ -115,13 +119,13 @@ static bool clash(const Pins &p) {
   return p.servo == p.button || p.servo == p.led || (p.button != PIN_NONE && p.button == p.led);
 }
 
-Pins resolve_pins(const Device &device, const Pins &build, std::string *problem) {
+Pins resolve_pins(const Device &device, const Pins &build, std::string *problem, const ReservedPins *reserved) {
   Pins out = build;
   for (PinRole role : {PinRole::SERVO, PinRole::BUTTON, PinRole::LED}) {
     const uint8_t saved = saved_pin(device, role);
     if (saved == PIN_BUILD)
       continue;
-    if (usable(role, saved)) {
+    if (usable(role, saved, reserved)) {
       pin_of(out, role) = saved;
     } else if (problem != nullptr) {
       *problem += std::string(problem->empty() ? "" : "; ") + "saved " + ROLE_NAMES[static_cast<uint8_t>(role)] +
@@ -137,7 +141,7 @@ Pins resolve_pins(const Device &device, const Pins &build, std::string *problem)
 }
 
 Pins FeederCore::pins_saved() const {
-  Pins p = resolve_pins(this->dev_, this->build_pins_, nullptr);
+  Pins p = resolve_pins(this->dev_, this->build_pins_, nullptr, &this->reserved_pins_);
   if (!this->has_button_)
     p.button = PIN_NONE;
   if (!this->has_led_)
@@ -150,9 +154,11 @@ Result FeederCore::set_pin(PinRole role, uint8_t gpio) {
   if (!this->pins_runtime_ || (role == PinRole::BUTTON && !this->has_button_) ||
       (role == PinRole::LED && !this->has_led_))
     return Result::UNSUPPORTED;
-  if (gpio != PIN_BUILD && !usable(role, gpio)) {
+  if (gpio != PIN_BUILD && !usable(role, gpio, &this->reserved_pins_)) {
     if (gpio == PIN_NONE)
       this->log_(LogLevel::kWarn, "The servo needs a pin");
+    else if (this->reserved_pins_.has(gpio))
+      this->log_(LogLevel::kWarn, "%s refused for the %s: the motor uses it", pin_text(gpio).c_str(), name);
     else
       this->log_(LogLevel::kWarn, "%s refused for the %s: %s", pin_text(gpio).c_str(), name, pin_note(gpio));
     return Result::INVALID_ARG;
@@ -164,7 +170,7 @@ Result FeederCore::set_pin(PinRole role, uint8_t gpio) {
   Pins after = this->build_pins_;
   for (PinRole r : {PinRole::SERVO, PinRole::BUTTON, PinRole::LED}) {
     const uint8_t s = saved_pin(next, r);
-    if (s != PIN_BUILD && usable(r, s))
+    if (s != PIN_BUILD && usable(r, s, &this->reserved_pins_))
       pin_of(after, r) = s;
   }
   if (clash(after)) {

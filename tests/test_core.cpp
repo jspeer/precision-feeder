@@ -1081,14 +1081,17 @@ static void test_device_record() {
 
 /// Boot as the adapter does: the saved pins are resolved against the build's before the drivers start.
 static std::unique_ptr<FakeFeeder> boot_with_pins(Flash &flash, const Pins &build, std::string *problem = nullptr,
-                                                  bool has_button = true, bool has_led = true) {
+                                                  bool has_button = true, bool has_led = true,
+                                                  std::initializer_list<uint8_t> reserved = {}) {
   auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
+  for (uint8_t r : reserved)
+    f->reserve_pin(r);
   Device saved{};
   saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
   if (flash.have_device && flash.device.version == DEVICE_VERSION)
     saved = flash.device;
   f->set_build_pins(build);
-  Pins use = resolve_pins(saved, build, problem);
+  Pins use = resolve_pins(saved, build, problem, &f->reserved_pins());
   if (!has_button)
     use.button = PIN_NONE;
   if (!has_led)
@@ -1103,8 +1106,11 @@ static void test_pins() {
   current = "pins";
   // The validator: the lists in feeder_core.h, which packages/hardware.yaml repeats (tests/test_consistency.py).
   CHECK(check_pin(1) == PinCheck::OK && check_pin(21) == PinCheck::OK && check_pin(48) == PinCheck::OK, "free pins");
-  for (uint8_t p : {0, 3, 45, 46})
-    CHECK(check_pin(p) == PinCheck::REFUSED, "strapping pins refused");
+  for (uint8_t p : {0, 45, 46})
+    CHECK(check_pin(p) == PinCheck::REFUSED, "boot strapping pins refused");
+  // GPIO3 only selects the JTAG source, and only with the STRAP_JTAG_SEL eFuse burned (D6, firmware 2.1.0).
+  CHECK(check_pin(3) == PinCheck::WARN && std::strstr(pin_note(3), "STRAP_JTAG_SEL") != nullptr,
+        "GPIO3 accepted with a warning");
   for (uint8_t p = 26; p <= 32; p++)
     CHECK(check_pin(p) == PinCheck::REFUSED, "flash and PSRAM pins refused");
   CHECK(check_pin(19) == PinCheck::REFUSED && check_pin(20) == PinCheck::REFUSED, "USB refused");
@@ -1213,6 +1219,23 @@ static const char *const PW_NEW_MASKED = "2e33a9c5afad47f2f7547a0ab2ab9f9ff8f2ac
 static const char *const PW_TEXT = "a wifi password longer than thirty-two bytes";
 static const char *const PW_TEXT_MASKED =
     "a8685e68331b4ef6464670da56f92f1fcdcfcab7533f75b6a2a34b3a2eed915476e0934605b6633c2ac93e3d";
+
+static void test_reserved_pins() {
+  current = "reserved motor pins";
+  // A mechanism that drives its own pins from the YAML (D4): the button and LED can never move onto them.
+  Flash flash;
+  auto f = boot_with_pins(flash, Pins{1, 3, 21}, nullptr, true, true, {2, 4, 5, 6});
+  CHECK(f->reserved_pins().has(4) && !f->reserved_pins().has(3), "reserved");
+  CHECK(f->set_pin(PinRole::BUTTON, 4) == Result::INVALID_ARG, "button refused on a motor pin");
+  CHECK(f->set_pin(PinRole::LED, 6) == Result::INVALID_ARG, "LED refused on a motor pin");
+  CHECK(f->set_pin(PinRole::BUTTON, 7) == Result::OK, "button on a free pin");
+  // A record saved before (a motor pin chosen for the button) falls back to the build's at boot.
+  flash.device.button_pin = 5;
+  std::string problem;
+  auto g = boot_with_pins(flash, Pins{1, 3, 21}, &problem, true, true, {2, 4, 5, 6});
+  CHECK(g->pins_in_use().button == 3 && problem.find("not usable") != std::string::npos,
+        "a saved button pin on a motor pin is not used");
+}
 
 static void test_settings_password() {
   current = "settings password";
@@ -1738,6 +1761,7 @@ static void test_mechanism_fault() {
   for (const auto &l : f->logs)
     logged = logged || l.find("Motor fault: stalled") != std::string::npos;
   CHECK(logged, "logged as a motor fault");
+  CHECK(f->faults_text().find("motor fault: stalled") != std::string::npos, "and shown in Faults");
   f->declare_position(4);
   CHECK(!f->position_unknown() && f->remaining() == 10 && m.restores == 2, "declare recovers through restore()");
 }
@@ -1949,6 +1973,7 @@ int main() {
   test_tz_parser();
   test_device_record();
   test_pins();
+  test_reserved_pins();
   test_settings_password();
   test_ble_settings();
   test_network();

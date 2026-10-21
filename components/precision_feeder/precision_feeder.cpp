@@ -257,7 +257,7 @@ void PrecisionFeeder::apply_pins() {
                    this->led_output_ != nullptr ? this->led_build_pin_ : PIN_NONE};
   const Device saved = load_device_early_();
   std::string problem;
-  Pins use = resolve_pins(saved, build, &problem);
+  Pins use = resolve_pins(saved, build, &problem, &this->reserved_pins());
   const bool has_button = this->button_pin_ != nullptr, has_led = this->led_output_ != nullptr;
   if (!has_button)
     use.button = PIN_NONE;  // not in this build, whatever is saved
@@ -299,8 +299,9 @@ void PrecisionFeeder::dump_config() {
   }
   for (uint8_t i = 0; i < this->tuning_count(); i++) {
     const TuningParam *p = this->tuning_param(i);
-    if (p != nullptr)
+    if (p != nullptr) {
       ESP_LOGCONFIG(TAG, "  %s: %ld (x%u, %s)", p->name, (long) this->tuning_value(i), (unsigned) p->scale, p->unit);
+    }
   }
   ESP_LOGCONFIG(TAG, "  Tray position: %u (%s), remaining: %u", this->position(), this->tray_state_text().c_str(),
                 this->remaining());

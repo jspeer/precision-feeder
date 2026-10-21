@@ -9,7 +9,9 @@
 # own pin select in their packages (button.yaml, status_led.yaml), where "none" means not fitted.
 #
 # Pins change when the feeder restarts: "Restart Needed" turns on until then, and nothing restarts by itself.
-# Only pins the ESP32-S3 can spare are offered (no flash, PSRAM, USB or strapping pins). Two need care:
+# Only pins the ESP32-S3 can spare are offered (no flash, PSRAM, USB or boot strapping pins). Three need care:
+#   GPIO3         a strapping pin for the JTAG source only, read at reset only if the STRAP_JTAG_SEL eFuse is burned
+#                 (it is not by default); fine for a button, which is released at power-up
 #   GPIO33 to 37  used by the octal flash or PSRAM of some modules (for example the N8R8 DevKitC-1): only on boards
 #                 without it
 #   GPIO43, 44    UART0: the chip prints boot messages there at every reset, so a servo on them may twitch
@@ -46,7 +48,7 @@ select:
     icon: mdi:pin
     entity_category: config
     # Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
-    options: ["GPIO1", "GPIO2", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
+    options: ["GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO8", "GPIO9", "GPIO10", "GPIO11",
                 "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO21", "GPIO33",
                 "GPIO34", "GPIO35", "GPIO36", "GPIO37", "GPIO38", "GPIO39", "GPIO40", "GPIO41", "GPIO42",
                 "GPIO43", "GPIO44", "GPIO47", "GPIO48"]

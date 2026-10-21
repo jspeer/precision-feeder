@@ -113,12 +113,14 @@ enum class AuthResult : uint8_t {
 enum class KeySource : uint8_t { NONE = 0, BUILD = 1, DEVICE = 2 };
 
 // Pins (firmware 2.0.0, DESIGN.md section 2.1): the ESP32-S3 GPIOs the servo, button and LED may use. Refused: not on
-// the chip (22 to 25), the SPI flash and PSRAM (26 to 32), USB (19, 20) and the strapping pins (0, 3, 45, 46). Warned
-// about but accepted: the octal flash or PSRAM of some modules (33 to 37; for example N8R8) and UART0 (43, 44: the boot
-// ROM prints on TX at reset). packages/hardware.yaml offers exactly the pins not refused (tests/test_consistency.py).
+// the chip (22 to 25), the SPI flash and PSRAM (26 to 32), USB (19, 20) and the strapping pins that decide how it boots
+// (0, 45, 46). Warned about but accepted: GPIO3 (a strapping pin only for the JTAG source, read at reset only when the
+// STRAP_JTAG_SEL eFuse is burned, which it is not by default; firmware 2.1.0), the octal flash or PSRAM of some modules
+// (33 to 37; for example N8R8) and UART0 (43, 44: the boot ROM prints on TX at reset). packages/hardware.yaml offers
+// exactly the pins not refused (tests/test_consistency.py).
 constexpr uint8_t GPIO_MAX = 48;
-constexpr uint8_t PINS_REFUSED[] = {0, 3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 45, 46};
-constexpr uint8_t PINS_WARNED[] = {33, 34, 35, 36, 37, 43, 44};
+constexpr uint8_t PINS_REFUSED[] = {0, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 45, 46};
+constexpr uint8_t PINS_WARNED[] = {3, 33, 34, 35, 36, 37, 43, 44};
 
 enum class PinCheck : uint8_t { OK = 0, WARN = 1, REFUSED = 2 };
 enum class PinRole : uint8_t { SERVO = 0, BUTTON = 1, LED = 2 };
@@ -145,6 +147,25 @@ struct BoardPreset {
 constexpr BoardPreset BOARD_PRESETS[] = {
     {Board::WAVESHARE_S3_ZERO, "Waveshare ESP32-S3-Zero", {1, 2, 21}},
     {Board::DEVKITC_1, "ESP32-S3-DevKitC-1", {4, 5, 38}},
+};
+
+/// Pins a mechanism other than the servo drives, set in its YAML only (D4, docs/plans/drive-decoupling.md): the
+/// button and the LED can never be moved onto them.
+constexpr uint8_t RESERVED_PINS_MAX = 8;
+struct ReservedPins {
+  uint8_t pins[RESERVED_PINS_MAX]{};
+  uint8_t count{0};
+  bool has(uint8_t gpio) const {
+    for (uint8_t i = 0; i < this->count; i++) {
+      if (this->pins[i] == gpio)
+        return true;
+    }
+    return false;
+  }
+  void add(uint8_t gpio) {
+    if (this->count < RESERVED_PINS_MAX && !this->has(gpio))
+      this->pins[this->count++] = gpio;
+  }
 };
 
 /// Whether the servo, button or LED may use this GPIO (see PINS_REFUSED and PINS_WARNED).
@@ -296,7 +317,8 @@ bool parse_ntp_servers(const std::string &text, std::vector<std::string> &out, s
 
 /// The pins a Device record asks for, given the build's (PIN_NONE where the build has no button or LED). A saved pin
 /// that is refused falls back to the build's, and so do all three if they clash; `problem` (optional) then says why.
-Pins resolve_pins(const Device &device, const Pins &build, std::string *problem);
+/// `reserved` (optional): the mechanism's own pins (ReservedPins); a saved button or LED pin on one is not usable.
+Pins resolve_pins(const Device &device, const Pins &build, std::string *problem, const ReservedPins *reserved = nullptr);
 
 namespace legacy {
 /// The Device record as saved by firmware 2.0.0 and 2.0.1 (version 1, no NTP servers). Migrated, not discarded.
@@ -552,6 +574,10 @@ class FeederCore : private ServoOutput {
   // The adapter resolves the saved pins at boot, before the drivers start, and reports what it applied. A change
   // here is saved at once and applies at the next restart.
   void set_build_pins(const Pins &pins) { this->build_pins_ = pins; }
+  /// The pins the mechanism drives itself (set in its YAML; none for the servo, whose pin is Pins::servo). Call
+  /// before resolving the saved pins.
+  void reserve_pin(uint8_t gpio) { this->reserved_pins_.add(gpio); }
+  const ReservedPins &reserved_pins() const { return this->reserved_pins_; }
   /// What the adapter applied. A build without the button or LED package has none, whatever is saved.
   void set_pins_in_use(const Pins &pins, bool has_button = true, bool has_led = true) {
     this->pins_in_use_ = pins;
@@ -901,6 +927,7 @@ class FeederCore : private ServoOutput {
   bool cfg_dirty_{false};
   Device dev_{};
   Pins build_pins_{PIN_NONE, PIN_NONE, PIN_NONE};
+  ReservedPins reserved_pins_{};
   Pins pins_in_use_{PIN_NONE, PIN_NONE, PIN_NONE};
   bool pins_runtime_{false};  // the adapter applied the saved pins at boot, so changing them means something
   bool has_button_{true};     // the build has the button package
