@@ -1,39 +1,6 @@
 // Dashboard: the tray, the next feed, Feed now, today's feeds, status and the everyday actions. Everything shown
 // is what the device reports; Feed now asks the device, whose guard decides, and reports the device's answer.
 
-/** The tray as seven slots on an arc: closed slot 0, slots already used, slots with food, and the current one. */
-function trayDial(position, unknown) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const el = (tag, attrs) => {
-    const e = document.createElementNS(ns, tag);
-    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-    return e;
-  };
-  const left = unknown ? null : Math.max(0, 6 - position);
-  const svg = el('svg', { viewBox: '0 0 200 170', class: 'dial', role: 'img' });
-  const title = el('title', {});
-  title.textContent = unknown ? 'Tray position unknown' : `Tray at slot ${position}: ${left} of 6 portions left`;
-  svg.appendChild(title);
-  svg.appendChild(el('path', { d: 'M 37 136 A 74 74 0 1 1 163 136', class: 'dial-track' }));
-  for (let i = 0; i <= 6; i++) {
-    const a = (150 + i * 40) * Math.PI / 180;
-    const x = 100 + 74 * Math.cos(a), y = 100 + 74 * Math.sin(a);
-    let cls = 'slot-food';
-    if (unknown) cls = 'slot-unknown';
-    else if (i === 0) cls = 'slot-closed';
-    else if (i <= position) cls = 'slot-used';
-    if (!unknown && i === position) svg.appendChild(el('circle', { cx: x, cy: y, r: 15, class: 'slot-ring' }));
-    svg.appendChild(el('circle', { cx: x, cy: y, r: i === 0 ? 8 : 10, class: `slot ${cls}` }));
-  }
-  const big = el('text', { x: 100, y: 102, class: 'dial-big', 'text-anchor': 'middle' });
-  big.textContent = unknown ? '?' : String(left);
-  const small = el('text', { x: 100, y: 126, class: 'dial-small', 'text-anchor': 'middle' });
-  small.textContent = unknown ? 'position unknown' : 'of 6 left';
-  svg.appendChild(big);
-  svg.appendChild(small);
-  return svg;
-}
-
 const STATUS_WORDS = {
   fed: ['check', 'Fed'], skipped: ['x', 'Skipped'], due: ['clock', 'Due now'], next: ['clock', 'Next'],
   later: ['clock', 'Later'], held: ['pause', 'On hold'],
@@ -84,7 +51,7 @@ PAGES.dashboard = {
     });
     add('Tray', () => {
       const state = store.text(E.trayState);
-      return state === 'unknown' ? 'Position unknown' : `Slot ${store.num(E.trayPosition)}, ${state}`;
+      return state === 'unknown' ? 'Position unknown' : `${mechanism().position(store.num(E.trayPosition))}, ${state}`;
     });
     add('Fed in the last 24 h', () => {
       const n = store.num(E.portions24h), cap = store.num(E.dailyCap);
@@ -155,7 +122,7 @@ PAGES.dashboard = {
     const position = store.num(E.trayPosition);
     if (this.changed('dial', [state, position])) {
       clear(this.dialBox);
-      this.dialBox.appendChild(trayDial(position, state === 'unknown' || isNaN(position)));
+      this.dialBox.appendChild(mechanism().dial(position, state === 'unknown' || isNaN(position)));
     }
     // Next feed
     const next = parseLocalDateTime(store.text(E.nextFeed));

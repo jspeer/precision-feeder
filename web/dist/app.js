@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '0810da80447e';
+const BUILD_ID = '4c51ca80037d';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -18,6 +18,8 @@ const E = {
   fedToday: 'sensor/Portions Fed Today',
   runway: 'sensor/Runway',
   clockAge: 'sensor/Minutes Since Clock Sync',
+  capacity: 'sensor/Capacity',
+  mechanism: 'text_sensor/Mechanism',
   trayState: 'text_sensor/Tray State',
   nextFeed: 'text_sensor/Next Feed',
   hold: 'text_sensor/Hold',
@@ -323,7 +325,8 @@ function addressKind(addr) {
 /** Compare two "major.minor.revision" versions: negative if a is older, 0 if the same, positive if newer. Missing
  *  parts count as 0; anything after a number in a part ("2.0.0-dev") is ignored. */
 function compareVersions(a, b) {
-  const parts = v => String(v || '').split('.').map(p => parseInt(p, 10) || 0);
+  // A branch build's suffix ("2.1.0-n20.1": a variant on top of 2.1.0) is not part of the release number.
+  const parts = v => String(v || '').split('-')[0].split('.').map(p => parseInt(p, 10) || 0);
   const x = parts(a), y = parts(b);
   for (let i = 0; i < Math.max(x.length, y.length); i++) {
     const d = (x[i] || 0) - (y[i] || 0);
@@ -333,13 +336,14 @@ function compareVersions(a, b) {
 }
 
 /** The update check (DESIGN.md section 9.5): the release manifest against the feeder's Firmware Version and
- *  Firmware Variant. {state: 'current' | 'update' | 'yaml' | 'unknown', latest}. 'yaml': built from its own YAML,
- *  updated with ESPHome; 'unknown': the manifest has no image for this variant. */
+ *  Firmware Variant. {state: 'current' | 'update' | 'yaml' | 'unlisted' | 'unknown', latest}. 'yaml': built from its
+ *  own YAML, updated with ESPHome; 'unlisted': a variant the releases do not publish (a branch build, firmware 2.1.0),
+ *  so no image is ever offered to it; 'unknown': no manifest. */
 function updateState(manifest, version, variant) {
   const latest = manifest && manifest.version;
   if (!latest) return { state: 'unknown', latest: '' };
   if (variant === 'yaml' || !variant) return { state: 'yaml', latest };
-  if (!manifest.variants || !manifest.variants[variant]) return { state: 'unknown', latest };
+  if (!manifest.variants || !manifest.variants[variant]) return { state: 'unlisted', latest };
   return { state: compareVersions(latest, version) > 0 ? 'update' : 'current', latest };
 }
 
@@ -1332,6 +1336,99 @@ function setting(label, hint, id) {
   return el;
 }
 
+// ---- mechanisms.js ----
+// What moves the tray (firmware 2.1.0). The device names its mechanism in the Mechanism entity; each one has a
+// description here: its tray drawing, its wording, and its own calibration cards, as data. Layout and wording only:
+// limits and behaviour come from the device. Adding a mechanism: AGENTS.md, "Adding a mechanism".
+
+/** Portions per load, as the device reports it (6 from a firmware before 2.1.0, which has no Capacity). */
+function capacity() {
+  const c = store.num(E.capacity);
+  return isNaN(c) || c < 1 ? 6 : c;
+}
+
+function svgEl(tag, attrs) {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+
+/** The middle of a dial: portions left, large, and a line under it. */
+function dialCentre(svg, unknown, left, cap) {
+  const big = svgEl('text', { x: 100, y: 102, class: 'dial-big', 'text-anchor': 'middle' });
+  big.textContent = unknown ? '?' : String(left);
+  const small = svgEl('text', { x: 100, y: 126, class: 'dial-small', 'text-anchor': 'middle' });
+  small.textContent = unknown ? 'position unknown' : `of ${cap} left`;
+  svg.appendChild(big);
+  svg.appendChild(small);
+}
+
+const MECHANISMS = {
+  servo: {
+    /** The tray as seven slots on an arc: closed slot 0, slots already used, slots with food, and the current one. */
+    dial(position, unknown) {
+      const cap = capacity();
+      const left = unknown ? null : Math.max(0, cap - position);
+      const svg = svgEl('svg', { viewBox: '0 0 200 170', class: 'dial', role: 'img' });
+      const title = svgEl('title', {});
+      title.textContent = unknown ? 'Tray position unknown' : `Tray at slot ${position}: ${left} of ${cap} portions left`;
+      svg.appendChild(title);
+      svg.appendChild(svgEl('path', { d: 'M 37 136 A 74 74 0 1 1 163 136', class: 'dial-track' }));
+      for (let i = 0; i <= cap; i++) {
+        const a = (150 + i * 240 / cap) * Math.PI / 180;
+        const x = 100 + 74 * Math.cos(a), y = 100 + 74 * Math.sin(a);
+        let cls = 'slot-food';
+        if (unknown) cls = 'slot-unknown';
+        else if (i === 0) cls = 'slot-closed';
+        else if (i <= position) cls = 'slot-used';
+        if (!unknown && i === position) svg.appendChild(svgEl('circle', { cx: x, cy: y, r: 15, class: 'slot-ring' }));
+        svg.appendChild(svgEl('circle', { cx: x, cy: y, r: i === 0 ? 8 : 10, class: `slot ${cls}` }));
+      }
+      dialCentre(svg, unknown, left, cap);
+      return svg;
+    },
+    position: p => `Slot ${p}`,
+    reloadText: cap => 'Press this before you load food. The tray turns back to the closed slot, so nothing can fall ' +
+                       `out while you fill it, and all ${cap} portions count as available again.`,
+    reloadDone: 'Tray going back to the closed slot',
+    recoverText: cap => 'Look at the feeder and choose the slot that is over the opening. Slot 0 is the closed one; ' +
+                        `each feed moves one slot further, up to ${cap}.`,
+    recoverFallback: 'Not sure? Cancel and use Tray reload instead: it returns to the closed slot, which is always safe.',
+    recoveryHint: 'Tell it which slot is over the opening, or reload the tray (it turns back to the closed slot, which ' +
+                  'is always safe).',
+    // The servo's calibration (slots, offsets, pulse range) is the Calibration card, shown whenever the build has a
+    // Calibration Position. Cards a mechanism adds: {title, hint, settings: [[label, hint, E.x]], buttons: [[label,
+    // E.x, done]], readings: [[label, E.x]]}.
+    cards: [],
+  },
+};
+
+/** The description of the mechanism the device reports (the servo's for a firmware that reports none). */
+function mechanism() {
+  return MECHANISMS[store.text(E.mechanism)] || MECHANISMS.servo;
+}
+
+/** The mechanism's own calibration cards. Each control is the entity's own (setting()); a card none of whose entities
+ *  this build has is left out. Pushes every row that needs updating into `rows` (each has ._update). */
+function mechanismCards(rows) {
+  const out = [];
+  for (const c of mechanism().cards) {
+    const items = (c.settings || []).map(([label, hint, id]) => setting(label, hint, id)).filter(Boolean);
+    const reads = (c.readings || []).filter(([, id]) => store.has(id)).map(([label, id]) => {
+      const r = row(label);
+      r.row._update = () => setText(r.value, store.text(id));
+      return r.row;
+    });
+    const buttons = (c.buttons || []).filter(([, id]) => store.has(id)).map(([label, id, done]) =>
+      h('button', { class: 'btn', onclick: () => api.press(id).then(() => toast(done || label, 'ok'), toastError) }, label));
+    if (!items.length && !reads.length && !buttons.length) continue;
+    rows.push(...items, ...reads);
+    out.push(card(c.title, c.hint ? h('p', { class: 'hint' }, c.hint) : null, ...items, ...reads,
+      buttons.length ? h('div', { class: 'actions' }, buttons) : null));
+  }
+  return out;
+}
+
 // ---- banners.js ----
 // The banner under the header: the most important thing wrong right now, with what you can do about it. One at a
 // time, most severe first. Everything here comes from what the device reports (Tray State, Faults, Clock Valid,
@@ -1343,21 +1440,20 @@ async function trayReloadFlow() {
   const ok = await confirmDialog({
     title: 'Reload the tray?',
     body: h('div', {},
-      h('p', {}, 'Press this before you load food. The tray turns back to the closed slot, so nothing can fall out ' +
-                 'while you fill it, and all 6 portions count as available again.'),
+      h('p', {}, mechanism().reloadText(capacity())),
       h('p', {}, isNaN(pause) || pause === 0
         ? 'Scheduled feeding carries on straight away.'
         : `Scheduled feeding pauses for ${pause} min while you load it. Feeds due in that time are skipped, not made up.`)),
     ok: 'Reload tray',
   });
   if (!ok) return;
-  api.press(E.trayReload).then(() => toast('Tray going back to the closed slot', 'ok'), toastError);
+  api.press(E.trayReload).then(() => toast(mechanism().reloadDone, 'ok'), toastError);
 }
 
 /** After a power cut mid-feed: say which slot the tray is really on (Declared Tray Position, then Declare). */
 async function recoverPositionFlow() {
   let chosen = null;
-  const buttons = [0, 1, 2, 3, 4, 5, 6].map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
+  const buttons = Array.from({ length: capacity() + 1 }, (_, i) => i).map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
     onclick: () => {
       chosen = i;
       for (const b of buttons) b.setAttribute('aria-pressed', b === buttons[i] ? 'true' : 'false');
@@ -1365,10 +1461,9 @@ async function recoverPositionFlow() {
   const ok = await confirmDialog({
     title: 'Where is the tray?',
     body: h('div', {},
-      h('p', {}, 'Look at the feeder and choose the slot that is over the opening. Slot 0 is the closed one; ' +
-                 'each feed moves one slot further, up to 6.'),
+      h('p', {}, mechanism().recoverText(capacity())),
       h('div', { class: 'slot-picker' }, buttons),
-      h('p', {}, 'Not sure? Cancel and use Tray reload instead: it returns to the closed slot, which is always safe.')),
+      h('p', {}, mechanism().recoverFallback)),
     ok: 'Set position',
   });
   if (!ok) return;
@@ -1499,39 +1594,6 @@ const banners = {
 // Dashboard: the tray, the next feed, Feed now, today's feeds, status and the everyday actions. Everything shown
 // is what the device reports; Feed now asks the device, whose guard decides, and reports the device's answer.
 
-/** The tray as seven slots on an arc: closed slot 0, slots already used, slots with food, and the current one. */
-function trayDial(position, unknown) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const el = (tag, attrs) => {
-    const e = document.createElementNS(ns, tag);
-    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-    return e;
-  };
-  const left = unknown ? null : Math.max(0, 6 - position);
-  const svg = el('svg', { viewBox: '0 0 200 170', class: 'dial', role: 'img' });
-  const title = el('title', {});
-  title.textContent = unknown ? 'Tray position unknown' : `Tray at slot ${position}: ${left} of 6 portions left`;
-  svg.appendChild(title);
-  svg.appendChild(el('path', { d: 'M 37 136 A 74 74 0 1 1 163 136', class: 'dial-track' }));
-  for (let i = 0; i <= 6; i++) {
-    const a = (150 + i * 40) * Math.PI / 180;
-    const x = 100 + 74 * Math.cos(a), y = 100 + 74 * Math.sin(a);
-    let cls = 'slot-food';
-    if (unknown) cls = 'slot-unknown';
-    else if (i === 0) cls = 'slot-closed';
-    else if (i <= position) cls = 'slot-used';
-    if (!unknown && i === position) svg.appendChild(el('circle', { cx: x, cy: y, r: 15, class: 'slot-ring' }));
-    svg.appendChild(el('circle', { cx: x, cy: y, r: i === 0 ? 8 : 10, class: `slot ${cls}` }));
-  }
-  const big = el('text', { x: 100, y: 102, class: 'dial-big', 'text-anchor': 'middle' });
-  big.textContent = unknown ? '?' : String(left);
-  const small = el('text', { x: 100, y: 126, class: 'dial-small', 'text-anchor': 'middle' });
-  small.textContent = unknown ? 'position unknown' : 'of 6 left';
-  svg.appendChild(big);
-  svg.appendChild(small);
-  return svg;
-}
-
 const STATUS_WORDS = {
   fed: ['check', 'Fed'], skipped: ['x', 'Skipped'], due: ['clock', 'Due now'], next: ['clock', 'Next'],
   later: ['clock', 'Later'], held: ['pause', 'On hold'],
@@ -1582,7 +1644,7 @@ PAGES.dashboard = {
     });
     add('Tray', () => {
       const state = store.text(E.trayState);
-      return state === 'unknown' ? 'Position unknown' : `Slot ${store.num(E.trayPosition)}, ${state}`;
+      return state === 'unknown' ? 'Position unknown' : `${mechanism().position(store.num(E.trayPosition))}, ${state}`;
     });
     add('Fed in the last 24 h', () => {
       const n = store.num(E.portions24h), cap = store.num(E.dailyCap);
@@ -1653,7 +1715,7 @@ PAGES.dashboard = {
     const position = store.num(E.trayPosition);
     if (this.changed('dial', [state, position])) {
       clear(this.dialBox);
-      this.dialBox.appendChild(trayDial(position, state === 'unknown' || isNaN(position)));
+      this.dialBox.appendChild(mechanism().dial(position, state === 'unknown' || isNaN(position)));
     }
     // Next feed
     const next = parseLocalDateTime(store.text(E.nextFeed));
@@ -2666,12 +2728,14 @@ PAGES.maintenance = {
     this.busy = false;
     const parts = [];
 
-    if (store.has(E.calibrationMode)) {
+    // The servo's slot calibration: whenever the build has its Calibration Position (packages/calibration.yaml).
+    if (store.has(E.calibrationMode) && store.has(E.calibrationPosition)) {
       this.calStatus = h('p', { class: 'cal-status' });
       this.calStart = h('button', { class: 'btn btn-primary', onclick: () => this.startCalibration() }, 'Start calibration');
       this.calFinish = h('button', { class: 'btn btn-primary', onclick: finishCalibration }, 'Finish and save');
+      this.slotCount = (store.get(E.calibrationPosition).option || []).length || 7;
       this.slots = h('div', { class: 'slot-picker', role: 'group', 'aria-label': 'Slot to adjust' },
-        [0, 1, 2, 3, 4, 5, 6].map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
+        Array.from({ length: this.slotCount }, (_, i) => i).map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
           onclick: () => this.pickSlot(i) }, String(i))));
       this.offsetValue = h('span', { class: 'offset-value', 'aria-live': 'polite' });
       const nudge = (delta, text) => h('button', { class: 'btn', 'aria-label': `Offset ${text}`, onclick: () => this.nudge(delta) }, text);
@@ -2699,13 +2763,14 @@ PAGES.maintenance = {
             'Then fine-tune each slot. The two must stay at least 500 µs apart.'), pulses) : null));
     }
 
+    parts.push(...mechanismCards(this.rows));
+
     // Recovery
     this.posRow = row('Tray', '');
     parts.push(card('Tray position',
       this.posRow.row,
       h('p', { class: 'hint' }, 'After a power cut in the middle of a feed the feeder no longer knows where the tray ' +
-        'is and stops feeding. Tell it which slot is over the opening, or reload the tray (it turns back to the ' +
-        'closed slot, which is always safe).'),
+        'is and stops feeding. ' + mechanism().recoveryHint),
       h('div', { class: 'actions' },
         store.has(E.declarePosition) && store.has(E.declaredPosition)
           ? h('button', { class: 'btn', onclick: recoverPositionFlow }, 'Declare position') : null,
@@ -2732,7 +2797,8 @@ PAGES.maintenance = {
   update() {
     for (const r of this.rows) r._update();
     const state = store.text(E.trayState);
-    setText(this.posRow.value, state === 'unknown' ? 'Position unknown' : `Slot ${store.num(E.trayPosition)}, ${state}`);
+    setText(this.posRow.value, state === 'unknown' ? 'Position unknown'
+      : `${mechanism().position(store.num(E.trayPosition))}, ${state}`);
     if (this.countRow) {
       const cap = store.num(E.dailyCap);
       setText(this.countRow.value, `${store.num(E.portions24h)}${isNaN(cap) ? '' : ` (cap ${cap})`}`);
@@ -2745,7 +2811,7 @@ PAGES.maintenance = {
     this.workArea.hidden = !on;
     const slot = this.slot();
     this.slots.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', i === slot ? 'true' : 'false'));
-    this.nextBtn.hidden = slot >= 6;
+    this.nextBtn.hidden = slot >= this.slotCount - 1;
     const off = parseFloat(store.get(E.calibrationOffset) ? store.get(E.calibrationOffset).value : NaN);
     setText(this.offsetValue, isNaN(off) ? '' : `${off > 0 ? '+' : ''}${off.toFixed(1)}°`);
   },
@@ -2771,7 +2837,7 @@ PAGES.maintenance = {
   },
 
   pickSlot(i) {
-    if (i < 0 || i > 6) return;
+    if (i < 0 || i >= this.slotCount) return;
     this.run(() => api.setAndConfirm(E.calibrationPosition, String(i)));
   },
 
@@ -3474,6 +3540,9 @@ PAGES.firmware = {
     } else if (u.state === 'current') this.show(h('p', {}, `Up to date (latest release ${u.latest}).`));
     else if (u.state === 'yaml') {
       this.show(h('p', {}, `Latest release ${u.latest}. Built from your own YAML: update with ESPHome.`));
+    } else if (u.state === 'unlisted') {
+      this.show(h('p', {}, `No published updates for this variant (${store.text(E.firmwareVariant)}): it is built ` +
+        `from its own branch. Latest release of the main firmware: ${u.latest}.`));
     } else this.show(h('p', {}, `Latest release ${u.latest}. `, link('Releases')));
     if (this.bytes) this.choose();  // name the chosen file now that the manifest is known
   },

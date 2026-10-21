@@ -345,8 +345,11 @@ std::string FeederCore::faults_text() {
     add("clock not set");
   if (this->time_stale())
     add("clock not re-synchronised for over a week");
-  if (this->state_.unknown)
+  if (this->state_.unknown) {
     add("tray position unknown");
+    if (this->mech_->fault_text()[0] != '\0')
+      add((std::string("motor fault: ") + this->mech_->fault_text()).c_str());
+  }
   if (this->state_.position >= this->capacity())
     add("tray empty");
   else if (this->needs_food())

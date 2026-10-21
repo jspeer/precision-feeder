@@ -10,6 +10,8 @@ const E = {
   fedToday: 'sensor/Portions Fed Today',
   runway: 'sensor/Runway',
   clockAge: 'sensor/Minutes Since Clock Sync',
+  capacity: 'sensor/Capacity',
+  mechanism: 'text_sensor/Mechanism',
   trayState: 'text_sensor/Tray State',
   nextFeed: 'text_sensor/Next Feed',
   hold: 'text_sensor/Hold',

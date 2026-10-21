@@ -161,6 +161,8 @@ class Feeder:
         a("sensor", "Portions Fed Today", icon="mdi:counter")
         a("sensor", "Runway", icon="mdi:calendar-clock", uom="d")
         a("sensor", "Minutes Since Clock Sync", 3, icon="mdi:clock-time-four-outline", category=DIAGNOSTIC, uom="min")
+        a("sensor", "Capacity", 6, icon="mdi:tray-full", category=DIAGNOSTIC)
+        a("text_sensor", "Mechanism", "servo", icon="mdi:cog-transfer", category=DIAGNOSTIC)
         for name, icon in [("Tray State", "mdi:state-machine"), ("Next Feed", "mdi:clock-outline"),
                            ("Hold", "mdi:pause-circle-outline"), ("Last Feed", "mdi:history"),
                            ("Last Result", "mdi:message-text-outline"), ("Recent Feeds", "mdi:format-list-bulleted"),

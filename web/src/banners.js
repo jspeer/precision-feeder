@@ -8,21 +8,20 @@ async function trayReloadFlow() {
   const ok = await confirmDialog({
     title: 'Reload the tray?',
     body: h('div', {},
-      h('p', {}, 'Press this before you load food. The tray turns back to the closed slot, so nothing can fall out ' +
-                 'while you fill it, and all 6 portions count as available again.'),
+      h('p', {}, mechanism().reloadText(capacity())),
       h('p', {}, isNaN(pause) || pause === 0
         ? 'Scheduled feeding carries on straight away.'
         : `Scheduled feeding pauses for ${pause} min while you load it. Feeds due in that time are skipped, not made up.`)),
     ok: 'Reload tray',
   });
   if (!ok) return;
-  api.press(E.trayReload).then(() => toast('Tray going back to the closed slot', 'ok'), toastError);
+  api.press(E.trayReload).then(() => toast(mechanism().reloadDone, 'ok'), toastError);
 }
 
 /** After a power cut mid-feed: say which slot the tray is really on (Declared Tray Position, then Declare). */
 async function recoverPositionFlow() {
   let chosen = null;
-  const buttons = [0, 1, 2, 3, 4, 5, 6].map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
+  const buttons = Array.from({ length: capacity() + 1 }, (_, i) => i).map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
     onclick: () => {
       chosen = i;
       for (const b of buttons) b.setAttribute('aria-pressed', b === buttons[i] ? 'true' : 'false');
@@ -30,10 +29,9 @@ async function recoverPositionFlow() {
   const ok = await confirmDialog({
     title: 'Where is the tray?',
     body: h('div', {},
-      h('p', {}, 'Look at the feeder and choose the slot that is over the opening. Slot 0 is the closed one; ' +
-                 'each feed moves one slot further, up to 6.'),
+      h('p', {}, mechanism().recoverText(capacity())),
       h('div', { class: 'slot-picker' }, buttons),
-      h('p', {}, 'Not sure? Cancel and use Tray reload instead: it returns to the closed slot, which is always safe.')),
+      h('p', {}, mechanism().recoverFallback)),
     ok: 'Set position',
   });
   if (!ok) return;

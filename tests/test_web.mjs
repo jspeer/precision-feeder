@@ -255,10 +255,66 @@ test('firmware versions and the update check', () => {
   assert.deepEqual(plain(P.updateState(m, '2.2.0', 'full')), { state: 'current', latest: '2.1.0' });
   assert.equal(P.updateState(m, '2.0.0', 'yaml').state, 'yaml');
   assert.equal(P.updateState(m, '2.0.0', '').state, 'yaml');
-  assert.equal(P.updateState(m, '2.0.0', 'other').state, 'unknown');
+  assert.equal(P.updateState(m, '2.0.0', 'other').state, 'unlisted');
+  // A branch build (firmware 2.1.0 plan): its variant is not published, so it is never offered main's image.
+  assert.equal(P.updateState(m, '2.1.0-n20.1', 'n20-direct').state, 'unlisted');
+  assert.equal(P.compareVersions('2.1.0-n20.1', '2.1.0'), 0);
+  assert.ok(P.compareVersions('2.2.0', '2.1.0-n20.3') > 0);
   assert.equal(P.updateState(null, '2.0.0', 'full').state, 'unknown');
   assert.deepEqual(plain(P.identifyImage(m, 'aa')), { variant: 'full', kind: 'ota', version: '2.1.0' });
   assert.deepEqual(plain(P.identifyImage(m, 'bb')), { variant: 'full', kind: 'factory', version: '2.1.0' });
   assert.equal(P.identifyImage(m, 'dd'), null);
   assert.equal(P.identifyImage(null, 'aa'), null);
+});
+
+// ---- the mechanism descriptions (web/src/mechanisms.js, firmware 2.1.0) ----------------------------
+// Run against a stub store and stub DOM helpers: which description is picked, the capacity, and the card renderer.
+function mechanismContext(values, extraCards) {
+  const msrc = readFileSync(new URL('../web/src/mechanisms.js', import.meta.url), 'utf8');
+  const node = (tag, kids = []) => ({ tag, kids });
+  const c = vm.createContext({
+    E: { capacity: 'sensor/Capacity', mechanism: 'text_sensor/Mechanism', a: 'number/A', b: 'button/B', r: 'sensor/R' },
+    store: {
+      has: id => id in values,
+      num: id => (id in values ? Number(values[id]) : NaN),
+      text: id => (id in values ? String(values[id]) : ''),
+    },
+    setting: (label, hint, id) => (id in values ? { label, _update() {} } : null),
+    row: label => ({ row: { label }, value: {} }),
+    setText: () => {},
+    h: (tag, attrs, ...kids) => node(tag, kids),
+    card: (title, ...kids) => ({ title, kids: kids.filter(Boolean) }),
+    api: { press: () => Promise.resolve() },
+    toast: () => {},
+    toastError: () => {},
+  });
+  vm.runInContext(`${msrc}\nthis.M = { capacity, mechanism, mechanismCards, MECHANISMS };`, c);
+  if (extraCards) c.M.MECHANISMS.servo.cards = extraCards;
+  return c.M;
+}
+
+test('mechanism: the servo is the default, capacity from the device', () => {
+  let M = mechanismContext({});
+  assert.equal(M.mechanism(), M.MECHANISMS.servo, 'a firmware with no Mechanism entity: the servo');
+  assert.equal(M.capacity(), 6, 'and 6 portions');
+  M = mechanismContext({ 'text_sensor/Mechanism': 'servo', 'sensor/Capacity': 6 });
+  assert.equal(M.mechanism().position(3), 'Slot 3');
+  M = mechanismContext({ 'text_sensor/Mechanism': 'something-new', 'sensor/Capacity': 14 });
+  assert.equal(M.mechanism(), M.MECHANISMS.servo, 'an unknown mechanism falls back to the servo description');
+  assert.equal(M.capacity(), 14, 'but the capacity is the device\'s');
+  assert.match(M.MECHANISMS.servo.reloadText(14), /all 14 portions/);
+});
+
+test('mechanism: cards show only what the build has', () => {
+  const cards = [
+    { title: 'Present', settings: [['A', '', 'number/A']], buttons: [['Press', 'button/B']], readings: [['R', 'sensor/R']] },
+    { title: 'Absent', settings: [['X', '', 'number/X']] },
+  ];
+  const rows = [];
+  let M = mechanismContext({ 'number/A': 1, 'button/B': 0, 'sensor/R': 2 }, cards);
+  const out = M.mechanismCards(rows);
+  assert.deepEqual(plain(out.map(x => x.title)), ['Present'], 'a card with none of its entities is left out');
+  assert.equal(rows.length, 2, 'the setting and the reading keep themselves current');
+  M = mechanismContext({}, cards);
+  assert.equal(M.mechanismCards([]).length, 0, 'nothing at all in a build without them');
 });

@@ -49,7 +49,25 @@ sensor:
     accuracy_decimals: 0
     update_interval: never
 
+  # Portions per load: the mechanism's (6 for the servo tray). The web app uses it for every portion count.
+  - platform: template
+    id: pf_capacity
+    name: "Capacity"
+    entity_category: diagnostic
+    icon: mdi:tray-full
+    accuracy_decimals: 0
+    update_interval: never
+
 text_sensor:
+  # What moves the tray: "servo" for the servo fan tray (packages/mechanism_servo.yaml). The web app shows that
+  # mechanism's tray drawing and calibration cards.
+  - platform: template
+    id: pf_mechanism
+    name: "Mechanism"
+    entity_category: diagnostic
+    icon: mdi:cog-transfer
+    update_interval: never
+
   - platform: template
     id: pf_tray_state
     name: "Tray State"
@@ -188,6 +206,8 @@ interval:
           publish_number(id(pf_fed_today), f->feeds_today());
           publish_number(id(pf_runway), f->runway_days() == 255 ? NAN : (float) f->runway_days());
           publish_number(id(pf_clock_age), f->time_ever_synced() ? (float) f->time_age_min() : NAN);
+          publish_number(id(pf_capacity), f->capacity());
+          publish_text(id(pf_mechanism), f->mechanism().name());
           publish_text(id(pf_tray_state), f->tray_state_text());
           publish_text(id(pf_next_feed), f->next_event_text());
           publish_text(id(pf_hold), f->hold_text());

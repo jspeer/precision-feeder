@@ -200,7 +200,8 @@ function addressKind(addr) {
 /** Compare two "major.minor.revision" versions: negative if a is older, 0 if the same, positive if newer. Missing
  *  parts count as 0; anything after a number in a part ("2.0.0-dev") is ignored. */
 function compareVersions(a, b) {
-  const parts = v => String(v || '').split('.').map(p => parseInt(p, 10) || 0);
+  // A branch build's suffix ("2.1.0-n20.1": a variant on top of 2.1.0) is not part of the release number.
+  const parts = v => String(v || '').split('-')[0].split('.').map(p => parseInt(p, 10) || 0);
   const x = parts(a), y = parts(b);
   for (let i = 0; i < Math.max(x.length, y.length); i++) {
     const d = (x[i] || 0) - (y[i] || 0);
@@ -210,13 +211,14 @@ function compareVersions(a, b) {
 }
 
 /** The update check (DESIGN.md section 9.5): the release manifest against the feeder's Firmware Version and
- *  Firmware Variant. {state: 'current' | 'update' | 'yaml' | 'unknown', latest}. 'yaml': built from its own YAML,
- *  updated with ESPHome; 'unknown': the manifest has no image for this variant. */
+ *  Firmware Variant. {state: 'current' | 'update' | 'yaml' | 'unlisted' | 'unknown', latest}. 'yaml': built from its
+ *  own YAML, updated with ESPHome; 'unlisted': a variant the releases do not publish (a branch build, firmware 2.1.0),
+ *  so no image is ever offered to it; 'unknown': no manifest. */
 function updateState(manifest, version, variant) {
   const latest = manifest && manifest.version;
   if (!latest) return { state: 'unknown', latest: '' };
   if (variant === 'yaml' || !variant) return { state: 'yaml', latest };
-  if (!manifest.variants || !manifest.variants[variant]) return { state: 'unknown', latest };
+  if (!manifest.variants || !manifest.variants[variant]) return { state: 'unlisted', latest };
   return { state: compareVersions(latest, version) > 0 ? 'update' : 'current', latest };
 }
 

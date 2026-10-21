@@ -67,6 +67,9 @@ PAGES.firmware = {
     } else if (u.state === 'current') this.show(h('p', {}, `Up to date (latest release ${u.latest}).`));
     else if (u.state === 'yaml') {
       this.show(h('p', {}, `Latest release ${u.latest}. Built from your own YAML: update with ESPHome.`));
+    } else if (u.state === 'unlisted') {
+      this.show(h('p', {}, `No published updates for this variant (${store.text(E.firmwareVariant)}): it is built ` +
+        `from its own branch. Latest release of the main firmware: ${u.latest}.`));
     } else this.show(h('p', {}, `Latest release ${u.latest}. `, link('Releases')));
     if (this.bytes) this.choose();  // name the chosen file now that the manifest is known
   },

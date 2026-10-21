@@ -35,6 +35,7 @@ SOURCES = [
     "auth.js",       # the settings password: SHA-256, HMAC, PBKDF2 and signed changes
     "api.js",        # writes, one at a time, and waiting for the device's echo
     "ui.js",         # DOM helpers, icons, dialogs, toasts, form controls
+    "mechanisms.js",  # what moves the tray: each mechanism's dial, wording and calibration cards
     "banners.js",    # the warning banner
     "pages/dashboard.js",
     "pages/schedule.js",

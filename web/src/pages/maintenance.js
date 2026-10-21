@@ -9,12 +9,14 @@ PAGES.maintenance = {
     this.busy = false;
     const parts = [];
 
-    if (store.has(E.calibrationMode)) {
+    // The servo's slot calibration: whenever the build has its Calibration Position (packages/calibration.yaml).
+    if (store.has(E.calibrationMode) && store.has(E.calibrationPosition)) {
       this.calStatus = h('p', { class: 'cal-status' });
       this.calStart = h('button', { class: 'btn btn-primary', onclick: () => this.startCalibration() }, 'Start calibration');
       this.calFinish = h('button', { class: 'btn btn-primary', onclick: finishCalibration }, 'Finish and save');
+      this.slotCount = (store.get(E.calibrationPosition).option || []).length || 7;
       this.slots = h('div', { class: 'slot-picker', role: 'group', 'aria-label': 'Slot to adjust' },
-        [0, 1, 2, 3, 4, 5, 6].map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
+        Array.from({ length: this.slotCount }, (_, i) => i).map(i => h('button', { type: 'button', class: 'btn slot-pick', 'aria-pressed': 'false',
           onclick: () => this.pickSlot(i) }, String(i))));
       this.offsetValue = h('span', { class: 'offset-value', 'aria-live': 'polite' });
       const nudge = (delta, text) => h('button', { class: 'btn', 'aria-label': `Offset ${text}`, onclick: () => this.nudge(delta) }, text);
@@ -42,13 +44,14 @@ PAGES.maintenance = {
             'Then fine-tune each slot. The two must stay at least 500 µs apart.'), pulses) : null));
     }
 
+    parts.push(...mechanismCards(this.rows));
+
     // Recovery
     this.posRow = row('Tray', '');
     parts.push(card('Tray position',
       this.posRow.row,
       h('p', { class: 'hint' }, 'After a power cut in the middle of a feed the feeder no longer knows where the tray ' +
-        'is and stops feeding. Tell it which slot is over the opening, or reload the tray (it turns back to the ' +
-        'closed slot, which is always safe).'),
+        'is and stops feeding. ' + mechanism().recoveryHint),
       h('div', { class: 'actions' },
         store.has(E.declarePosition) && store.has(E.declaredPosition)
           ? h('button', { class: 'btn', onclick: recoverPositionFlow }, 'Declare position') : null,
@@ -75,7 +78,8 @@ PAGES.maintenance = {
   update() {
     for (const r of this.rows) r._update();
     const state = store.text(E.trayState);
-    setText(this.posRow.value, state === 'unknown' ? 'Position unknown' : `Slot ${store.num(E.trayPosition)}, ${state}`);
+    setText(this.posRow.value, state === 'unknown' ? 'Position unknown'
+      : `${mechanism().position(store.num(E.trayPosition))}, ${state}`);
     if (this.countRow) {
       const cap = store.num(E.dailyCap);
       setText(this.countRow.value, `${store.num(E.portions24h)}${isNaN(cap) ? '' : ` (cap ${cap})`}`);
@@ -88,7 +92,7 @@ PAGES.maintenance = {
     this.workArea.hidden = !on;
     const slot = this.slot();
     this.slots.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', i === slot ? 'true' : 'false'));
-    this.nextBtn.hidden = slot >= 6;
+    this.nextBtn.hidden = slot >= this.slotCount - 1;
     const off = parseFloat(store.get(E.calibrationOffset) ? store.get(E.calibrationOffset).value : NaN);
     setText(this.offsetValue, isNaN(off) ? '' : `${off > 0 ? '+' : ''}${off.toFixed(1)}°`);
   },
@@ -114,7 +118,7 @@ PAGES.maintenance = {
   },
 
   pickSlot(i) {
-    if (i < 0 || i > 6) return;
+    if (i < 0 || i >= this.slotCount) return;
     this.run(() => api.setAndConfirm(E.calibrationPosition, String(i)));
   },
 
