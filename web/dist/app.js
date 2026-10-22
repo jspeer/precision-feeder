@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '73260f177d78';
+const BUILD_ID = '7ed06deceedf';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -162,6 +162,7 @@ const E = {
   mqttPrefix: 'text/MQTT Topic Prefix',
   mqttPrefixInUse: 'text_sensor/MQTT Topic Prefix In Use',
   mqttConnected: 'binary_sensor/MQTT Connected',
+  mqttGuard: 'switch/MQTT Can Change Guard Limits',
 };
 
 // ---- parse.js ----
@@ -2515,14 +2516,17 @@ PAGES.configuration = {
     this.hw = this.hardwareCard();
 
     // MQTT (packages/mqtt.yaml): the client and Home Assistant discovery, set up here.
-    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; once it has ' +
-                       'connected, changes (and the topic prefix) are used after a restart.', [
+    const mqtt = group('MQTT', 'Home Assistant\'s controls and status (with discovery), and the schedule on its own ' +
+                       'topics (docs/MQTT.md). Never calibration, pins or keys. Saved at once; once it has ' +
+                       'connected, changes are used after a restart.', [
       setting('MQTT', null, E.mqtt),
       setting('Broker', 'Host name or IP address.', E.mqttBroker),
       setting('Port', null, E.mqttPort),
       setting('Username', 'Empty: none.', E.mqttUsername),
       setting('Password', 'Not shown once saved. Set to change it.', E.mqttPassword),
       setting('Topic prefix', 'Empty: the device name.', E.mqttPrefix),
+      setting('MQTT may change the safety limits', 'Daily cap, gaps and portions per command, on their own ' +
+              'topics. Anyone your broker lets publish could change them: off unless you need it.', E.mqttGuard),
     ]);
     if (mqtt) {
       this.timeRows.push(boundRow(mqtt, 'Connected', () => store.bool(E.mqttConnected) ? 'Yes' : 'No'),

@@ -154,4 +154,5 @@ const E = {
   mqttPrefix: 'text/MQTT Topic Prefix',
   mqttPrefixInUse: 'text_sensor/MQTT Topic Prefix In Use',
   mqttConnected: 'binary_sensor/MQTT Connected',
+  mqttGuard: 'switch/MQTT Can Change Guard Limits',
 };
