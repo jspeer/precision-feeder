@@ -1,7 +1,6 @@
 // Host tests for MQTT's own topics (components/precision_feeder/feeder_mqtt.*, firmware 2.2.0, docs/MQTT.md).
-// Build and run from the repository root (tools/check.sh does):
-//   c++ -std=c++17 -Icomponents/precision_feeder -Itests tests/test_mqtt.cpp \
-//     components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp && ./a.out
+// Build and run from the repository root (tools/check.sh does): c++ -std=c++17 -Icomponents/precision_feeder -Itests
+// tests/test_mqtt.cpp components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp
 //
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
