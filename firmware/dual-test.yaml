@@ -25,8 +25,8 @@
 
 substitutions:
   fw_variant: "dual-test"    # an experiment: the update check offers it nothing
-  # Portions per load go up to the disc's 14; the core holds each drive to its own capacity.
-  tray_capacity: "14"
+  # The portion boxes go up to the most any drive may hold (60 disc slots); the core holds each drive to its own.
+  tray_capacity: "59"
   # ESPHome adds "-<6 hex digits>" to the BLE name too, and refuses more than 20 characters in all.
   ble_name: Feeder
   name_add_mac_suffix: "true"
