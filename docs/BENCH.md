@@ -737,5 +737,20 @@ container, the ESPHome integration) and a Mosquitto broker with an account.
   web app validated** (captive_portal auto-loads ESPHome's web OTA, which the feeder took for the web app): fixed in
   2.1.2, and check.sh now checks a headless build.
 - Then the full 2.2.0 image went back over USB.
-- Not yet: the servo rig (unplugged), and a release build of 2.2.0.
+- The servo rig and the release images: next section.
+
+## Release images of 2.2.0 on both rigs (2026-10-22)
+
+The images from a manual run of the Release workflow on `release/2.2.0` (ESPHome 2026.10.0), checked against the
+manifest, uploaded through the web app's firmware upload. (The first run failed in CI: GCC's -Wcomment on a backslash
+at the end of a comment in tests/test_mqtt.cpp, which the Mac's clang does not flag; fixed.)
+
+- **Servo rig, 2.1.1 to 2.2.0 `no-ble`:** every value read before and after was identical: tray position 5, the five
+  feeds in Recent Feeds and the 24 h count (the tray state migrated from version 2 to 3), the pulse range 637-2675 us,
+  the limits, Drive Servo. A feed emptied the tray; Tray Reload showed **moving** with the guard **busy** while the
+  servo turned, then loaded with 6; the next feed was refused by the daily cap (the five migrated feeds plus one). No
+  resets (the capacitor in place).
+- **Servo rig, `full`:** two feeds (6 -> 5 -> 4), uptime unbroken; BLE up with no key (as a fresh prebuilt starts).
+- **Disc rig, `full`** (its final state): the drive, the tray, MQTT connected again, the BLE key kept; BLE selftest
+  13/13.
 
