@@ -1512,6 +1512,15 @@ precision-feeder/
     a Codex review of 2.1.1). **Decided 2026-10-22 (D25, firmware 2.2.0):** web app only, behind the settings password;
     no longer in Home Assistant.
 
+26. ESPHome's Wi-Fi internals the 2.3.0 plan relies on (docs/plans/2.3.0-loose-ends.md, M0; **checked 2026-10-22
+    against ESPHome 2026.10.0's source**): a build with no network in its YAML keeps the one set on the device in NVS
+    namespace `esphome`, key `"88491487"` (a fixed hash), and only erasing that key forgets it (an empty record is
+    loaded as a network with no name); with none, the setup access point, captive portal and Improv come up as after
+    a fresh flash. ESPHome's own `start_scanning()` drops a live connection; an ESP-IDF scan with
+    `coex_background_scan`, as ESPHome's post-connect roaming uses, keeps it, and ESPHome collects its results
+    (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
+    ESPHome upgrade.
+
 ## 15. Implementation status (v2.2.0)
 
 2.2.0 (who can change what, section 10.2; MQTT's own topics, section 9.6) carries 2.1.2, below. Its release images ran
