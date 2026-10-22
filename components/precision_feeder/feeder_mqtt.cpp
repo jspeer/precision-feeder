@@ -98,7 +98,8 @@ void FeederMqtt::states(std::vector<MqttOut> &out) {
   const int32_t policy[4] = {c.daily_cap, c.min_gap_s, c.portion_gap_s, c.max_portions_cmd};
   for (uint8_t i = 0; i < 4; i++)
     out.push_back({std::string("policy/") + POLICY_KEYS[i], std::to_string(policy[i]), true});
-  out.push_back({"policy/writable", this->f_.mqtt_may_change_guard() ? "ON" : "OFF", true});
+  // Always OFF since 2.3.0 (D28): kept so a client that reads it, and a broker holding 2.2.0's retained ON, see why.
+  out.push_back({"policy/writable", "OFF", true});
 }
 
 void FeederMqtt::changed(std::vector<MqttOut> &out) {
@@ -225,23 +226,10 @@ Result FeederMqtt::command_(const std::string &topic, const std::string &payload
     for (uint8_t i = 0; i < 4; i++) {
       if (key != POLICY_KEYS[i])
         continue;
+      // The feed guard's limits are protected settings: read-only over MQTT (D28, 2.3.0; it reversed 2.2.0's switch,
+      // D24). Refused, and answered with the value in force.
       state_topic = std::string("policy/") + key;
-      // The feed guard's limits: only with MQTT Can Change Guard Limits on (D24; web app only, off by default).
-      if (!this->f_.mqtt_may_change_guard())
-        return Result::NOT_ALLOWED;
-      int32_t v;
-      if (!parse_int(payload, v))
-        return Result::INVALID_ARG;
-      switch (i) {
-        case 0:
-          return this->f_.set_daily_cap(v);
-        case 1:
-          return this->f_.set_min_gap_s(v);
-        case 2:
-          return this->f_.set_portion_gap_s(v);
-        default:
-          return this->f_.set_max_portions_cmd(v);
-      }
+      return Result::NOT_ALLOWED;
     }
   }
   return Result::NONE;

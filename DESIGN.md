@@ -859,8 +859,9 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   (`schedule/<A|B|C>/event/<1-4>/{enabled,anchor,time,portions,days}`, `every_n_days`, `fast_days`, `restart_cycle`),
   one-shot feeds (`oneshot/add`, `oneshot/clear`, `oneshot/list`) and the feed guard's limits
   (`policy/{daily_cap,min_gap_s,portion_gap_s,max_portions_cmd}`), each with a retained state topic and `/set`. The
-  limits apply only with **MQTT Can Change Guard Limits** on (a Device flag, `DEVICE_MQTT_GUARD`, off by default; web
-  app only, protected); refused otherwise with `NOT_ALLOWED` (18). Every value goes through FeederCore's setters
+  limits are **read-only** (2.3.0, D28): their `/set` is refused with `NOT_ALLOWED` (18) and answered with the value in
+  force, and `policy/writable` is always `OFF`. (2.2.0 let them change behind a switch, MQTT Can Change Guard Limits,
+  D24; its Device flag bit, 0x08, is retired and cleared on load.) Every value goes through FeederCore's setters
   (`set_event_*`, `set_profile_*`, `set_daily_cap` ...), which the web app's editor uses too. The routing is
   `FeederMqtt` (feeder_mqtt.*, pure, tests/test_mqtt.cpp); `components/precision_feeder_mqtt` subscribes to
   `<prefix>/feeder/#` at run time (a YAML `on_message` topic is fixed at build time, the prefix is not), publishes
@@ -1010,7 +1011,7 @@ talking ([docs/plans/2.2.0-scopes.md](docs/plans/2.2.0-scopes.md)):
 | Web app | yes | yes, settings password | yes, settings password |
 | BLE (a key, every write signed) | yes | guard limits behind BLE Can Change Guard Limits (never the 24 h count) | calibration only, behind BLE Can Change Calibration |
 | Home Assistant (the API key) | the slim set (section 7); no schedule editing | no | no |
-| MQTT (the broker's login) | the slim set, and the schedule and one-shots on its own topics (section 9.6) | guard limits only behind MQTT Can Change Guard Limits (off by default) | never |
+| MQTT (the broker's login) | the slim set, and the schedule and one-shots on its own topics (section 9.6) | no: published, read-only (2.3.0, D28) | never |
 
 The 24 h count's hand edit is the web app's only (D25). A build without the web app sets its components in the YAML and
 runs headless over BLE (D27).
@@ -1311,6 +1312,9 @@ precision-feeder/
   - D26: components are never on MQTT. Closes open item 24.
   - D27: BLE keeps calibration behind its switch (headless recalibration); pins, drive, keys and network are web app
     or YAML only. A headless build leaves the web app out and runs over BLE.
+- **Loose ends (firmware 2.3.0; owner, 2026-10-22; [docs/plans/2.3.0-loose-ends.md](docs/plans/2.3.0-loose-ends.md)):**
+  - D28: every protected setting is read-only over MQTT, the guard's limits included ("MQTT is somewhere in between
+    basic and very advanced"). **Reverses D24**: MQTT Can Change Guard Limits is gone; the limits stay published.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1505,7 +1509,8 @@ precision-feeder/
 24. MQTT and the protected settings (section 9.6). Over MQTT, whoever the broker let publish could change the guard
     limits, the calibration and the pins, which the web app guards with the settings password. **Decided 2026-10-22
     (firmware 2.2.0, D22 to D26):** MQTT sees only the slim set; its own topics edit the schedule, and the guard's
-    limits only with MQTT Can Change Guard Limits on; components never.
+    limits only with MQTT Can Change Guard Limits on; components never. **Since 2.3.0 (D28):** the guard's limits are
+    read-only over MQTT too; the switch is gone.
 
 25. Editing the 24 h count (Portions Counted (24 h)). AGENTS.md allowed it by hand in Home Assistant only (the owner's
     exception, 2026-10-14), but the web app's Maintenance page also offered it, behind the settings password (found by

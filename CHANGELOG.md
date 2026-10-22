@@ -6,6 +6,13 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.3.0: loose ends (in progress)
+
+- **Protected settings are read-only over MQTT.** The feed guard's limits (daily cap, gaps, portions per command) are
+  still published on their MQTT topics, but changing them there is refused ("not allowed", with the value in force).
+  The **MQTT Can Change Guard Limits** switch from 2.2.0 is gone; if you turned it on, change the limits in the web
+  app (Configuration) instead. The schedule and one-shot feeds can still be edited over MQTT.
+
 ## 2.2.0: who can change what (2026-10-22)
 
 The first release since 2.1.1. It also carries 2.1.2's safety fixes and the move to ESPHome 2026.10.0 and the MIT

@@ -93,8 +93,10 @@ constexpr unsigned PASSWORD_HASH_SIZE = 32;            // SHA-256
 constexpr uint8_t DEVICE_SETUP_DONE = 0x01;        // the setup wizard has finished
 constexpr uint8_t DEVICE_BLE_GUARD = 0x02;         // BLE may change the guard limits (default on)
 constexpr uint8_t DEVICE_BLE_CALIBRATION = 0x04;   // BLE may change the calibration (default on)
-constexpr uint8_t DEVICE_MQTT_GUARD = 0x08;        // MQTT may change the guard limits (default off; 2.2.0, D24)
-constexpr uint8_t DEVICE_FLAGS_KNOWN = DEVICE_SETUP_DONE | DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION | DEVICE_MQTT_GUARD;
+// 0x08 was 2.2.0's "MQTT may change the guard limits" (D24). Retired in 2.3.0 (D28: protected settings are read-only
+// over MQTT): no longer known, so a bit saved by 2.2.0 is cleared on load. Do not reuse it.
+constexpr uint8_t DEVICE_FLAGS_RETIRED = 0x08;
+constexpr uint8_t DEVICE_FLAGS_KNOWN = DEVICE_SETUP_DONE | DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION;
 
 // Settings password (DESIGN.md section 10.1). The browser derives a key from the password with PBKDF2 and proves it
 // knows the key with an HMAC over a one-time challenge, so the password never crosses plain HTTP.
@@ -236,7 +238,7 @@ enum class Result : uint8_t {
   NOT_CALIBRATING = 15,     // the command needs calibration mode
   // 16 is the BLE layer's NOT_AUTHORIZED.
   STORAGE_FAILED = 17,      // a safety-critical save to flash failed, so nothing moved (2.1.2)
-  NOT_ALLOWED = 18,         // this channel may not change that (MQTT's guard limits with their switch off; 2.2.0)
+  NOT_ALLOWED = 18,         // this channel may not change that (MQTT and the guard's limits, which it only reads; D28)
   NONE = 255,
 };
 
@@ -802,10 +804,6 @@ class FeederCore : private ServoOutput {
   bool ble_may_change_calibration() const { return (this->dev_.flags & DEVICE_BLE_CALIBRATION) != 0; }
   void set_ble_may_change_guard(bool allowed) { this->set_device_flag_(DEVICE_BLE_GUARD, allowed, "guard limits"); }
   /// MQTT may change the guard limits (its policy topics, docs/MQTT.md). Off by default; web app only (D24).
-  bool mqtt_may_change_guard() const { return (this->dev_.flags & DEVICE_MQTT_GUARD) != 0; }
-  void set_mqtt_may_change_guard(bool allowed) {
-    this->set_device_flag_(DEVICE_MQTT_GUARD, allowed, "guard limits");
-  }
   void set_ble_may_change_calibration(bool allowed) {
     this->set_device_flag_(DEVICE_BLE_CALIBRATION, allowed, "calibration");
   }

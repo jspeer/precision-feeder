@@ -12,7 +12,7 @@ in the web app: Configuration, MQTT (broker, port, username, password, topic pre
 |---|---|
 | Everyday control and status | yes: the entities Home Assistant sees (below), with Home Assistant discovery |
 | The schedule and one-shot feeds | yes: their own topics (below) |
-| The feed guard's limits | only with **MQTT Can Change Guard Limits** on (web app, Configuration, MQTT; off by default) |
+| The feed guard's limits | read only: published, never changed over MQTT (since 2.3.0; change them in the web app) |
 | Calibration, pins, drive, keys, network, firmware, the 24 h count | never: the web app (and the YAML) only |
 
 The broker's login is MQTT's only protection: anyone your broker lets publish to these topics can use them. Give the
@@ -46,11 +46,11 @@ from MQTT, the web app, BLE or the schedule) and a **`/set`** topic to change it
 | `schedule/<P>/every_n_days` | a number | 1 to 14 (feed every N days) |
 | `schedule/<P>/fast_days` | like `days` | like `days` (weekdays with no feeding) |
 | `oneshot/list` | `none`, or `Thu 2026-12-24 08:00 x2; ...` | (read only) |
-| `policy/daily_cap` | a number | 1 to the portions per load, **only with the switch on** |
-| `policy/min_gap_s` | seconds | 10 to 3600, only with the switch on |
-| `policy/portion_gap_s` | seconds | 1 to 60, only with the switch on |
-| `policy/max_portions_cmd` | a number | 1 to the portions per load, only with the switch on |
-| `policy/writable` | `ON` or `OFF` | (read only: the switch, set in the web app) |
+| `policy/daily_cap` | a number | (read only: `/set` is answered "not allowed" and the value in force) |
+| `policy/min_gap_s` | seconds | (read only) |
+| `policy/portion_gap_s` | seconds | (read only) |
+| `policy/max_portions_cmd` | a number | (read only) |
+| `policy/writable` | always `OFF` | (read only; 2.2.0 had a switch that made the limits writable, removed in 2.3.0) |
 
 Commands without a state:
 

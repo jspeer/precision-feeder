@@ -113,26 +113,41 @@ static void test_oneshots() {
 }
 
 static void test_policy() {
-  current = "the guard's limits";
+  current = "the guard's limits: read only (D28)";
   Rig r;
-  CHECK(!r.f->mqtt_may_change_guard(), "off by default");
-  CHECK(r.send("policy/daily_cap/set", "3") == Result::NOT_ALLOWED && r.f->cfg.daily_cap == 4, "refused while off");
+  const int32_t before[4] = {r.f->cfg.daily_cap, r.f->cfg.min_gap_s, r.f->cfg.portion_gap_s, r.f->cfg.max_portions_cmd};
+  const char *keys[4] = {"daily_cap", "min_gap_s", "portion_gap_s", "max_portions_cmd"};
+  for (const char *value : {"3", "120", "8", "2", "0", "999", "x", ""}) {
+    for (const char *key : keys) {
+      const std::string topic = std::string("policy/") + key + "/set";
+      CHECK(r.send(topic, value) == Result::NOT_ALLOWED, "every limit, every value: not allowed");
+    }
+  }
+  CHECK(r.f->cfg.daily_cap == before[0] && r.f->cfg.min_gap_s == before[1] && r.f->cfg.portion_gap_s == before[2] &&
+            r.f->cfg.max_portions_cmd == before[3],
+        "nothing changed");
+  r.send("policy/daily_cap/set", "3");
   CHECK(sent(r.out, "policy/daily_cap") == "4" && sent(r.out, "result") == "policy/daily_cap/set: not allowed",
         "answered with the cap in force");
-  r.f->set_mqtt_may_change_guard(true);
-  CHECK(r.flash.device.flags & DEVICE_MQTT_GUARD, "the switch is saved on the device");
+  r.out.clear();
+  r.m->states(r.out);
+  CHECK(sent(r.out, "policy/writable") == "OFF", "policy/writable is always OFF");
+  CHECK(r.send("policy/portions_24h/set", "0") == Result::NONE, "the 24 h count is never on MQTT (D25)");
+  // Changed in the web app (or over BLE), the new value is published; MQTT still cannot change it.
+  r.f->set_daily_cap(5);
   r.out.clear();
   r.m->changed(r.out);
-  CHECK(sent(r.out, "policy/writable") == "ON", "and published");
-  CHECK(r.send("policy/daily_cap/set", "3") == Result::OK && r.f->cfg.daily_cap == 3, "applied while on");
-  CHECK(r.send("policy/daily_cap/set", "7") == Result::INVALID_ARG, "the limits still hold (servo: 6)");
-  CHECK(r.send("policy/min_gap_s/set", "5") == Result::INVALID_ARG, "the minimum gap's limit");
-  CHECK(r.send("policy/min_gap_s/set", "120") == Result::OK && r.f->cfg.min_gap_s == 120, "minimum gap");
-  CHECK(r.send("policy/portion_gap_s/set", "8") == Result::OK && r.f->cfg.portion_gap_s == 8, "gap between portions");
-  CHECK(r.send("policy/max_portions_cmd/set", "2") == Result::OK && r.f->cfg.max_portions_cmd == 2, "per command");
-  CHECK(r.send("policy/portions_24h/set", "0") == Result::NONE, "the 24 h count is never on MQTT (D25)");
+  CHECK(sent(r.out, "policy/daily_cap") == "5", "a change elsewhere is published");
+  CHECK(r.send("policy/daily_cap/set", "6") == Result::NOT_ALLOWED && r.f->cfg.daily_cap == 5, "and still read only");
+  // A feeder upgraded from 2.2.0 with its "MQTT Can Change Guard Limits" switch on: the retired bit is dropped.
+  r.f->advance(6000);  // the settings save shortly after a change
+  r.flash.device.flags |= DEVICE_FLAGS_RETIRED;
   auto g = boot(r.flash, T0 + 60);
-  CHECK(g->mqtt_may_change_guard(), "kept across a restart");
+  CHECK((g->device().flags & DEVICE_FLAGS_RETIRED) == 0, "2.2.0's switch is cleared on load");
+  FeederMqtt m(*g);
+  std::vector<MqttOut> out;
+  CHECK(m.on_message("policy/daily_cap/set", "3", out) == Result::NOT_ALLOWED && g->cfg.daily_cap == 5,
+        "and the limits stay read only");
 }
 
 static void test_not_commands() {

@@ -20,9 +20,10 @@
 # - Losing the broker never restarts the feeder (reboot_timeout 0s, AGENTS.md).
 #
 # What MQTT reaches (firmware 2.2.0, docs/plans/2.2.0-scopes.md): the slim set's entities, as Home Assistant does,
-# and its own plain topics under <prefix>/feeder/ (docs/MQTT.md): the schedule and one-shot feeds always, the feed
-# guard's limits only with "MQTT Can Change Guard Limits" on (off by default; web app only). Never calibration, pins
-# or keys. Anyone the broker lets publish to those topics can use them: give the broker accounts and ACLs.
+# and its own plain topics under <prefix>/feeder/ (docs/MQTT.md): the schedule and one-shot feeds. The feed guard's
+# limits are published there but read-only (firmware 2.3.0, D28: every protected setting is read-only over MQTT).
+# Never calibration, pins or keys. Anyone the broker lets publish to those topics can use them: give the broker
+# accounts and ACLs.
 
 mqtt:
   id: pf_mqtt
@@ -41,7 +42,6 @@ precision_feeder_mqtt:
 
 precision_feeder:
   protected_entities:
-    - switch/MQTT Can Change Guard Limits
     - switch/MQTT
     - text/MQTT Broker
     - number/MQTT Port
@@ -111,18 +111,6 @@ esphome:
             boot: true
 
 switch:
-  # Whether MQTT's policy topics may change the feed guard's limits (daily cap, gaps, portions per command). Saved on
-  # the feeder; off by default (D24).
-  - platform: template
-    name: "MQTT Can Change Guard Limits"
-    internal: true
-    icon: mdi:shield-lock-outline
-    entity_category: config
-    lambda: return id(feeder).mqtt_may_change_guard();
-    turn_on_action:
-      - lambda: id(feeder).set_mqtt_may_change_guard(true);
-    turn_off_action:
-      - lambda: id(feeder).set_mqtt_may_change_guard(false);
   - platform: template
     id: pf_mqtt_enabled
     name: "MQTT"
