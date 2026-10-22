@@ -73,8 +73,8 @@ Maintenance hold the same settings later, and Configuration (Device) starts the 
   this key; plaintext OTA is refused.
 - **What Home Assistant sees** (2.2.0): the everyday controls and status (feed, reload, stop, hold, scheduler, active
   profile, portions remaining, tray state, next and last feed, faults, needs food, firmware version). Settings,
-  calibration, pins and the schedule editor are in the web app. A feeder upgraded from 2.1 leaves the other entities
-  behind in Home Assistant as unavailable: remove them, or delete the device and adopt it again.
+  calibration, pins and the schedule editor are in the web app. On an upgrade from 2.1, Home Assistant's ESPHome
+  integration removes the other entities by itself (seen on the bench: 124 entities, then 20).
 - **MQTT** (2.1.0; 2.2.0 scopes): instead of or beside the ESPHome integration, set your broker in the web app
   (Configuration, MQTT); Home Assistant's MQTT integration then discovers the same entities, and the schedule has its
   own topics ([MQTT.md](MQTT.md)). Use a broker with accounts ([SECURITY.md](SECURITY.md)).

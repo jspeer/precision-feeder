@@ -12,8 +12,8 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 Feed Selected Portions with Manual Portions, Tray Reload, Stop, Hold Scheduled Feeding with Hold Duration, Cancel
 Hold, Scheduler, Active Profile, Portions Remaining, Tray State, Next Feed, Last Feed, Last Result, Recent Feeds,
 Today's Feeds, Faults, Needs Food and Firmware Version. Everything else (the guard limits, calibration, pins, the
-schedule editor, diagnostics) is in the web app only. Home Assistant may keep the removed entities as unavailable:
-remove them, or delete the device and adopt it again. Automations that used them need the web app or MQTT instead.
+schedule editor, diagnostics) is in the web app only. Home Assistant's ESPHome integration removes the others by itself
+when the feeder reconnects after the update. Automations that used them need the web app or MQTT instead.
 
 - **Scopes** ([docs/plans/2.2.0-scopes.md](docs/plans/2.2.0-scopes.md), DESIGN.md section 10.2): operate, safety
   policy and components, and what each channel reaches. Every other entity is `internal`; the web app still has them

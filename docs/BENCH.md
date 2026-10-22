@@ -712,3 +712,30 @@ firmware upload; `no-ble` then `full` on each rig.
   (button GPIO3) and BLE key kept. MQTT: topics under the name saved on the feeder (`precision-feeder-disc/`, the
   2.1.1 fix), `offline` then `online` across the restart, every discovery config under that prefix, a feed over MQTT ok (9 -> 8).
   BLE selftest 13/13. Left on `full` 2.1.1.
+
+## Firmware 2.2.0 on the disc rig (2026-10-22, bench builds)
+
+Who can change what (docs/plans/2.2.0-scopes.md), on the disc rig with the owner's test Home Assistant (a Docker
+container, the ESPHome integration) and a Mosquitto broker with an account.
+
+- **Home Assistant:** on 2.1.2 the device had 124 entities; after the upload of 2.2.0 it had exactly the 20 of the slim
+  set, with live states, and **the integration removed the other 104 by itself** (none left as unavailable). A feed
+  from Home Assistant worked (the owner's test).
+- **MQTT:** discovery exactly the 20, plus the 72 retained state topics of the feeder's own (M3). Schedule commands
+  applied and answered; the daily cap refused with MQTT Can Change Guard Limits off ("not allowed"), applied with it on,
+  out of range refused; one-shots added and cleared; a calibration topic ignored; a change in the web app reached MQTT
+  within a second. After a restart, MQTT reconnected and republished.
+- **MQTT settings and restarts (the 2.1.2 fix):** with MQTT started at boot, a port change kept it connected on the old
+  settings and turned Restart Needed on; after the restart it connected with the saved ones. Off took effect at once;
+  on again set Restart Needed. With MQTT off since the boot, setting the broker and login and turning it on connected at
+  once.
+- **Web app:** every page and card complete with the internal entities (the event stream carries all 135); the MQTT
+  card's new switch sets the device's flag both ways.
+- **BLE:** selftest 13/13.
+- **Headless:** the disc example without the web app, with BLE (75.3%), uploaded through the web app's firmware upload:
+  no web server; BLE status, selftest 13/13 and a feed over BLE alone. Building it found that **no build without the
+  web app validated** (captive_portal auto-loads ESPHome's web OTA, which the feeder took for the web app): fixed in
+  2.1.2, and check.sh now checks a headless build.
+- Then the full 2.2.0 image went back over USB.
+- Not yet: the servo rig (unplugged), and a release build of 2.2.0.
+
