@@ -14,6 +14,7 @@ switch:
   - platform: template
     id: pf_calibration_mode
     name: "Calibration Mode"
+    internal: true
     icon: mdi:tune
     lambda: return id(feeder).calibration_mode();
     turn_on_action:
@@ -25,6 +26,7 @@ number:
   - platform: template
     id: declared_position
     name: "Declared Tray Position"
+    internal: true
     icon: mdi:numeric
     min_value: 0
     max_value: ${tray_capacity}
@@ -37,6 +39,7 @@ button:
   - platform: template
     id: pf_declare_position
     name: "Declare Tray Position"
+    internal: true
     icon: mdi:map-marker-check
     on_press:
       - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);

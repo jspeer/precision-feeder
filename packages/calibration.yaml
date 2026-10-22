@@ -22,6 +22,7 @@ select:
   - platform: template
     id: pf_calibration_position
     name: "Calibration Position"
+    internal: true
     icon: mdi:numeric
     options: ["0", "1", "2", "3", "4", "5", "6"]
     set_action:
@@ -32,6 +33,7 @@ number:
   - platform: template
     id: pf_calibration_offset
     name: "Calibration Offset"
+    internal: true
     icon: mdi:angle-acute
     unit_of_measurement: "°"
     min_value: -15
@@ -50,6 +52,7 @@ number:
   - platform: template
     id: pf_servo_min_pulse
     name: "Servo Min Pulse"
+    internal: true
     icon: mdi:pulse
     entity_category: config
     unit_of_measurement: "µs"
@@ -63,6 +66,7 @@ number:
   - platform: template
     id: pf_servo_max_pulse
     name: "Servo Max Pulse"
+    internal: true
     icon: mdi:pulse
     entity_category: config
     unit_of_measurement: "µs"

@@ -559,6 +559,15 @@ path.
 
 ## 7. Home Assistant entities
 
+**Since 2.2.0 Home Assistant and MQTT see only the slim set** (docs/plans/2.2.0-scopes.md, D22): Feed One Portion, Feed
+Selected Portions with Manual Portions, Tray Reload, Stop, Hold Scheduled Feeding with Hold Duration, Cancel Hold,
+Scheduler, Active Profile, Portions Remaining, Tray State, Next Feed, Last Feed, Last Result, Recent Feeds, Today's
+Feeds, Faults, Needs Food and Firmware Version. Every other entity below is `internal: true`: the web app reads and
+changes it (`web_server: include_internal`), Home Assistant and MQTT do not see it. `tools/check_scopes.py` checks every
+build's resolved configuration for exactly that set (and that no internal entity has its own MQTT topic, which would
+publish it); check.sh and build_bins.sh run it. The rest of this section describes the entities as the web app sees
+them.
+
 Editor pattern, to keep the entity count low.
 
 Status (read-only): tray position, remaining portions, tray state, needs food

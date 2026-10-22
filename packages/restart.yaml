@@ -15,6 +15,7 @@ text_sensor:
   - platform: template
     id: pf_pins_in_use
     name: "Pins In Use"
+    internal: true
     icon: mdi:pin-outline
     entity_category: diagnostic
     update_interval: never
@@ -23,6 +24,7 @@ binary_sensor:
   - platform: template
     id: pf_restart_needed
     name: "Restart Needed"
+    internal: true
     icon: mdi:restart-alert
     entity_category: diagnostic
     lambda: return id(feeder).restart_needed();
@@ -30,6 +32,7 @@ binary_sensor:
 button:
   - platform: template
     name: "Restart"
+    internal: true
     icon: mdi:restart
     entity_category: config
     on_press:

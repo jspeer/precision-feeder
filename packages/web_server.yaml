@@ -35,6 +35,9 @@ web_server:
   # password when one is set, and the image's SHA-256 checked on the feeder before it switches (DESIGN.md section
   # 9.5). The encrypted ESPHome OTA (`ota:` in core.yaml) works as before.
   ota: false
+  # Home Assistant and MQTT see only the feeder's everyday controls and status (firmware 2.2.0,
+  # docs/plans/2.2.0-scopes.md); everything else is `internal: true`. The web app still reads and changes every one.
+  include_internal: true
   # auth:
   #   username: !secret web_username
   #   password: !secret web_password
@@ -86,6 +89,7 @@ binary_sensor:
   - platform: template
     id: pf_settings_password
     name: "Settings Password"
+    internal: true
     icon: mdi:form-textbox-password
     entity_category: diagnostic
     lambda: return id(feeder).password_set();

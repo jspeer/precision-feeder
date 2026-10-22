@@ -92,6 +92,7 @@ number:
   - platform: template
     id: pf_n20_ticks
     name: "Ticks Per Turn"
+    internal: true
     icon: mdi:rotate-360
     entity_category: config
     unit_of_measurement: ticks
@@ -106,6 +107,7 @@ number:
   - platform: template
     id: pf_n20_power
     name: "Drive Power"
+    internal: true
     icon: mdi:flash
     entity_category: config
     unit_of_measurement: "%"
@@ -119,6 +121,7 @@ number:
   - platform: template
     id: pf_n20_braking
     name: "Braking Distance"
+    internal: true
     icon: mdi:car-brake-hold
     entity_category: config
     unit_of_measurement: ticks
@@ -133,6 +136,7 @@ number:
   - platform: template
     id: pf_n20_wiggle_amplitude
     name: "Wiggle Amplitude"
+    internal: true
     icon: mdi:vibrate
     entity_category: config
     unit_of_measurement: "°"
@@ -147,6 +151,7 @@ number:
   - platform: template
     id: pf_n20_wiggle_cycles
     name: "Wiggle Cycles"
+    internal: true
     icon: mdi:sine-wave
     entity_category: config
     min_value: 1
@@ -159,6 +164,7 @@ number:
   - platform: template
     id: pf_n20_trim
     name: "Slot Trim"
+    internal: true
     icon: mdi:arrow-left-right
     entity_category: config
     unit_of_measurement: "°"
@@ -174,6 +180,7 @@ number:
   - platform: template
     id: pf_n20_slots
     name: "Disc Slots"
+    internal: true
     icon: mdi:circle-slice-8
     entity_category: config
     min_value: 3
@@ -188,6 +195,7 @@ number:
   - platform: template
     id: pf_n20_cal_turns
     name: "Calibration Turns"
+    internal: true
     icon: mdi:counter
     entity_category: config
     min_value: 1
@@ -203,6 +211,7 @@ switch:
   # Set by the calibration's direction test; change by hand only if you rewire.
   - platform: template
     name: "Reverse Motor"
+    internal: true
     icon: mdi:swap-horizontal
     entity_category: config
     lambda: return id(feeder).tuning_value(precision_feeder::N20_REVERSE_MOTOR) != 0;
@@ -212,6 +221,7 @@ switch:
       - lambda: id(feeder).set_tuning(precision_feeder::N20_REVERSE_MOTOR, 0);
   - platform: template
     name: "Reverse Encoder"
+    internal: true
     icon: mdi:swap-horizontal-variant
     entity_category: config
     lambda: return id(feeder).tuning_value(precision_feeder::N20_REVERSE_ENCODER) != 0;
@@ -226,6 +236,7 @@ select:
   - platform: template
     id: pf_n20_pin_in1
     name: "Motor IN1 Pin"
+    internal: true
     icon: mdi:pin
     entity_category: config
     # DRV8833 AIN1. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
@@ -244,6 +255,7 @@ select:
   - platform: template
     id: pf_n20_pin_in2
     name: "Motor IN2 Pin"
+    internal: true
     icon: mdi:pin
     entity_category: config
     # DRV8833 AIN2. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
@@ -262,6 +274,7 @@ select:
   - platform: template
     id: pf_n20_pin_stby
     name: "Motor STBY Pin"
+    internal: true
     icon: mdi:pin
     entity_category: config
     # DRV8833 STBY. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
@@ -280,6 +293,7 @@ select:
   - platform: template
     id: pf_n20_pin_enc_a
     name: "Encoder A Pin"
+    internal: true
     icon: mdi:pin
     entity_category: config
     # encoder C1. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
@@ -298,6 +312,7 @@ select:
   - platform: template
     id: pf_n20_pin_enc_b
     name: "Encoder B Pin"
+    internal: true
     icon: mdi:pin
     entity_category: config
     # encoder C2. Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
@@ -318,57 +333,68 @@ select:
 button:
   - platform: template
     name: "Calibration Start"
+    internal: true
     icon: mdi:play
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_START);
   - platform: template
     name: "Calibration Yes"
+    internal: true
     icon: mdi:check
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_YES);
   - platform: template
     name: "Calibration No"
+    internal: true
     icon: mdi:close
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NO);
   - platform: template
     name: "Calibration Nudge 0.1°"
+    internal: true
     icon: mdi:chevron-right
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NUDGE, 1);
   - platform: template
     name: "Calibration Nudge 1°"
+    internal: true
     icon: mdi:chevron-double-right
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NUDGE, 10);
   - platform: template
     name: "Calibration Overshot"
+    internal: true
     icon: mdi:undo
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_OVERSHOT);
   - platform: template
     name: "Calibration Zero"
+    internal: true
     icon: mdi:target
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_ZERO);
   - platform: template
     name: "Calibration Run Turns"
+    internal: true
     icon: mdi:rotate-right
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_TURNS);
   - platform: template
     name: "Calibration Measured"
+    internal: true
     icon: mdi:ruler
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_MEASURED);
   - platform: template
     name: "Calibration Next Slot"
+    internal: true
     icon: mdi:skip-next
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_NEXT);
   # In step 4: this slot was nudged to the centre of the hole; every slot shifts by the same amount (Slot Trim).
   - platform: template
     name: "Calibration Trim Here"
+    internal: true
     icon: mdi:crosshairs
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_TRIM_HERE);
@@ -377,11 +403,13 @@ text_sensor:
   - platform: template
     id: pf_n20_step
     name: "Calibration Step"
+    internal: true
     icon: mdi:list-status
     update_interval: never
   - platform: template
     id: pf_n20_fault
     name: "Motor Fault"
+    internal: true
     icon: mdi:engine-off-outline
     entity_category: diagnostic
     update_interval: never
@@ -390,6 +418,7 @@ sensor:
   - platform: template
     id: pf_n20_ticks_now
     name: "Encoder Ticks"
+    internal: true
     icon: mdi:counter
     entity_category: diagnostic
     accuracy_decimals: 0
@@ -398,6 +427,7 @@ sensor:
   - platform: template
     id: pf_n20_feed_move_ms
     name: "Last Feed Move Time"
+    internal: true
     icon: mdi:timer-outline
     entity_category: diagnostic
     unit_of_measurement: ms
@@ -406,6 +436,7 @@ sensor:
   - platform: template
     id: pf_n20_feed_ms
     name: "Last Feed Time"
+    internal: true
     icon: mdi:timer-outline
     entity_category: diagnostic
     unit_of_measurement: ms
@@ -415,6 +446,7 @@ sensor:
   - platform: template
     id: pf_n20_gap
     name: "Motor Loop Max Gap"
+    internal: true
     icon: mdi:timer-alert-outline
     entity_category: diagnostic
     unit_of_measurement: ms

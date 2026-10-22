@@ -11,17 +11,23 @@ text_sensor:
   - platform: wifi_info
     ssid:
       name: "Wi-Fi Network"
+      internal: true
     # The first address, and up to three more (IPv6 adds link-local and global addresses).
     ip_address:
       name: "IP Address"
+      internal: true
       address_1:
         name: "IP Address 2"
+        internal: true
       address_2:
         name: "IP Address 3"
+        internal: true
       address_3:
         name: "IP Address 4"
+        internal: true
 
 sensor:
   - platform: wifi_signal
     name: "Wi-Fi Signal"
+    internal: true
     update_interval: 60s

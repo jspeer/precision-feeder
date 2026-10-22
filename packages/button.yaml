@@ -41,6 +41,7 @@ select:
   - platform: template
     id: pf_button_pin
     name: "Button Pin"
+    internal: true
     icon: mdi:gesture-tap-button
     entity_category: config
     # "none" and every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.

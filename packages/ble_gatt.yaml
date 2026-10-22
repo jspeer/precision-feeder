@@ -142,6 +142,7 @@ switch:
   - platform: template
     id: pf_ble_guard
     name: "BLE Can Change Guard Limits"
+    internal: true
     icon: mdi:shield-lock-outline
     entity_category: config
     lambda: return id(feeder).ble_may_change_guard();
@@ -152,6 +153,7 @@ switch:
   - platform: template
     id: pf_ble_calibration
     name: "BLE Can Change Calibration"
+    internal: true
     icon: mdi:tune-variant
     entity_category: config
     lambda: return id(feeder).ble_may_change_calibration();
@@ -169,6 +171,7 @@ text_sensor:
   - platform: template
     id: pf_ble_info
     name: "BLE Info"
+    internal: true
     icon: mdi:bluetooth-settings
     entity_category: diagnostic
     disabled_by_default: true
@@ -178,6 +181,7 @@ text_sensor:
   - platform: template
     id: pf_ble_session
     name: "BLE Session"
+    internal: true
     icon: mdi:bluetooth-connect
     entity_category: diagnostic
     disabled_by_default: true

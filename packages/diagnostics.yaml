@@ -22,9 +22,13 @@ sensor:
   - platform: debug
     free:
       name: "Free Heap"
+      internal: true
     block:
       name: "Largest Free Heap Block"
+      internal: true
     fragmentation:
       name: "Heap Fragmentation"
+      internal: true
     loop_time:
       name: "Loop Time"
+      internal: true

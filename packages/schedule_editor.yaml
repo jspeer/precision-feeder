@@ -19,6 +19,7 @@ text_sensor:
   - platform: template
     id: pf_edited_profile
     name: "Edited Profile"
+    internal: true
     icon: mdi:calendar-edit
     # Summary of the profile chosen in "Edit Profile", marked [active] or [not active], with a
     # warning when its busiest day needs more portions than the Daily Portion Cap.
@@ -29,6 +30,7 @@ text_sensor:
   - platform: template
     id: pf_schedule_data
     name: "Schedule Data"
+    internal: true
     icon: mdi:code-braces
     entity_category: diagnostic
     disabled_by_default: true
@@ -38,6 +40,7 @@ select:
   - platform: template
     id: pf_edit_profile
     name: "Edit Profile"
+    internal: true
     icon: mdi:pencil
     options: ["A", "B", "C"]
     set_action:
@@ -47,6 +50,7 @@ select:
   - platform: template
     id: pf_edit_event
     name: "Edit Event"
+    internal: true
     icon: mdi:pencil
     options: ["1", "2", "3", "4"]
     set_action:
@@ -56,6 +60,7 @@ select:
   - platform: template
     id: pf_event_anchor
     name: "Event Anchor"
+    internal: true
     icon: mdi:weather-sunset
     options: ["clock", "sunrise", "sunset"]
     set_action:
@@ -69,6 +74,7 @@ select:
 switch:
   - platform: template
     name: "Event Enabled"
+    internal: true
     icon: mdi:check-circle-outline
     lambda: return id(feeder).edit_event().enabled != 0;
     turn_on_action:
@@ -84,6 +90,7 @@ text:
   - platform: template
     id: pf_event_time
     name: "Event Time"
+    internal: true
     icon: mdi:clock-edit-outline
     mode: text
     min_length: 0
@@ -98,6 +105,7 @@ text:
   - platform: template
     id: pf_event_days
     name: "Event Days"
+    internal: true
     icon: mdi:calendar-week
     mode: text
     min_length: 0
@@ -116,6 +124,7 @@ text:
   - platform: template
     id: pf_profile_fast_days
     name: "Profile Fast Days"
+    internal: true
     icon: mdi:calendar-remove
     mode: text
     min_length: 0
@@ -135,6 +144,7 @@ text:
   - platform: template
     id: pf_add_one_shot_feed
     name: "Add One-shot Feed"
+    internal: true
     icon: mdi:calendar-plus
     mode: text
     min_length: 0
@@ -152,6 +162,7 @@ number:
   - platform: template
     id: pf_event_portions
     name: "Event Portions"
+    internal: true
     icon: mdi:fish
     min_value: 1
     max_value: ${tray_capacity}
@@ -166,6 +177,7 @@ number:
   - platform: template
     id: pf_profile_every_n_days
     name: "Profile Every N Days"
+    internal: true
     icon: mdi:calendar-sync
     min_value: 1
     max_value: 14
@@ -181,6 +193,7 @@ number:
   - platform: template
     id: oneshot_portions
     name: "One-shot Portions"
+    internal: true
     icon: mdi:fish
     min_value: 1
     max_value: ${tray_capacity}
@@ -192,12 +205,14 @@ number:
 button:
   - platform: template
     name: "Restart Cycle Today"
+    internal: true
     icon: mdi:calendar-today
     on_press:
       - lambda: id(feeder).restart_cadence_today();
 
   - platform: template
     name: "Clear One-shot Feeds"
+    internal: true
     icon: mdi:calendar-remove
     on_press:
       - lambda: id(feeder).clear_oneshots();

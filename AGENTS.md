@@ -110,8 +110,8 @@ substitutions.
   `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder -I. -Ireference test_n20.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`; and
-  `python3 -m unittest test_precision_feeder_ble test_make_release` in `tools/`. The C++ and Python
-  protocol tests share golden byte vectors; change them together.
+  `python3 -m unittest test_precision_feeder_ble test_make_release test_check_scopes` in `tools/`. The C++ and
+  Python protocol tests share golden byte vectors; change them together.
 - Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
   `feeder_schedule.cpp`, `feeder_text.cpp`, `feeder_password.cpp`, `feeder_pins.cpp` and `feeder_network.cpp`; the timezone parser is `tz_rules.h`, SHA-256 and
 HMAC are `crypto.h`; what moves the tray is a mechanism, `mechanism.h`, the servo's in `mechanism_servo.*`, the disc's in `mechanism_n20.*`), which must stay free of
@@ -125,6 +125,9 @@ HMAC are `crypto.h`; what moves the tray is a mechanism, `mechanism.h`, the serv
 - BLE protocol behaviour belongs in `BleEngine` (`engine.*`), which must stay free of
   ESPHome includes; the radio is reached only through `BleTransport`. New protocol
   behaviour gets a test in `tests/test_ble_engine.cpp`.
+- Who sees what (2.2.0, docs/plans/2.2.0-scopes.md): Home Assistant and MQTT see only the slim set in
+  `tools/check_scopes.py`; every other entity is `internal: true` (the web app still has it). A new entity is internal
+  unless the owner adds it to the slim set; never give an internal entity its own MQTT topic.
 - The web app (`web/src/`) uses the firmware's entities as its API, by name, all listed in
   `web/src/entities.js`; `tests/test_consistency.py` checks them against `packages/`. Renaming an entity
   means changing that table in the same change. The app never repeats guard or scheduler logic: it

@@ -37,8 +37,11 @@ SECRETS
 for variant in full no-ble; do
   cp "firmware/$variant.yaml" "$WORK/precision-feeder-$variant.yaml"
   if [ "$MODE" = "--config" ]; then
-    echo "== esphome config firmware/$variant.yaml"
-    "$ESPHOME" config "$WORK/precision-feeder-$variant.yaml" >/dev/null
+    echo "== esphome config firmware/$variant.yaml, and who sees what"
+    "$ESPHOME" config "$WORK/precision-feeder-$variant.yaml" > "$WORK/resolved-$variant.yaml"
+    PY="$(dirname "$ESPHOME")/python"
+    [ -x "$PY" ] || PY=python3
+    "$PY" tools/check_scopes.py "$WORK/resolved-$variant.yaml"
     # Nothing secret may reach the image: the throwaway values must all have been removed.
     if "$ESPHOME" config "$WORK/precision-feeder-$variant.yaml" --show-secrets 2>/dev/null |
         grep -qF -e "unused" -e "$API_KEY" -e "$BLE_KEY"; then

@@ -34,9 +34,6 @@ mqtt:
   discovery_unique_id_generator: mac
   log_topic: null              # the live log stays on the web app's Diagnostics page
 
-web_server:
-  include_internal: true       # the MQTT settings below are internal: the web app still needs them
-
 precision_feeder:
   protected_entities:
     - switch/MQTT

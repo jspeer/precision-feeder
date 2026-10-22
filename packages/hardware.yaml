@@ -27,6 +27,7 @@ select:
   - platform: template
     id: pf_board
     name: "Board"
+    internal: true
     icon: mdi:developer-board
     entity_category: config
     options: ["Build Default", "Waveshare ESP32-S3-Zero", "ESP32-S3-DevKitC-1", "Custom"]
@@ -42,6 +43,7 @@ select:
   - platform: template
     id: pf_servo_pin
     name: "Servo Pin"
+    internal: true
     icon: mdi:pin
     entity_category: config
     # Every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.

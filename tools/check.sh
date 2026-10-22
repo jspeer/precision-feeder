@@ -33,7 +33,7 @@ echo "== C++ host tests"
 "$OUT/test_ble_engine"
 
 echo "== Python tests (client, and limits consistency)"
-(cd tools && python3 -m unittest -q test_precision_feeder_ble test_make_release)
+(cd tools && python3 -m unittest -q test_precision_feeder_ble test_make_release test_check_scopes)
 python3 -m unittest -q tests/test_consistency.py
 
 echo "== Web app (web/dist built from web/src, parser tests)"
@@ -79,9 +79,13 @@ grep -q "api_key_on_device" "$CONFIG/ble_key_on_device.yaml"
 awk '/^  web_ui: !include/ { next } { print } /^  disc: !include/ { print "  ble_gatt: !include precision-feeder/packages/ble_gatt.yaml" }' \
   examples/disc.yaml > "$CONFIG/headless.yaml"
 grep -q "ble_gatt" "$CONFIG/headless.yaml"
+# Python with PyYAML for tools/check_scopes.py: ESPHome's own, else the system's.
+PY="$(dirname "$ESPHOME")/python"
+[ -x "$PY" ] || PY=python3
 for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml; do
-  echo "== esphome config examples/$f (as a copy in a config folder)"
-  "$ESPHOME" config "$CONFIG/$f" >/dev/null
+  echo "== esphome config examples/$f (as a copy in a config folder), and who sees what"
+  "$ESPHOME" config "$CONFIG/$f" > "$OUT/resolved.yaml"
+  "$PY" tools/check_scopes.py "$OUT/resolved.yaml"
 done
 if [ "${1:-}" = "--compile" ]; then
   for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml; do

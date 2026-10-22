@@ -12,6 +12,7 @@ sensor:
   - platform: template
     id: pf_tray_position
     name: "Tray Position"
+    internal: true
     icon: mdi:rotate-right
     accuracy_decimals: 0
     update_interval: never
@@ -26,6 +27,7 @@ sensor:
   - platform: template
     id: pf_fed_today
     name: "Portions Fed Today"
+    internal: true
     icon: mdi:counter
     accuracy_decimals: 0
     update_interval: never
@@ -34,6 +36,7 @@ sensor:
   - platform: template
     id: pf_runway
     name: "Runway"
+    internal: true
     icon: mdi:calendar-clock
     unit_of_measurement: d
     accuracy_decimals: 0
@@ -43,6 +46,7 @@ sensor:
   - platform: template
     id: pf_clock_age
     name: "Minutes Since Clock Sync"
+    internal: true
     entity_category: diagnostic
     icon: mdi:clock-time-four-outline
     unit_of_measurement: min
@@ -53,6 +57,7 @@ sensor:
   - platform: template
     id: pf_capacity
     name: "Capacity"
+    internal: true
     entity_category: diagnostic
     icon: mdi:tray-full
     accuracy_decimals: 0
@@ -64,6 +69,7 @@ text_sensor:
   - platform: template
     id: pf_mechanism
     name: "Mechanism"
+    internal: true
     entity_category: diagnostic
     icon: mdi:cog-transfer
     update_interval: never
@@ -83,6 +89,7 @@ text_sensor:
   - platform: template
     id: pf_hold
     name: "Hold"
+    internal: true
     icon: mdi:pause-circle-outline
     update_interval: never
 
@@ -107,18 +114,21 @@ text_sensor:
   - platform: template
     id: pf_active_schedule
     name: "Active Schedule"
+    internal: true
     icon: mdi:calendar-text
     update_interval: never
 
   - platform: template
     id: pf_oneshots
     name: "One-shot Feeds"
+    internal: true
     icon: mdi:calendar-star
     update_interval: never
 
   - platform: template
     id: pf_empty_on
     name: "Tray Empty On"
+    internal: true
     icon: mdi:calendar-end
     update_interval: never
 
@@ -132,6 +142,7 @@ text_sensor:
   - platform: template
     id: pf_time_source
     name: "Time Source"
+    internal: true
     icon: mdi:clock-check-outline
     entity_category: diagnostic
     update_interval: never
@@ -146,6 +157,7 @@ text_sensor:
   - platform: template
     id: pf_firmware_variant
     name: "Firmware Variant"
+    internal: true
     icon: mdi:package-variant
     entity_category: diagnostic
     update_interval: never
@@ -163,6 +175,7 @@ text_sensor:
   - platform: template
     id: pf_feed_guard
     name: "Feed Guard"
+    internal: true
     icon: mdi:shield-check-outline
     update_interval: never
 
@@ -170,6 +183,7 @@ text_sensor:
   - platform: template
     id: pf_device_time
     name: "Device Time"
+    internal: true
     icon: mdi:clock-digital
     entity_category: diagnostic
     update_interval: never
@@ -178,6 +192,7 @@ text_sensor:
 binary_sensor:
   - platform: template
     name: "Clock Valid"
+    internal: true
     entity_category: diagnostic
     lambda: return id(feeder).time_valid();
 
@@ -192,6 +207,7 @@ binary_sensor:
 
   - platform: template
     name: "Schedule Over Capacity"
+    internal: true
     icon: mdi:alert-outline
     lambda: return id(feeder).schedule_oversubscribed();
 

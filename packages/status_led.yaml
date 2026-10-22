@@ -61,6 +61,7 @@ select:
   - platform: template
     id: pf_led_pin
     name: "LED Pin"
+    internal: true
     icon: mdi:led-outline
     entity_category: config
     # "none" and every pin not in PINS_REFUSED (feeder_core.h); tests/test_consistency.py checks it.
