@@ -50,9 +50,8 @@ SOURCES = [
 STYLES = ["app.css"]
 
 # The gzipped size the firmware carries, both files together: about 60 KB in the 1.1.0 plan, 64 KB since 2.0.0 N7
-# (the Firmware page; the firmware has room, DESIGN.md section 13).
-# EXPERIMENT (experiment/mqtt-trial): 66 KB for the MQTT card, to try it on the bench; main keeps 64 KB until the
-# owner decides.
+# (the Firmware page; the firmware has room, DESIGN.md section 13), 66 KB since 2.1.0 (the disc's calibration and the
+# MQTT card, D20).
 BUDGET_GZ = 66 * 1024
 
 HEADER = """\

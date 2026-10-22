@@ -819,7 +819,7 @@ static std::unique_ptr<FakeFeeder> boot_pins(Flash &flash, N20Mechanism &disc, s
   return f;
 }
 
-// ---- one binary, the drive chosen on the device (experiment/single-binary, plan S2.0b) -------------------
+// ---- one binary, the drive chosen on the device (D17) -------------------------------------------------------
 static std::unique_ptr<FakeFeeder> boot_dual(Flash &flash, N20Mechanism &disc) {
   auto f = std::make_unique<FakeFeeder>(flash, T0 * 1000, true);
   f->add_drive(&disc);     // option 2
@@ -872,10 +872,36 @@ static void test_motor_pins() {
     CHECK(f->motor_pin_in_use(0) == 1 && f->motor_pin_in_use(2) == 6, "the build's pins");
     CHECK(problem.find("not usable") != std::string::npos, "and the log says why");
   }
+  {
+    // A firmware with both drives keeps the servo's button default, GPIO2: the disc's IN2. The button is off until
+    // another pin is chosen; the motor keeps its pin.
+    Flash fresh;
+    N20Mechanism disc;
+    auto f = boot_pins(fresh, disc);
+    ReservedPins motor = f->reserved_pins();
+    Device saved{};
+    saved.servo_pin = saved.button_pin = saved.led_pin = PIN_BUILD;
+    std::string problem;
+    const Pins use = resolve_pins(saved, Pins{PIN_NONE, 2, 21}, &problem, &motor);
+    CHECK(use.button == PIN_NONE && use.led == 21, "the button's build pin drives the motor: the button is off");
+    CHECK(problem.find("button pin GPIO2 drives the motor") != std::string::npos, "and the log says why");
+    saved.button_pin = 3;
+    CHECK(resolve_pins(saved, Pins{PIN_NONE, 2, 21}, nullptr, &motor).button == 3, "a pin chosen on the device wins");
+  }
 }
 
 static void test_single_binary() {
   current = "single binary: the drive chosen on the device";
+  {
+    // The prebuilt firmware carries both and defaults to the servo (build_default: false): only the disc is added.
+    Flash servo_first;
+    N20Mechanism disc;
+    auto f = std::make_unique<FakeFeeder>(servo_first, T0 * 1000, true);
+    f->add_drive(&disc);
+    Device none{};
+    CHECK(f->choose_drive(none) == FeederCore::DRIVE_SERVO && f->is_servo(), "servo by default");
+    CHECK(f->capacity() == 6, "and the servo's capacity");
+  }
   Flash flash;
   {
     N20Mechanism disc;

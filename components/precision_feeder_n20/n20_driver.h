@@ -49,7 +49,7 @@ class N20Driver : public Component, protected N20Lock, public MotorPinUser {
   void set_timing_ms(const char *field, uint32_t value);
   /// Register with the feeder: called before the feeder's setup, so core_start() already sees this mechanism.
   /// `with_servo`: the build also has the servo (a single binary: the drive is chosen on the device).
-  void attach(PrecisionFeeder *feeder, bool with_servo);
+  void attach(PrecisionFeeder *feeder, bool with_servo, bool build_default);
 
   void setup() override;
   void loop() override;

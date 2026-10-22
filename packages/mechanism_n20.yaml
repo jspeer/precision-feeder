@@ -1,5 +1,9 @@
-# Precision Feeder: the direct-drive disc mechanism (DESIGN.md section 3.3). core.yaml includes it on the
-# variant/n20-direct-drive branch; you do not.
+# Precision Feeder: the direct-drive disc mechanism (DESIGN.md section 3.3), a second drive beside the servo.
+#
+# core.yaml always carries the servo fan tray (mechanism_servo.yaml). Including this package adds the disc: the
+# firmware then has both, and Drive (web app Configuration; packages/drive_select.yaml, included below) chooses which
+# one the feeder uses, from the next restart. The drive not chosen is never set up, so its pins stay free.
+# examples/disc.yaml is a disc build; the prebuilt firmware includes this package with disc_build_default "false".
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
@@ -16,7 +20,12 @@
 #
 # Calibrate it before feeding: Maintenance in the web app (or the Calibration buttons below), docs/CALIBRATION.md.
 
+packages:
+  drive: !include drive_select.yaml       # Drive: servo or disc, chosen on the device
+
 substitutions:
+  # Which drive the feeder uses until one is chosen on the device: "true" the disc, "false" the servo.
+  disc_build_default: "true"
   # Slots on the disc for a new feeder: the starting value of Disc Slots, which you set in the calibration (step 1)
   # and which is saved on the feeder from then on.
   disc_slots: "15"
@@ -45,6 +54,7 @@ precision_feeder_n20:
   encoder_a_pin: ${encoder_a_pin}
   encoder_b_pin: ${encoder_b_pin}
   pwm_frequency: ${motor_pwm_frequency}
+  build_default: ${disc_build_default}
 
 precision_feeder:
   # With the web server, changing these needs the settings password when one is set (packages/web_server.yaml has
@@ -189,27 +199,7 @@ number:
       - lambda: id(feeder).set_tuning(precision_feeder::N20_CALIBRATION_TURNS, (int32_t) x);
     update_interval: never
 
-  # --- Recovery (after a power cut mid-feed): nudge forward in calibration mode, then declare ---------------
-  - platform: template
-    id: declared_position
-    name: "Declared Tray Position"
-    icon: mdi:numeric
-    min_value: 0
-    max_value: ${tray_capacity}
-    step: 1
-    mode: box
-    optimistic: true
-    initial_value: 0
-
 switch:
-  - platform: template
-    name: "Calibration Mode"
-    icon: mdi:tune
-    lambda: return id(feeder).calibration_mode();
-    turn_on_action:
-      - lambda: id(feeder).set_calibration_mode(true);
-    turn_off_action:
-      - lambda: id(feeder).set_calibration_mode(false);
   # Set by the calibration's direction test; change by hand only if you rewire.
   - platform: template
     name: "Reverse Motor"
@@ -382,11 +372,6 @@ button:
     icon: mdi:crosshairs
     on_press:
       - lambda: id(feeder).calibration_action(precision_feeder::N20_CAL_TRIM_HERE);
-  - platform: template
-    name: "Declare Tray Position"
-    icon: mdi:map-marker-check
-    on_press:
-      - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);
 
 text_sensor:
   - platform: template

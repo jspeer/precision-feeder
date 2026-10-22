@@ -1,4 +1,4 @@
-# Precision Feeder: MQTT, set up on the device (EXPERIMENT, branch experiment/mqtt-trial).
+# Precision Feeder: MQTT with Home Assistant discovery, set up on the device (optional; firmware 2.1.0, D20).
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 # Designed and written with the assistance of an AI (Anthropic's Claude);

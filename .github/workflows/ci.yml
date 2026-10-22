@@ -1,4 +1,4 @@
-# Runs tools/check.sh: the host tests (C++ and Python) and an ESPHome config validation of both examples.
+# Runs tools/check.sh: the host tests (C++ and Python) and an ESPHome config validation of the examples.
 # A full compile runs on manual dispatch only (it downloads a 1-2 GB toolchain).
 name: CI
 

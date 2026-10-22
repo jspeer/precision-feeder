@@ -6,51 +6,76 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.1.0-n20.1: direct-drive disc (branch `variant/n20-direct-drive`, never released)
+## 2.1.0: two drives, the direct-drive disc, and MQTT (not released yet)
 
-A variant for a feeder whose disc is turned directly by a DC gear motor with an encoder, on top of 2.1.0. Built from
-YAML on its branch; there are no prebuilt binaries, and the web app's update check offers it nothing.
-
-- New mechanism (DESIGN.md section 3.3): a GA12-N20 gear motor with encoder behind a DRV8833 turns a disc of open
-  slots (15 on the bench print); 14 portions per load; it only turns forward, and Tray Reload moves nothing.
-- Its motion is the owner's tuned bench sketch, rewritten as firmware and checked against it on a simulated motor,
-  with extra safety limits: a short stall window at full power, a travel limit, a timeout from the distance and a
-  watchdog on the control loop.
-- A guided calibration (docs/CALIBRATION.md): direction test, zero, a full-turn measurement, a check of every slot, a
-  global trim.
-- Tuning on the device (web app Maintenance, and Home Assistant): ticks per turn, drive power, braking distance,
-  wiggle amplitude and cycles, slot trim, calibration turns, reverse motor and encoder.
-- The slot count is a setting (Disc Slots, 3 to 60) in the calibration, so a 14- or 16-slot disc needs no rebuild.
-  Slot count, ticks per turn, trim and the direction reversals can only be changed in calibration mode.
-- The disc's five pins can be chosen on the feeder (Configuration, Pins; and Home Assistant), like the servo's: the
-  YAML's are the starting values, a change applies after a restart. The disc build gains Restart and Restart Needed
-  (`packages/restart.yaml`).
-- The calibration's texts say which step you are on and which button to press; Trim here sets the trim from a slot you
-  nudged to the centre.
-- The button defaults to GPIO3. Runtime button and LED pins work without a servo pin.
-- Host-tested only: nothing of this has run on hardware yet (DESIGN.md open item 23).
-
-## 2.1.0: mechanisms (not released yet)
-
-Nothing changes for a servo feeder: same entities, same behaviour, same saved settings, same BLE protocol. Underneath,
-the firmware no longer assumes a servo, so feeders with other motors and trays can be built
+Nothing changes for a servo feeder: same entities, same behaviour, same saved settings, same BLE protocol, and the
+prebuilt firmware still starts as a servo feeder. Underneath, the firmware no longer assumes a servo: it carries a
+second drive, a direct-drive disc, for custom prints, and other motors and trays can be added
 ([docs/MECHANISMS.md](docs/MECHANISMS.md)).
+
+Mechanisms:
 
 - What moves the tray is now a *mechanism* (DESIGN.md section 3.0). The servo fan tray is the first; its timing,
   wiggle and angles are unchanged, checked against a recording of what 2.0.2 did.
 - Portions per load come from the mechanism (6 for the servo) instead of a fixed 6: the guard limits, event and
   one-shot portions, Declare Tray Position and the BLE ranges follow it.
-- New diagnostic entities: **Mechanism** (`servo`) and **Capacity** (6). Faults names a motor fault when a mechanism
-  reports one.
+- New diagnostic entities: **Mechanism** (`servo` or `n20-direct`) and **Capacity**. Faults names a motor fault
+  when a mechanism reports one.
+- The servo's YAML settings moved to `packages/mechanism_servo.yaml`, which `core.yaml` includes: your YAML and its
+  substitutions work as before. Calibration Mode and the position recovery entities moved to
+  `packages/tray_recovery.yaml`, which `core.yaml` includes too (a build without `calibration.yaml` now has them).
+- `AGENTS.md` gains the rules for adding a mechanism; [docs/MECHANISMS.md](docs/MECHANISMS.md) is the walkthrough.
+
+The direct-drive disc (DESIGN.md section 3.3):
+
+- A GA12-N20 gear motor with an encoder behind a DRV8833 turns a printed disc of open slots (15 on the bench print,
+  14 portions per load). It only turns forward; Tray Reload moves nothing.
+- Its motion is the owner's tuned bench sketch, rewritten as firmware and checked against it on a simulated motor,
+  with extra safety limits: a short stall window at full power, a travel limit, a timeout from the distance and a
+  watchdog on the control loop.
+- A guided calibration in the web app (docs/CALIBRATION.md): direction test, zero, a full-turn measurement, a check
+  of every slot, a global trim, and Trim here (the trim from a slot nudged to the centre). Each step says which
+  button to press.
+- Tuning on the device (web app Maintenance, and Home Assistant): ticks per turn, drive power, braking distance,
+  wiggle amplitude and cycles, slot trim, calibration turns, reverse motor and encoder. **Disc Slots** (3 to 60) is a
+  setting too, so a 14- or 16-slot disc needs no rebuild. The values that move the slots can only be changed in
+  calibration mode.
+- Its five pins (IN1, IN2, STBY, encoder A and B) are chosen on the feeder like the others (D19); the button and LED
+  can never be moved onto them.
+
+One firmware, both drives (D17):
+
+- Including `packages/mechanism_n20.yaml` adds the disc beside the servo, and **Drive** (web app Configuration, Home
+  Assistant) chooses between them, from the next restart. The drive not chosen is never set up, so its pins stay
+  free. Changing the drive marks the tray position unknown: reload before feeding.
+- The prebuilt binaries carry both and start with the servo (`disc_build_default: "false"`); `examples/disc.yaml`
+  starts with the disc, with the button on GPIO3.
+- A build's button or LED pin that the drive in use drives (the servo's button default, GPIO2, is the disc's IN2) is
+  left off, with a warning, until another pin is chosen.
+- **Restart**, **Restart Needed** and **Pins In Use** are in `packages/restart.yaml` (hardware.yaml includes it).
+
+MQTT (D20):
+
+- New optional package `packages/mqtt.yaml`, in the prebuilt binaries: ESPHome's MQTT client beside the native API,
+  with Home Assistant discovery for every entity Home Assistant sees, and ESPHome's device discovery
+  (`esphome/discover`). Off until it is set up.
+- Set up in the web app (Configuration, MQTT): on/off, broker, port, username, password and topic prefix, saved on
+  the feeder. On/off, broker and login apply at once; the topic prefix after a restart. The settings are web app
+  only (neither Home Assistant nor MQTT can redirect the feeder) and need the settings password. The password is
+  never sent back. Losing the broker never restarts the feeder.
+- Discovery unique IDs are made from the MAC, so two feeders never clash.
+
+Also:
+
 - GPIO3 can now be chosen for the button or LED, with a warning: on the ESP32-S3 it only selects the JTAG source,
   and only once an eFuse is burned that is not by default.
-- The servo's YAML settings moved to `packages/mechanism_servo.yaml`, which `core.yaml` includes: your YAML and its
-  substitutions work as before.
 - The web app's update check tells a feeder built from a branch (a variant the releases do not publish) that there
   are no published updates for it, instead of offering the main firmware.
+- A password text in the web app (the MQTT password) gets a password box and starts empty.
+- The web app's size budget is 66 KB gzipped (was 64 KB).
 - The Python BLE client reads calibration offsets only from a feeder that has them, and checks the tray position
   against the positions the feeder reports.
-- `AGENTS.md` gains the rules for adding a mechanism; [docs/MECHANISMS.md](docs/MECHANISMS.md) is the walkthrough.
+- Fixed: a build without the native API failed to compile (a missing include).
 
 ## 2.0.2: NTP servers (2026-10-16)
 

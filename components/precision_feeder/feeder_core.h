@@ -49,7 +49,7 @@ constexpr uint32_t CALIBRATION_VERSION = 1;
 constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
 constexpr uint32_t DEVICE_VERSION = 2;         // 2: NTP servers (firmware 2.0.2)
 constexpr uint32_t TUNING_VERSION = 1;         // firmware 2.1.0
-constexpr uint32_t MOTOR_PINS_VERSION = 1;     // firmware 2.1.0-n20.1 (D19)
+constexpr uint32_t MOTOR_PINS_VERSION = 1;     // firmware 2.1.0 (D19)
 // Setting limits: the single source of truth. Every way of changing a setting (Home Assistant, BLE, loading from
 // flash) goes through the setters below, which check against these. The YAML entities repeat them as min/max for
 // their input boxes; tests/test_consistency.py checks that they agree.
@@ -300,7 +300,7 @@ struct Device {
   char ap_password[AP_PASSWORD_SIZE];
   uint8_t ble_key[DEVICE_KEY_SIZE];  // all zero = no key set on the device
   uint8_t password_scheme;           // 0 = no settings password
-  // reserved[0]: the drive chosen on the device (experiment/single-binary, DRIVE_*); reserved[1]: the drive the last
+  // reserved[0]: the drive chosen on the device (D17, DRIVE_*); reserved[1]: the drive the last
   // boot used (DRIVE_*), so a change can mark the tray position unknown. 0 in every record before: the build's.
   uint8_t reserved[3];
   uint8_t password_salt[PASSWORD_SALT_SIZE];
@@ -417,7 +417,7 @@ class FeederCore : private ServoOutput {
   /// Use another mechanism instead of the servo. Call before core_start(); the core does not own it.
   void set_mechanism(Mechanism *mechanism) { this->mech_ = mechanism != nullptr ? mechanism : &this->servo_; }
 
-  // ---- the drive chosen on the device (experiment/single-binary: plan S2.0b, D17) ----
+  // ---- the drive chosen on the device (D17) ----
   // A build may carry more than one mechanism. Each is an option (the servo is always option 1); the one the device
   // saved (Device::reserved[0]) is used from the next boot, else the build's (the one set_mechanism() gave). The
   // adapter picks it before any driver starts and never sets up the others, so their pins stay free.

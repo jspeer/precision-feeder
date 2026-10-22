@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = 'a9b07891ea9d';
+const BUILD_ID = '2263839e0552';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -80,7 +80,7 @@ const E = {
   restartCycle: 'button/Restart Cycle Today',
   clearOneshots: 'button/Clear One-shot Feeds',
 
-  // packages/mechanism_n20.yaml (the direct-drive disc; only on the variant/n20-direct-drive branch's builds)
+  // packages/mechanism_n20.yaml (the direct-drive disc, beside the servo)
   calStep: 'text_sensor/Calibration Step',
   calStart: 'button/Calibration Start',
   calYes: 'button/Calibration Yes',
@@ -153,7 +153,7 @@ const E = {
   bleGuard: 'switch/BLE Can Change Guard Limits',
   bleCalibration: 'switch/BLE Can Change Calibration',
 
-  // packages/mqtt.yaml (experiment/mqtt-trial)
+  // packages/mqtt.yaml
   mqtt: 'switch/MQTT',
   mqttBroker: 'text/MQTT Broker',
   mqttPort: 'number/MQTT Port',

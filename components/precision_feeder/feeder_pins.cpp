@@ -138,7 +138,21 @@ Pins resolve_pins(const Device &device, const Pins &build, std::string *problem,
   if (clash(out)) {
     if (problem != nullptr)
       *problem += std::string(problem->empty() ? "" : "; ") + "saved pins clash, the build's used";
-    return build;
+    out = build;
+  }
+  // The build's own button or LED pin may be one the drive in use drives (a firmware with two drives keeps the
+  // servo's button default, GPIO2, which is the disc's IN2): that part is off until another pin is chosen.
+  if (reserved != nullptr) {
+    for (PinRole role : {PinRole::BUTTON, PinRole::LED}) {
+      uint8_t &pin = pin_of(out, role);
+      if (pin != PIN_NONE && reserved->has(pin)) {
+        if (problem != nullptr)
+          *problem += std::string(problem->empty() ? "" : "; ") + ROLE_NAMES[static_cast<uint8_t>(role)] + " pin " +
+                      pin_text(pin) + " drives the motor, so the " + ROLE_NAMES[static_cast<uint8_t>(role)] +
+                      " is off";
+        pin = PIN_NONE;
+      }
+    }
   }
   return out;
 }

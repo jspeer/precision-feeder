@@ -1,16 +1,17 @@
 # Precision Feeder for ESPHome
 
-> **Branch `variant/n20-direct-drive`: a community variant, not a release.** This branch builds the firmware for a
-> direct-drive disc (a DRV8833 driving a GA12-N20 gear motor with an encoder, turning a 15-slot printed disc) instead
-> of the servo tray. Build it from YAML ([docs/BUILDING.md](docs/BUILDING.md)); there are no prebuilt binaries for it.
-> For another motor or disc, change `disc_slots`, `tray_capacity` and the pins in
-> [packages/mechanism_n20.yaml](packages/mechanism_n20.yaml), then calibrate
-> ([docs/CALIBRATION.md](docs/CALIBRATION.md)); for a different kind of mechanism, see
-> [docs/MECHANISMS.md](docs/MECHANISMS.md). The servo firmware is on `main`. Not yet tested on hardware.
-
 ESPHome firmware for the
 [Automated Precision Fish Feeder with WiFi (Rev2)](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2),
 a 3D-printed fish feeder that drops one measured portion at a time from a servo-driven tray.
+
+It started as firmware for that one print. Since 2.1.0 it also drives custom prints: what moves the food is a
+*mechanism*, and one firmware carries two of them, chosen on the device:
+
+- **A servo tray:** a 180-degree hobby servo (MG90S or SG92R) swinging a fan of slots, as in the original feeder.
+- **A direct-drive disc:** a small gear motor with an encoder (GA12-N20) behind a DRV8833 motor driver, turning a
+  printed disc of slots (3 to 60 of them) one slot per portion, with a calibration wizard in the web app.
+
+Another motor or tray can be added by following [docs/MECHANISMS.md](docs/MECHANISMS.md).
 
 - **The feeder to print:** <https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2>
   (by FlyingGyroscope; the model is CC BY-NC-SA 4.0, see [Licence](#licence))
@@ -23,17 +24,18 @@ install, no account. Open `http://precision-feeder-xxxxxx.local` (or its IP addr
 the dashboard, the schedule, the settings, calibration and diagnostics. The app is stored in the firmware; nothing is
 loaded from the internet.
 
-Everything else is optional, on top: full **Home Assistant** control, and a **Bluetooth (BLE) interface** for a PLC
-or another controller.
+Everything else is optional, on top: full **Home Assistant** control (the native API, or **MQTT** with discovery), and
+a **Bluetooth (BLE) interface** for a PLC or another controller.
 
 It does everything the [original Arduino firmware](https://github.com/FlyingGyroscope/PrecisionFeederRev2) does, then
 adds minute-accurate scheduling with sunrise and sunset events, three switchable schedule profiles, and a feed guard
 that protects the fish from being over-fed.
 
-> **Status: release 2.0.2.** One complete feeder (Waveshare ESP32-S3-Zero, MG90S servo) has
+> **Status: release 2.1.0.** One complete servo feeder (Waveshare ESP32-S3-Zero, MG90S servo) has
 > been calibrated and tested on real hardware: feeding, schedules, power cuts, Home Assistant, BLE, and for 2.0 the
-> install page, the setup wizard, firmware updates, NTP servers and upgrades from 1.1 ([docs/BENCH.md](docs/BENCH.md)). It has
-> not yet had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
+> install page, the setup wizard, firmware updates, NTP servers and upgrades from 1.1. For 2.1 the direct-drive disc
+> has been calibrated and fed on a bench rig (with BLE and MQTT), and the two-drive firmware switched drives on both
+> rigs ([docs/BENCH.md](docs/BENCH.md)). The disc has not yet fed animals, and neither has had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
 > fed.
 
 > **Written with AI.** This project was designed and written with the assistance of an AI (Anthropic's Claude). A
@@ -45,6 +47,11 @@ The tray is a fan of 7 slots, 25 degrees apart, turned by a hobby servo over a b
 closed** (it has a floor); **slots 1 to 6 each hold one portion.** Each feed turns the tray one slot further, so the
 next portion falls through the hole. A full tray is therefore **6 portions**. When it is empty you press **Tray
 Reload**, which turns the tray back to the closed slot, and refill it.
+
+**The direct-drive disc** works the same way with more slots: one slot is always over the hole, so a disc of N slots
+holds N - 1 portions (14 on a 15-slot disc). It only ever turns forward, a slot per portion; Tray Reload marks it
+full without moving it. The motor's encoder places each slot, but the firmware still treats a move that was cut short
+as unknown.
 
 There is no position sensor: the firmware keeps track of where the tray is. It saves where it is going *before* every
 move, so if the power is cut halfway, the position is marked **unknown** on the next boot and feeding stops until you
@@ -65,12 +72,16 @@ say where the tray is (or reload it). It never guesses.
 - **Knows what is left.** Portions remaining is exact. It tells you when the tray will run out, and **Needs Food**
   turns on when the tray is empty or the next feed would come up short, ready for a notification.
 - **Hold** the schedule for a number of hours or until you cancel it, and add **one-shot feeds** for a date and time.
-- **Calibration** in the web app or Home Assistant: the servo's pulse range and a fine offset for each slot.
+- **Two drives, one firmware:** the servo tray or the direct-drive disc, chosen in the web app, with every pin
+  (motor, encoder, button, LED) chosen there too.
+- **Calibration** in the web app or Home Assistant: the servo's pulse range and a fine offset for each slot, or the
+  disc's step-by-step wizard (direction, one full turn, slot count, trim).
 - **Time from NTP** (the public pool, or your own servers, set on the feeder), optionally also from Home Assistant,
   or pushed over BLE when there is no network. Shows where the clock came from and how old it is.
 - **An appliance** (2.0): install from a web page, a setup wizard, Wi-Fi, name, time zone, pins and keys set in the
   web app, and firmware updates from the web app, checked before they are applied.
-- **Optional:** push button (as in the original), status LED, BLE interface (every write authenticated with a key;
+- **Optional:** push button (as in the original), status LED, MQTT with Home Assistant discovery (broker and login set
+  in the web app), BLE interface (every write authenticated with a key;
   documented byte for byte in [docs/PROTOCOL.md](docs/PROTOCOL.md), with a Python reference client).
 
 ## What you need
@@ -84,6 +95,15 @@ say where the tray is (or reload it). It never guesses.
 | Capacitor, 470 to 1000 µF | across the servo's power, close to the servo |
 | Push button (optional) | any normally-open button |
 
+For the direct-drive disc, instead of the servo and its capacitor:
+
+| Part | Notes |
+|---|---|
+| GA12-N20 gear motor with a hall encoder | the bench one is 6 V, 35 rpm; another speed works after calibration |
+| DRV8833 motor driver board | one of its two channels is used |
+| Capacitor, about 100 µF | across the driver's 5 V supply |
+| Your printed disc | any number of slots from 3 to 60 |
+
 **Wiring** (defaults for the S3-Zero; pins can be changed in the web app or your YAML):
 
 | From | To |
@@ -93,6 +113,10 @@ say where the tray is (or reload it). It never guesses.
 | Servo − | GND |
 | Button (optional) | GPIO2 and GND (no resistor needed) |
 | Status LED | built into the S3-Zero (GPIO21) |
+
+Direct-drive disc: motor M1 and M2 to the DRV8833's AO1 and AO2; AIN1 to GPIO1, AIN2 to GPIO2, STBY to GPIO6; encoder
+C1 to GPIO4, C2 to GPIO5, encoder VCC to 3.3 V; the driver's VM to 5 V; all grounds together. Put the button on GPIO3
+(GPIO2 is AIN2), or choose its pin in the web app.
 
 If the servo twitches when the board powers up, add a 10 kΩ resistor from the signal wire to GND. (It did not on the
 bench build.)
@@ -109,11 +133,13 @@ There are two ways to run it:
 
 Then, either way:
 
-1. **Calibrate** the tray so every slot lines up with the hole: [docs/CALIBRATION.md](docs/CALIBRATION.md).
-2. **Load it:** press **Tray Reload** (it closes the tray so food cannot fall out), then fill slots 1 to 6.
-3. **Set a schedule:** [docs/SCHEDULING.md](docs/SCHEDULING.md). For sunrise or sunset events, set the location
+1. **Choose the drive** if yours is the direct-drive disc: Configuration, Drive, then restart. The prebuilt firmware
+   starts as a servo feeder.
+2. **Calibrate** the tray so every slot lines up with the hole: [docs/CALIBRATION.md](docs/CALIBRATION.md).
+3. **Load it:** press **Tray Reload** (it closes the servo tray so food cannot fall out), then fill the slots.
+4. **Set a schedule:** [docs/SCHEDULING.md](docs/SCHEDULING.md). For sunrise or sunset events, set the location
    first.
-4. **Watch it for a few days** before you trust it while you are away.
+5. **Watch it for a few days** before you trust it while you are away.
 
 ## Documentation
 
@@ -138,9 +164,10 @@ Then, either way:
 ```
 components/precision_feeder/      the logic (tray, guard, scheduler, sun maths, settings), plain C++ and tested
                                   on a PC, plus the ESPHome adapter
+components/precision_feeder_n20/  the direct-drive disc's motor driver (only compiled when its package is used)
 components/precision_feeder_ble/  the BLE protocol (only compiled when the BLE package is used)
 packages/                         the feature packages (docs/BUILDING.md)
-examples/                         basic.yaml, ble.yaml, secrets.example.yaml
+examples/                         basic.yaml, ble.yaml, disc.yaml, secrets.example.yaml
 firmware/                         the prebuilt binaries' configurations (full.yaml, no-ble.yaml)
 install/                          the install page, published with each release
 web/                              the web app: src/ and the built dist/ the firmware embeds

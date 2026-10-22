@@ -1,0 +1,42 @@
+# Precision Feeder: Calibration Mode and tray position recovery, shared by every mechanism.
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# core.yaml includes it, for every mechanism: the servo's calibration (calibration.yaml) and the disc's
+# (mechanism_n20.yaml) both work in Calibration Mode. You do not include it yourself.
+#
+# Recovery: after a power loss in the middle of a feed the tray position is "unknown" and feeding stops. Look at the
+# tray, enter where it really is, and press the button.
+
+switch:
+  - platform: template
+    id: pf_calibration_mode
+    name: "Calibration Mode"
+    icon: mdi:tune
+    lambda: return id(feeder).calibration_mode();
+    turn_on_action:
+      - lambda: id(feeder).set_calibration_mode(true);
+    turn_off_action:
+      - lambda: id(feeder).set_calibration_mode(false);
+
+number:
+  - platform: template
+    id: declared_position
+    name: "Declared Tray Position"
+    icon: mdi:numeric
+    min_value: 0
+    max_value: ${tray_capacity}
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 0
+
+button:
+  - platform: template
+    id: pf_declare_position
+    name: "Declare Tray Position"
+    icon: mdi:map-marker-check
+    on_press:
+      - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);

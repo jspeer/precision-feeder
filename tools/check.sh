@@ -2,7 +2,7 @@
 # Run every check this repository has: the host tests (C++ and Python) and, if ESPHome is available, a config
 # validation of each example. The same script runs in CI (.github/workflows/ci.yml) and on your machine.
 #
-#   tools/check.sh              host tests, plus "esphome config" if esphome is on PATH or in .venv (both examples,
+#   tools/check.sh              host tests, plus "esphome config" if esphome is on PATH or in .venv (the examples,
 #                               ble.yaml with the api_key_on_device package, and the prebuilt binaries' firmware/)
 #   tools/check.sh --compile    also compile the examples (slow; downloads the toolchain the first time)
 #
@@ -56,7 +56,7 @@ fi
 CONFIG="$OUT/config"
 mkdir -p "$CONFIG"
 ln -s "$(pwd)" "$CONFIG/precision-feeder"
-cp examples/basic.yaml examples/ble.yaml "$CONFIG/"
+cp examples/basic.yaml examples/ble.yaml examples/disc.yaml "$CONFIG/"
 if [ -f examples/secrets.yaml ]; then
   cp examples/secrets.yaml "$CONFIG/secrets.yaml"
 else
@@ -75,7 +75,7 @@ fi
 awk '{ print } /^  ble_gatt: !include/ { print "  api_key: !include precision-feeder/packages/api_key_on_device.yaml" }' \
   examples/ble.yaml > "$CONFIG/ble_key_on_device.yaml"
 grep -q "api_key_on_device" "$CONFIG/ble_key_on_device.yaml"
-for f in basic.yaml ble.yaml ble_key_on_device.yaml; do
+for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml; do
   echo "== esphome config examples/$f (as a copy in a config folder)"
   "$ESPHOME" config "$CONFIG/$f" >/dev/null
 done

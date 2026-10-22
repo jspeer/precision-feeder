@@ -72,7 +72,7 @@ const E = {
   restartCycle: 'button/Restart Cycle Today',
   clearOneshots: 'button/Clear One-shot Feeds',
 
-  // packages/mechanism_n20.yaml (the direct-drive disc; only on the variant/n20-direct-drive branch's builds)
+  // packages/mechanism_n20.yaml (the direct-drive disc, beside the servo)
   calStep: 'text_sensor/Calibration Step',
   calStart: 'button/Calibration Start',
   calYes: 'button/Calibration Yes',
@@ -145,7 +145,7 @@ const E = {
   bleGuard: 'switch/BLE Can Change Guard Limits',
   bleCalibration: 'switch/BLE Can Change Calibration',
 
-  // packages/mqtt.yaml (experiment/mqtt-trial)
+  // packages/mqtt.yaml
   mqtt: 'switch/MQTT',
   mqttBroker: 'text/MQTT Broker',
   mqttPort: 'number/MQTT Port',

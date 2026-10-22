@@ -3,6 +3,7 @@
 // reviewed by a human, but it may still contain mistakes.
 #include "precision_feeder.h"
 
+#include "esphome/core/application.h"  // App: reached through the API's headers otherwise, so a build without it failed
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -280,19 +281,21 @@ void PrecisionFeeder::hal_save_motor_pins(const MotorPins &pins) {
 }
 
 void PrecisionFeeder::offer_drive(Mechanism *mechanism, Component *driver, const uint8_t *pins, uint8_t n,
-                                  bool with_servo) {
+                                  bool with_servo, bool build_default) {
   (void) pins;  // its pins are offered with offer_motor_pins(): reserved while it is the drive (D19)
   (void) n;
   if (!with_servo) {
     this->set_mechanism(mechanism);  // the only mechanism
     return;
   }
-  // The servo is here too: a second drive, chosen on the device. This build's default is the one offered last.
+  // The servo is here too: a second drive, chosen on the device. Until one is chosen, the build's default: this one
+  // if it asks to be (build_default), else the servo.
   const uint8_t drive = this->add_drive(mechanism);
   if (drive < 2)
     return;
   this->offers_[drive - 2].driver = driver;
-  this->set_mechanism(mechanism);
+  if (build_default)
+    this->set_mechanism(mechanism);
 }
 
 void PrecisionFeeder::apply_drive() {

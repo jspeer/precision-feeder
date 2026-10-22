@@ -16,15 +16,7 @@
 # fix that first with "Servo Max Pulse" (bigger = longer steps), line up slot 0
 # with "Servo Min Pulse", and only then fine-tune the per-slot offsets.
 
-switch:
-  - platform: template
-    name: "Calibration Mode"
-    icon: mdi:tune
-    lambda: return id(feeder).calibration_mode();
-    turn_on_action:
-      - lambda: id(feeder).set_calibration_mode(true);
-    turn_off_action:
-      - lambda: id(feeder).set_calibration_mode(false);
+# Calibration Mode, Declared Tray Position and Declare Tray Position are in packages/tray_recovery.yaml (core.yaml).
 
 select:
   - platform: template
@@ -81,27 +73,6 @@ number:
     set_action:
       - lambda: id(feeder).set_pulse_range(id(feeder).min_pulse_us(), (uint16_t) x);
     update_interval: never
-
-  # --- Position recovery ----------------------------------------------------
-  # After a power loss in the middle of a feed the tray position is "unknown"
-  # and feeding stops. Look at the tray, enter where it really is, and press the button.
-  - platform: template
-    id: declared_position
-    name: "Declared Tray Position"
-    icon: mdi:numeric
-    min_value: 0
-    max_value: ${tray_capacity}
-    step: 1
-    mode: box
-    optimistic: true
-    initial_value: 0
-
-button:
-  - platform: template
-    name: "Declare Tray Position"
-    icon: mdi:map-marker-check
-    on_press:
-      - lambda: id(feeder).declare_position((uint8_t) id(declared_position).state);
 
 # Publish the entities above only when their value changes (see packages/status.yaml).
 interval:

@@ -1,13 +1,14 @@
-# Precision Feeder: choose the drive on the device, in a build that carries two (experiment/single-binary, plan S2.0b).
+# Precision Feeder: choose the drive on the device, in a build that carries two (D17).
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 #
-# Only for a firmware that includes both the servo (mechanism_servo.yaml) and the direct-drive disc
-# (mechanism_n20.yaml): firmware/dual-test.yaml. The choice applies at the next restart (Restart Needed turns on); the
-# drive not chosen is never set up, so its pins stay free. Changing the drive marks the tray position unknown: reload
-# before feeding. Needs the settings password when one is set.
+# Included by mechanism_n20.yaml: a firmware with the direct-drive disc also has the servo (core.yaml), and this
+# chooses between them. "Build Default" is the build's (disc_build_default in mechanism_n20.yaml). The choice
+# applies at the next restart (Restart Needed turns on); the drive not chosen is never set up, so its pins stay free.
+# Changing the drive marks the tray position unknown: reload before feeding. Needs the settings password when one is
+# set.
 
 select:
   - platform: template

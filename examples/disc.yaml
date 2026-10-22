@@ -1,0 +1,68 @@
+# Precision Feeder: the direct-drive disc (a GA12-N20 gear motor behind a DRV8833 turning a slotted disc), for Home
+# Assistant plus the web UI. As basic.yaml, with the disc's package added and the button on GPIO3 (GPIO2 is the
+# bridge's AIN2). The firmware also carries the servo: Drive (web app Configuration) switches between them. Wiring and
+# the disc's settings: packages/mechanism_n20.yaml; calibrate before feeding: docs/CALIBRATION.md.
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# How to use it: clone https://github.com/jspeer/precision-feeder into your ESPHome
+# config folder (in Home Assistant: /config/esphome/) so it sits there as
+# `precision-feeder/`, then copy this file up into the config folder itself, next
+# to the clone, and rename it (for example precision-feeder.yaml):
+#
+#   /config/esphome/
+#     precision-feeder/          <- the repository
+#     precision-feeder.yaml      <- your copy of this file
+#     secrets.yaml               <- keys from precision-feeder/examples/secrets.example.yaml
+#
+# Then set your timezone below and comment packages in or out to suit your build.
+# Update the firmware later with `git pull` inside precision-feeder/; your copy
+# and your secrets stay outside the repository.
+
+substitutions:
+  name: precision-feeder
+  friendly_name: Precision Feeder
+  # Your timezone: daylight saving and sunrise/sunset events depend on it.
+  timezone: America/New_York
+  # Pins default to the Waveshare ESP32-S3-Zero. Change them for another board here, or on
+  # the device (web app Configuration: the pin selects), which then wins:
+  button_pin: GPIO3
+  # motor_in1_pin: GPIO1
+  # motor_in2_pin: GPIO2
+  # motor_standby_pin: GPIO6
+  # encoder_a_pin: GPIO4
+  # encoder_b_pin: GPIO5
+  # Slots on your disc (the starting value; you set it in the calibration too):
+  # disc_slots: "15"
+  # The most portions any disc may hold: the input boxes go up to this. Leave it.
+  tray_capacity: "59"
+  # NTP is the primary time source. Defaults are the public pool servers; point
+  # at a local server if your network has no internet access:
+  # ntp_server_1: 192.168.1.1
+
+# The components and packages are read from the clone next to this file.
+external_components:
+  - source:
+      type: local
+      path: precision-feeder/components
+
+packages:
+  # Always include.
+  core: !include precision-feeder/packages/core.yaml
+  status: !include precision-feeder/packages/status.yaml
+  controls: !include precision-feeder/packages/controls.yaml
+  schedule_editor: !include precision-feeder/packages/schedule_editor.yaml
+  calibration: !include precision-feeder/packages/calibration.yaml       # the servo's, used when Drive is the servo
+  disc: !include precision-feeder/packages/mechanism_n20.yaml           # the direct-drive disc, the build's drive
+  # Optional.
+  hardware: !include precision-feeder/packages/hardware.yaml                 # board and pins chosen on the device (pins below are then defaults)
+  # diagnostics: !include precision-feeder/packages/diagnostics.yaml         # free heap and loop time
+  network_info: !include precision-feeder/packages/network_info.yaml       # Wi-Fi network, addresses and signal
+  improv_serial: !include precision-feeder/packages/improv_serial.yaml     # set Wi-Fi over USB from an install page (Improv)
+  web_ui: !include precision-feeder/packages/web_server.yaml                 # the built-in web app (and the settings password)
+  status_led: !include precision-feeder/packages/status_led.yaml             # onboard RGB LED
+  time_ha: !include precision-feeder/packages/time_homeassistant.yaml        # Home Assistant as a second clock source (keeps time when the internet is down)
+  # button: !include precision-feeder/packages/button.yaml                   # only if your print has the button (GPIO3)
+  # mqtt: !include precision-feeder/packages/mqtt.yaml                       # MQTT with Home Assistant discovery, set up in the web app

@@ -255,7 +255,7 @@ class Feeder:
             a("number", "Declared Tray Position", 0, icon="mdi:numeric", min_value=0, max_value=6, step=1)
             a("button", "Declare Tray Position")
         # hardware.yaml, and the pin selects of button.yaml and status_led.yaml
-        if getattr(args, "dual", False):  # drive_select.yaml: a firmware with both drives (experiment/single-binary)
+        if getattr(args, "dual", False):  # drive_select.yaml: a firmware with both drives (D17)
             a("select", "Drive", "Build Default", icon="mdi:cog-transfer-outline", category=CONFIG,
               options=["Build Default", "Servo", "Direct-drive disc"])
         if not self.disc or getattr(args, "dual", False):  # the disc-only build leaves hardware.yaml out
@@ -953,7 +953,7 @@ def main():
     ap.add_argument("--unknown", action="store_true", help="start with the tray position unknown")
     ap.add_argument("--dual", action="store_true", help="a firmware with both drives: Drive, and the board and pins")
     ap.add_argument("--mechanism", choices=["servo", "n20"], default="servo",
-                    help="the servo fan tray (default) or the direct-drive disc (variant/n20-direct-drive)")
+                    help="the servo fan tray (default) or the direct-drive disc (mechanism_n20.yaml)")
     ap.add_argument("--ping", type=float, default=10.0, help="seconds between keep-alive pings (default 10)")
     args = ap.parse_args()
 

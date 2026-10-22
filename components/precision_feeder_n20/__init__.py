@@ -31,6 +31,7 @@ CONF_STANDBY = "standby_pin"
 CONF_ENCODER_A = "encoder_a_pin"
 CONF_ENCODER_B = "encoder_b_pin"
 CONF_PWM_FREQUENCY = "pwm_frequency"
+CONF_BUILD_DEFAULT = "build_default"
 PINS = (CONF_IN1, CONF_IN2, CONF_STANDBY, CONF_ENCODER_A, CONF_ENCODER_B)
 
 # The motion's timings and limits: YAML-only (D10). Defaults are the bench sketch's (v7); see N20Timing in
@@ -78,6 +79,8 @@ CONFIG_SCHEMA = cv.All(
             # Slots on the disc, all open, one always over the chute: a load holds slots - 1 portions. The bench
             # print has 15 (24 degrees apart). Set packages/mechanism_n20.yaml's tray_capacity to slots - 1.
             cv.Optional(CONF_SLOTS, default=15): cv.int_range(min=3, max=60),
+            # With the servo in the build too: whether the disc is the drive until one is chosen on the device.
+            cv.Optional(CONF_BUILD_DEFAULT, default=True): cv.boolean,
             # GPIO numbers. Not claimed as ESPHome pins: this component sets them up itself (a pin on the
             # ESP32-S3 that check_pin() refuses fails at boot).
             cv.Required(CONF_IN1): precision_feeder.gpio_number,
@@ -118,6 +121,6 @@ async def to_code(config):
     for key, (field, _, _, _) in {**PULSES, **TICKS}.items():
         cg.add(var.set_timing_ms(field, config[key]))
     # Emitted before App.setup(): the feeder's own setup (core_start) then already finds this mechanism. A build whose
-    # feeder also has the servo's output carries both: the drive is chosen on the device (experiment/single-binary).
+    # feeder also has the servo's output carries both: the drive is chosen on the device (D17).
     with_servo = CONF_OUTPUT in CORE.config.get("precision_feeder", {})
-    cg.add(var.attach(feeder, with_servo))
+    cg.add(var.attach(feeder, with_servo, config[CONF_BUILD_DEFAULT]))

@@ -1,6 +1,6 @@
 # Precision Feeder: Restart, Restart Needed and Pins In Use, for every build whose settings wait for a restart (the
-# pins, the name, the access-point password). hardware.yaml includes it; a build without hardware.yaml (the
-# direct-drive disc's) includes it directly.
+# pins, the drive, the name, the access-point password). hardware.yaml includes it; a build without hardware.yaml
+# includes it directly.
 #
 # Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
