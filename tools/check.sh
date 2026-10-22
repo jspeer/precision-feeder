@@ -75,12 +75,16 @@ fi
 awk '{ print } /^  ble_gatt: !include/ { print "  api_key: !include precision-feeder/packages/api_key_on_device.yaml" }' \
   examples/ble.yaml > "$CONFIG/ble_key_on_device.yaml"
 grep -q "api_key_on_device" "$CONFIG/ble_key_on_device.yaml"
-for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml; do
+# A headless build (BUILDING.md): the disc example without the web app, run over BLE.
+awk '/^  web_ui: !include/ { next } { print } /^  disc: !include/ { print "  ble_gatt: !include precision-feeder/packages/ble_gatt.yaml" }' \
+  examples/disc.yaml > "$CONFIG/headless.yaml"
+grep -q "ble_gatt" "$CONFIG/headless.yaml"
+for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml; do
   echo "== esphome config examples/$f (as a copy in a config folder)"
   "$ESPHOME" config "$CONFIG/$f" >/dev/null
 done
 if [ "${1:-}" = "--compile" ]; then
-  for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml; do
+  for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml; do
     echo "== esphome compile examples/$f"
     # ESPHome's own exit status decides (the filter below only prints the sizes); a failed build fails the check.
     if ! "$ESPHOME" compile "$CONFIG/$f" > "$OUT/compile.log" 2>&1; then

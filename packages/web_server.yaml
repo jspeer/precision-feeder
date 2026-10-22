@@ -20,6 +20,7 @@
 # visitors out but is not encrypted; do not reuse a password you care about.
 
 web_server:
+  id: pf_web_server
   port: 80
   version: 3
   # The app replaces ESPHome's own dashboard script, which would otherwise be loaded from the internet.
@@ -39,6 +40,7 @@ web_server:
   #   password: !secret web_password
 
 precision_feeder:
+  web_server_id: pf_web_server
   # Changes through the web server that need the settings password, when one is set. "<domain>/<entity name>";
   # tests/test_consistency.py checks each one exists. The guard limits, the calibration (not Declare Tray
   # Position, which is everyday recovery), the pins (hardware.yaml, button.yaml, status_led.yaml) and the BLE

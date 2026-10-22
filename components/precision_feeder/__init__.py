@@ -96,7 +96,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_DETACH_DELAY, default="1s"): cv.positive_time_period_milliseconds,
         # With the web server: entities ("<domain>/<name>") whose changes through the web server need the settings
         # password when one is set (DESIGN.md section 10.1). Home Assistant and BLE are not affected.
-        cv.OnlyWith(CONF_WEB_SERVER_ID, "web_server"): cv.use_id(WebServer),
+        # Set by packages/web_server.yaml. Not worked out from what is loaded: captive_portal auto-loads ota.web_server,
+        # which counts as "web_server" loaded even in a build without the web app (found in 2.1.2: such builds failed).
+        cv.Optional(CONF_WEB_SERVER_ID): cv.use_id(WebServer),
         cv.Optional(CONF_PROTECTED, default=[]): cv.ensure_list(protected_entity),
         # Runtime pins (DESIGN.md section 2.1): the pins of the servo output, the button and the status LED, so the
         # pins saved on the device can replace the YAML's before those drivers start. Set by the packages (core.yaml,

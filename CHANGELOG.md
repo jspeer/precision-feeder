@@ -38,6 +38,9 @@ everyday use, except that a reload or a declared position now counts as moving f
 - **BLE:** an event could not have more than 6 portions, even on a disc (now up to the portions per load); a failed
   AUTH on an authenticated connection left Status and the other records readable (now cleared, as on a disconnect).
 - **Checks:** `tools/check.sh --compile` and `tools/build_bins.sh` reported success when ESPHome failed to build.
+- **A build without the web app** failed to validate: `captive_portal` (core.yaml) auto-loads ESPHome's web OTA, which
+  the feeder took for the web app. packages/web_server.yaml now names its web server for the feeder; check.sh checks
+  a headless build (the disc example without the web app, with BLE).
 - **ESPHome 2026.10.0** (ESP-IDF 5.5.6) for the prebuilt binaries and CI; YAML builds should use it too.
 - **Licence: MIT** (copyright (c) 2026 Jeremy Speer), replacing The Unlicense: keep the copyright and permission
   notice (LICENSE) with copies. 2.1.1 and earlier stay public domain. The prebuilt images contain ESPHome's GPLv3
