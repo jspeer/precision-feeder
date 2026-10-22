@@ -4,7 +4,7 @@ The advanced path: build the firmware yourself with ESPHome, choosing exactly wh
 people should flash the prebuilt firmware instead ([INSTALL.md](INSTALL.md)); a YAML build has the same web app,
 settings and safety behaviour, plus whatever you change in your YAML.
 
-*Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense). Written with the assistance of an AI
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
 ## How a build is put together

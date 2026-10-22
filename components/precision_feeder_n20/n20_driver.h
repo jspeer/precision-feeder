@@ -9,7 +9,7 @@
 //   The main loop watches it: if it stops running while the motor is driven, STBY goes low (the mechanism's own
 //   watchdog then faults the move at its next step).
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

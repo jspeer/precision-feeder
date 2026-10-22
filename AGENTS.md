@@ -35,7 +35,8 @@ substitutions.
   ([FlyingGyroscope/PrecisionFeederRev2](https://github.com/FlyingGyroscope/PrecisionFeederRev2))
   is AGPL-3.0. **Do not copy its code.** Learn behaviour and geometry, then
   write fresh code. Physical facts (positions, pitch, sweep) are fine to reuse.
-- This project is public domain (The Unlicense). Keep the AI-authorship
+- This project is MIT licensed (LICENSE; since 2.1.2, before that The Unlicense). Every new file gets the project's
+  header ("MIT licence, see LICENSE"). Keep the AI-authorship
   disclosure and the credits (FlyingGyroscope as inspiration, Claude) in the
   README, the protocol doc and source file headers. Do not remove them.
 - Do not add dependencies with incompatible licences.

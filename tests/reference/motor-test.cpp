@@ -10,7 +10,7 @@
 // Bench results: 15 forward 24-degree moves land on exactly 8344 ticks (one turn); 300 move-and-wiggle cycles over
 // 20 turns ended within 5 ticks of the grid (docs/BENCH.md, plan docs/plans/drive-decoupling.md).
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense): the sketch is the project owner's,
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE): the sketch is the project owner's,
 // committed with their permission (2026-10-20). This header, and the tests and simulation around the sketch, were
 // written with the assistance of an AI (Anthropic's Claude); reviewed by a human, but they may still contain mistakes.
 #include <Arduino.h>

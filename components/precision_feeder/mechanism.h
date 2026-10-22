@@ -8,7 +8,7 @@
 // No ESPHome dependencies: a mechanism reaches hardware only through hooks the adapter implements, so it can be
 // tested on a computer.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

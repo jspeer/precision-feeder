@@ -5,7 +5,7 @@
 # one the feeder uses, from the next restart. The drive not chosen is never set up, so its pins stay free.
 # examples/disc.yaml is a disc build; the prebuilt firmware includes this package with disc_build_default "false".
 #
-# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 #

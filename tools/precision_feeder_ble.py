@@ -4,7 +4,7 @@
 The packing and parsing functions are pure Python and need nothing installed. The
 FeederClient class and the command line need `bleak` (pip install bleak).
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 

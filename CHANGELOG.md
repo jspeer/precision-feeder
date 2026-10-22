@@ -36,6 +36,9 @@ everyday use, except that a reload or a declared position now counts as moving f
   AUTH on an authenticated connection left Status and the other records readable (now cleared, as on a disconnect).
 - **Checks:** `tools/check.sh --compile` and `tools/build_bins.sh` reported success when ESPHome failed to build.
 - **ESPHome 2026.10.0** (ESP-IDF 5.5.6) for the prebuilt binaries and CI; YAML builds should use it too.
+- **Licence: MIT** (copyright (c) 2026 Jeremy Speer), replacing The Unlicense: keep the copyright and permission
+  notice (LICENSE) with copies. 2.1.1 and earlier stay public domain. The prebuilt images contain ESPHome's GPLv3
+  runtime (README, Licence).
 - Docs: DESIGN.md's status and password line, the servo's travel in CALIBRATION.md (150 degrees from slot 0 to 6),
   the protocol document's credits.
 

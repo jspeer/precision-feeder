@@ -8,7 +8,7 @@
 // Pure C++ with no ESPHome or ESP-IDF dependencies, so it is tested on a host (tests/test_core.cpp). The adapter
 // (precision_feeder.cpp) gives it a sink over ESPHome's OTA backend.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

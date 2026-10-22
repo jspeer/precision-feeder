@@ -1,6 +1,6 @@
 // Precision Feeder BLE control plane: the ESPHome adapter (see precision_feeder_ble.h; the protocol is engine.cpp).
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "precision_feeder_ble.h"

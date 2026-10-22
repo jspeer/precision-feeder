@@ -17,7 +17,7 @@ wrong is the device's word that counts.
 
 Standard library only. The app is served from web/dist/ (app.js, app.css) when it exists.
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """

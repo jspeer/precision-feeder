@@ -3,7 +3,7 @@
 // ::g_ref_sim (the motor), ::g_ref_serial_in (what the console "types") and ::g_ref_bridge_written (called after each
 // bridge write) before including the sketch.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

@@ -4,7 +4,7 @@ FeederCore's setters are the single source of truth for every setting's range. T
 as min/max for Home Assistant's input boxes, and the component schema repeats the pulse limits; this test fails if
 any of them drift. Run from the repository root:  python3 -m unittest tests/test_consistency.py
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """

@@ -5,7 +5,7 @@
 // (tests/test_protocol.cpp: FIPS 180-4 and RFC 4231 vectors, plus golden vectors shared with the Python client).
 // The amounts hashed are tiny (a few dozen bytes per command), so speed does not matter.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

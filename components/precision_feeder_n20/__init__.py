@@ -6,7 +6,7 @@ inputs, PCNT for the encoder, a GPIO for STBY), so the YAML claims none of them,
 from an esp_timer. It registers the mechanism with the feeder before the feeder starts, and reserves its pins so the
 button and the LED can never be moved onto them. packages/mechanism_n20.yaml sets it up.
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """

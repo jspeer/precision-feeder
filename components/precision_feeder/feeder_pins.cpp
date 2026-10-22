@@ -4,7 +4,7 @@
 // any driver is set up, and a change made here applies at the next restart. Only pins the ESP32-S3 can spare are
 // accepted: see PINS_REFUSED and PINS_WARNED in feeder_core.h.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "feeder_internal.h"

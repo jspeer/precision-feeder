@@ -3,7 +3,7 @@
 Everyday use, the settings, what the feeder does to stay safe, and what to do when something looks wrong. The same
 for the prebuilt firmware and a YAML build.
 
-*Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense). Written with the assistance of an AI
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
 ## Everyday use

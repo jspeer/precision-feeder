@@ -4,7 +4,7 @@ From firmware 2.0 the feeder is an appliance: flash a release from a web page, t
 Nothing to build. If you would rather build your own from YAML (the advanced path, with Home Assistant's ESPHome
 add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
-*Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense). Written with the assistance of an AI
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
 ## What you need

@@ -1,6 +1,6 @@
 # Precision Feeder: MQTT with Home Assistant discovery, set up on the device (optional; firmware 2.1.0, D20).
 #
-# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 #

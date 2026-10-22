@@ -4,7 +4,7 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 [DESIGN.md](../DESIGN.md) sections 9.5, 10 and 10.1; the BLE protocol's authentication is in
 [PROTOCOL.md](PROTOCOL.md).
 
-*Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense). Written with the assistance of an AI
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
 ## The short version

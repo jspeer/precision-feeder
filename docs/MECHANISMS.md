@@ -1,6 +1,6 @@
 # Mechanisms: what moves the tray
 
-*Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense). Written with the assistance of an AI
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
 Since firmware 2.1.0 the feeder's logic (the feed guard, the schedule, the history, the tray position) does not know

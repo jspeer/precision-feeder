@@ -6,7 +6,7 @@ authoritative; the firmware (`components/precision_feeder_ble/protocol.h` and
 checked against the same byte vectors.
 
 *Written with the assistance of an AI (Anthropic's Claude); verify against the
-source if something looks wrong.* Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense),
+source if something looks wrong.* Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE),
 inspired by FlyingGyroscope's Precision Feeder Rev2
 ([original firmware](https://github.com/FlyingGyroscope/PrecisionFeederRev2),
 [Printables model](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2));

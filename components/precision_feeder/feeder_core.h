@@ -6,7 +6,7 @@
 // them for the real device; tests/test_core.cpp implements them with a simulated clock, so the logic
 // can be tested on any computer.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

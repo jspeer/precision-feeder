@@ -5,7 +5,7 @@
 // password. A protected request carries HMAC-SHA256(key, nonce || message) for a one-time challenge, so neither the
 // password nor the key crosses plain HTTP, and a recorded answer cannot be replayed.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "feeder_internal.h"

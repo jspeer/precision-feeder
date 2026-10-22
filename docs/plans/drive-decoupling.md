@@ -39,7 +39,7 @@ still open are marked **open**; the rest are the owner's answers of 2026-10-20 a
 [DESIGN.md](../../DESIGN.md) section 13 when the step that needs them lands. Each step updates DESIGN.md, the
 guides and CHANGELOG.md in the same change, and `tools/check.sh` passes.
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude); reviewed by
 a human, but it may still contain mistakes.
 
@@ -415,7 +415,7 @@ driver is ours, so it can do the same. Throwaway build on this branch, before an
 
 ### S2.2 The bench sketch as a reference test (D11)
 
-- Commit `src/main.cpp` as `tests/reference/motor-test.cpp`, with the project's header (public domain, AI
+- Commit `src/main.cpp` as `tests/reference/motor-test.cpp`, with the project's header (the licence, AI
   disclosure, credits) and a note on what it is and how to flash it alone (PlatformIO, `esp32-s3-devkitc-1`, the
   sketch's build flags).
 - `tests/reference/arduino_shim.h`: just enough of `millis`, `digitalRead/Write`, `ledcWrite`, `Serial` and the

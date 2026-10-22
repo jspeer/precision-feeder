@@ -5,7 +5,7 @@ so the client and the firmware are checked against the same bytes. No Bluetooth 
 
 Run:  python3 -m unittest test_precision_feeder_ble   (from this directory)
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """

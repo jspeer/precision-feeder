@@ -4,7 +4,7 @@
 // Recorded again for 2.1.2: a reload, a declare and the end of calibration now save their move as an intent (to=<slot>)
 // and clear it once settled (Codex review). Every servo command and release, with its time, is unchanged.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

@@ -2,7 +2,7 @@
 //   node --test tests/test_web.mjs
 // parse.js is a plain script (the app joins its sources into one module), so it is run in a fresh context here.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 import { test } from 'node:test';

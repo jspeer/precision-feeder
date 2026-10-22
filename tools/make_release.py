@@ -13,7 +13,7 @@ manifest, the install page's manifests and the release notes (DESIGN.md section 
   <site dir>/release-notes.md         this version's section of CHANGELOG.md, for the GitHub release
 The version must be fw_version in packages/core.yaml, so a tag cannot publish images that report another version.
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """

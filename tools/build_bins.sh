@@ -10,7 +10,7 @@
 # built in that layout in a temporary folder. Every !secret the packages read is removed by the configs; the
 # throwaway secrets below only let the YAML load, and none ends up in an image.
 #
-# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 set -euo pipefail

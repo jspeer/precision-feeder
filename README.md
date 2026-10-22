@@ -190,8 +190,13 @@ packages are thin glue that expose it to Home Assistant and the web app.
 
 ## Licence
 
-Released into the public domain under [The Unlicense](LICENSE). Do anything you like with it. This covers this
-repository's own files only.
+[MIT](LICENSE), copyright (c) 2026 Jeremy Speer: use it, change it and share it, also commercially, as long as the
+copyright and permission notice in [LICENSE](LICENSE) goes with every copy or substantial portion. This covers this
+repository's own files only. (Versions up to 2.1.1 were released into the public domain under The Unlicense.)
+
+The firmware is built with [ESPHome](https://esphome.io), whose C++ runtime is GPLv3 (its Python code is MIT). The
+prebuilt firmware images contain that runtime, so an image as a whole is distributed under the GPLv3's terms; its
+source is this repository and ESPHome's.
 
 The feeder itself, the [Printables model](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2)
 by FlyingGyroscope, is licensed separately under

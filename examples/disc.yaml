@@ -3,7 +3,7 @@
 # bridge's AIN2). The firmware also carries the servo: Drive (web app Configuration) switches between them. Wiring and
 # the disc's settings: packages/mechanism_n20.yaml; calibrate before feeding: docs/CALIBRATION.md.
 #
-# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
 # reviewed by a human, but it may still contain mistakes.
 #

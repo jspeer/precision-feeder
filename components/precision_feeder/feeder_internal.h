@@ -1,7 +1,7 @@
 // Precision Feeder core: constants and helpers shared by feeder_core.cpp, feeder_schedule.cpp and feeder_text.cpp.
 // Internal to the component; not part of FeederCore's interface.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

@@ -4,7 +4,7 @@
 // correction (zenith 90.833 degrees). Accuracy is about a minute at mid latitudes,
 // which is plenty for scheduling a feed.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

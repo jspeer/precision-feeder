@@ -4,7 +4,7 @@ Needs nothing outside the standard library. Byte for byte as docs/PROTOCOL.md (p
 checked against the same golden vectors (tools/test_precision_feeder_ble.py, tests/test_protocol.cpp). Reuse this
 module for other clients, such as a PLC bridge.
 
-Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude);
 reviewed by a human, but it may still contain mistakes.
 """

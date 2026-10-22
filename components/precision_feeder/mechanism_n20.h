@@ -16,7 +16,7 @@
 // the bridge as it answers. Everything else (feed_one, poll, the calibration actions) comes from the main loop; the
 // adapter's lock (N20Lock) keeps the two apart.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

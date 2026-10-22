@@ -1,6 +1,6 @@
 // Precision Feeder core: start-up and persistence, motion (through the mechanism), calibration, feed guard, clock.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "feeder_internal.h"

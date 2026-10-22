@@ -12,10 +12,12 @@ history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](
   > (Anthropic's Claude). A human reviewed and directed the work, but the code
   > and documentation may contain mistakes. Test on your own hardware, and do
   > not rely on it as the only means of feeding animals you care about.
-- **Licence:** public domain, under The Unlicense (owner, 2026-10-14; replaces
-  the MIT proposal). No copyright holder. Credits (FlyingGyroscope as the
-  inspiration, Claude as the author's tool) are in the README; the dedication
-  cannot require them, but they travel with the README.
+- **Licence:** MIT (owner, 2026-10-22; replaces The Unlicense, decided 2026-10-14). Copyright (c) 2026 Jeremy
+  Speer; copies and substantial portions must keep the copyright and permission notice (LICENSE). Versions up to
+  2.1.1 were released into the public domain and stay so for anyone who has them; the Unlicense allows the change.
+  Credits (FlyingGyroscope as the inspiration, Claude as the author's tool) are in the README and the source headers.
+  ESPHome's C++ runtime is GPLv3 (its Python is MIT, per its LICENSE), so the prebuilt images, which link it, are as a
+  whole under the GPLv3's terms; this repository's own files are MIT, which the GPLv3 allows (README, Licence).
 - **Provenance:** this is a clean-room ESPHome implementation. The original
   Arduino firmware ([FlyingGyroscope/PrecisionFeederRev2](https://github.com/FlyingGyroscope/PrecisionFeederRev2),
   AGPL-3.0) was read only to learn the mechanism's geometry and behaviour. No
@@ -1040,7 +1042,7 @@ precision-feeder/
 - Three profiles, editor-entity pattern, 4 events per profile.
 - Solar anchoring (clock, sunrise, sunset, signed offset) is core.
 - No burst/fry mode.
-- Public domain (The Unlicense), AI disclosure in repo (licence decided 2026-10-14; was MIT).
+- MIT licence (owner, 2026-10-22; public domain under The Unlicense from 2026-10-14 to 2.1.1), AI disclosure in repo.
 - Time: NTP is the truth; BLE `SET_TIME` is a fallback gated by
   `ble_time_policy`; HA time a second source (on in the examples since 2026-10-14); time never restored from flash.
 - No external hardware (RTC, sensors). Optional push button supported.

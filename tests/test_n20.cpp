@@ -8,7 +8,7 @@
 // Build and run (tools/check.sh does):
 //   c++ -std=c++17 -I../components/precision_feeder -I. -Ireference test_n20.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include <algorithm>

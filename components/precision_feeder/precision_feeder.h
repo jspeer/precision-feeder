@@ -4,7 +4,7 @@
 // connects it to the device: the clock, the servo's PWM output, flash storage and the log. YAML lambdas and
 // the BLE component call the FeederCore methods through it (id(feeder).request_feed(...) and so on).
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

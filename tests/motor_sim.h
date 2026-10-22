@@ -8,7 +8,7 @@
 // not move it at all), fast decay when braked (both inputs high), slow decay when coasting. Both the sketch and the
 // firmware's controller drive the same model, so comparing them is exact even where the model is not.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #pragma once

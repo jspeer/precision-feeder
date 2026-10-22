@@ -3,7 +3,7 @@
 // app. Applying them is
 // the adapter's job (precision_feeder.cpp), at boot, before Wi-Fi starts.
 //
-// Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+// Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
 #include "feeder_internal.h"
