@@ -2060,6 +2060,16 @@ static void test_review_212() {
     CHECK(f->position() == 0, "nothing fed");
   }
   {
+    current = "2.1.2: something outside the core can ask for a restart";
+    Flash flash;
+    auto f = boot(flash, T0);
+    CHECK(!f->restart_needed(), "nothing waiting");
+    f->note_restart_needed("MQTT settings");
+    CHECK(f->restart_needed(), "Restart Needed on");
+    auto g = boot(flash, T0 + 60);
+    CHECK(!g->restart_needed(), "and off after the restart");
+  }
+  {
     current = "2.1.2: a clock set back across a date does not repeat an event";
     Flash flash;
     auto f = boot(flash, T0);

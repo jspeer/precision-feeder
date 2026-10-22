@@ -9,7 +9,9 @@
 # Home Assistant find the feeder's address through esphome/discover). Nothing about the broker is in the image: MQTT
 # is off until it is set up in the web app (Configuration, MQTT), and the settings are saved on the feeder.
 #
-# - MQTT (on/off), broker, port, username and password take effect at once (the client reconnects).
+# - Turning MQTT off takes effect at once. ESPHome builds its MQTT client once per boot, with the broker and login
+#   it has then: before the client has started (MQTT off since the restart), turning it on and the broker, port and
+#   login take effect at once; after that they are saved and used after a restart (Restart Needed turns on).
 # - The topic prefix applies at the next restart: ESPHome subscribes to the command topics while starting up.
 #   Empty means the device's name.
 # - The settings are web app only (internal, so neither Home Assistant nor MQTT itself can redirect the feeder to
@@ -49,10 +51,14 @@ globals:
   - id: pf_mqtt_ready
     type: bool
     initial_value: "false"
+  # Whether the MQTT client has started this boot: from then on it keeps its broker and login until a restart.
+  - id: pf_mqtt_started
+    type: bool
+    initial_value: "false"
 
 script:
-  # The broker settings into the client; reconnect when MQTT is on. `boot`: only set them, and let the client's own
-  # setup start it.
+  # The broker settings into the client. `boot`: let the client's own setup start it. Later: start it now if it has not
+  # started this boot, else they wait for a restart (ESPHome's client keeps its first broker and login).
   - id: pf_mqtt_apply
     parameters:
       boot: bool
@@ -67,11 +73,18 @@ script:
           const bool on = id(pf_mqtt_enabled).state && !broker.empty();
           if (boot) {
             m->set_enable_on_boot(on);
+            id(pf_mqtt_started) = on;
             return;
           }
-          m->disable();
+          if (!id(pf_mqtt_started)) {
+            if (on) {
+              m->enable();
+              id(pf_mqtt_started) = true;
+            }
+            return;
+          }
           if (on)
-            m->enable();
+            id(feeder).note_restart_needed("MQTT settings");
 
 esphome:
   on_boot:
@@ -165,6 +178,12 @@ text:
     optimistic: true
     restore_value: true
     initial_value: ""
+    on_value:
+      - if:
+          condition:
+            lambda: return id(pf_mqtt_ready);
+          then:
+            - lambda: id(feeder).note_restart_needed("MQTT topic prefix");
 
 number:
   - platform: template

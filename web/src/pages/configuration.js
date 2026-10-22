@@ -108,8 +108,8 @@ PAGES.configuration = {
     this.hw = this.hardwareCard();
 
     // MQTT (packages/mqtt.yaml): the client and Home Assistant discovery, set up here.
-    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; the topic prefix ' +
-                       'is used after a restart.', [
+    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; once it has ' +
+                       'connected, changes (and the topic prefix) are used after a restart.', [
       setting('MQTT', null, E.mqtt),
       setting('Broker', 'Host name or IP address.', E.mqttBroker),
       setting('Port', null, E.mqttPort),

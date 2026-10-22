@@ -683,10 +683,17 @@ class FeederCore : private ServoOutput {
   const Pins &pins_in_use() const { return this->pins_in_use_; }
   /// The pins the next restart will use.
   Pins pins_saved() const;
-  /// A saved pin, name, access-point password or drive waits for a restart.
+  /// A saved pin, name, access-point password or drive waits for a restart, or something else said so.
   bool restart_needed() const {
     return (this->pins_runtime_ && this->pins_saved() != this->pins_in_use_) || this->network_restart_needed() ||
-           this->motor_pins_restart_needed() || this->drive_restart_needed();
+           this->motor_pins_restart_needed() || this->drive_restart_needed() || this->restart_noted_;
+  }
+  /// A setting outside the core waits for a restart (MQTT's broker and login once its client has started: ESPHome
+  /// builds that client once per boot). Restart Needed stays on until the restart.
+  void note_restart_needed(const char *what) {
+    if (!this->restart_noted_)
+      this->log_(LogLevel::kInfo, "%s saved: used after a restart", what);
+    this->restart_noted_ = true;
   }
   /// Choose one pin: a GPIO, PIN_NONE (button and LED only) or PIN_BUILD. INVALID_ARG for a refused pin or one
   /// another role already uses; UNSUPPORTED when the build cannot change pins.
@@ -1026,6 +1033,7 @@ class FeederCore : private ServoOutput {
   bool calibrating_{false};
   bool positioning_{false};    // the phase is a positioning move with a saved intent (cleared when it settles)
   bool storage_fault_{false};  // the last flushed save failed
+  bool restart_noted_{false};  // note_restart_needed() was called this boot
   uint8_t cal_pos_{0};
 
   std::function<void(const FeedRecord &)> feed_listener_;

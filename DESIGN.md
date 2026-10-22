@@ -839,8 +839,12 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   the client, the topic prefix is the saved one or else the device's name in use (ESPHome works its default out
   from the build's name, before a name saved on the feeder is applied: found on the bench, fixed in 2.1.1), the birth, will and shutdown messages follow the topic prefix in use (ESPHome builds them from the
   YAML name, without the MAC suffix), and the client starts if MQTT is on and a broker is set.
-- **At run time:** on/off, the broker, port and login apply at once (the client is disabled and enabled again).
-  The topic prefix applies at the next restart: ESPHome subscribes to the command topics while starting up.
+- **At run time:** turning MQTT off applies at once. ESPHome's ESP32 backend builds its MQTT client once per boot, with
+  the broker and login it has then (`initialize_()`), and a second start does nothing: so before the client has
+  started this boot, turning it on and the broker, port and login apply at once; after that a change is saved and
+  Restart Needed turns on (`FeederCore::note_restart_needed`), and turning it on again after it was off waits for the
+  restart too. (2.1.0 and 2.1.1 said "at once"; found on the bench with 2.2.0, fixed in 2.1.2.) The topic prefix
+  applies at the next restart: ESPHome subscribes to the command topics while starting up.
 - **No restart on loss** (`reboot_timeout: 0s`), as for the API (AGENTS.md).
 - **Trust:** whoever the broker lets publish to `<prefix>/.../command` can do what Home Assistant can: feed (still
   through the feed guard), and change the guard limits, the calibration and the pins. The settings password does

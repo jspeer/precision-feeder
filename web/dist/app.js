@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '80ac00f95662';
+const BUILD_ID = '73260f177d78';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -2515,8 +2515,8 @@ PAGES.configuration = {
     this.hw = this.hardwareCard();
 
     // MQTT (packages/mqtt.yaml): the client and Home Assistant discovery, set up here.
-    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; the topic prefix ' +
-                       'is used after a restart.', [
+    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; once it has ' +
+                       'connected, changes (and the topic prefix) are used after a restart.', [
       setting('MQTT', null, E.mqtt),
       setting('Broker', 'Host name or IP address.', E.mqttBroker),
       setting('Port', null, E.mqttPort),

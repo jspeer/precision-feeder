@@ -32,6 +32,9 @@ everyday use, except that a reload or a declared position now counts as moving f
   fed day now only moves forward and is saved before it feeds.
 - **Flash write failures** were ignored. A feed whose intent cannot be saved now does not move and answers
   `STORAGE_FAILED` (BLE result 17, new); Faults says "saving to flash failed".
+- **MQTT settings:** once MQTT has connected after a restart, changing the broker, port or login, or turning it on
+  again after turning it off, did nothing (ESPHome builds its MQTT client once per boot), while the web app said they
+  applied at once. They are now saved and Restart Needed turns on; before MQTT has started, they still apply at once.
 - **BLE:** an event could not have more than 6 portions, even on a disc (now up to the portions per load); a failed
   AUTH on an authenticated connection left Status and the other records readable (now cleared, as on a disconnect).
 - **Checks:** `tools/check.sh --compile` and `tools/build_bins.sh` reported success when ESPHome failed to build.
