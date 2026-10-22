@@ -107,6 +107,21 @@ PAGES.configuration = {
 
     this.hw = this.hardwareCard();
 
+    // MQTT (packages/mqtt.yaml): the client and Home Assistant discovery, set up here.
+    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; the topic prefix ' +
+                       'is used after a restart.', [
+      setting('MQTT', null, E.mqtt),
+      setting('Broker', 'Host name or IP address.', E.mqttBroker),
+      setting('Port', null, E.mqttPort),
+      setting('Username', 'Empty: none.', E.mqttUsername),
+      setting('Password', 'Not shown once saved. Set to change it.', E.mqttPassword),
+      setting('Topic prefix', 'Empty: the device name.', E.mqttPrefix),
+    ]);
+    if (mqtt) {
+      this.timeRows.push(boundRow(mqtt, 'Connected', () => store.bool(E.mqttConnected) ? 'Yes' : 'No'),
+                         boundRow(mqtt, 'Prefix in use', () => store.text(E.mqttPrefixInUse)));
+    }
+
     this.pw = card('Settings password');
     this.pw.hidden = true;
     this.keys = card('Keys');
@@ -127,7 +142,7 @@ PAGES.configuration = {
     auth.loadNetwork();
 
     append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
-           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net));
+           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net), mqtt);
     this.update();
   },
 

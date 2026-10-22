@@ -144,4 +144,14 @@ const E = {
   bleSession: 'text_sensor/BLE Session',
   bleGuard: 'switch/BLE Can Change Guard Limits',
   bleCalibration: 'switch/BLE Can Change Calibration',
+
+  // packages/mqtt.yaml (experiment/mqtt-trial)
+  mqtt: 'switch/MQTT',
+  mqttBroker: 'text/MQTT Broker',
+  mqttPort: 'number/MQTT Port',
+  mqttUsername: 'text/MQTT Username',
+  mqttPassword: 'text/MQTT Password',
+  mqttPrefix: 'text/MQTT Topic Prefix',
+  mqttPrefixInUse: 'text_sensor/MQTT Topic Prefix In Use',
+  mqttConnected: 'binary_sensor/MQTT Connected',
 };

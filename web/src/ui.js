@@ -293,7 +293,8 @@ function entityControl(id) {
     const input = h('input', isNum
       ? { class: 'input input-num', type: 'number', inputmode: 'decimal', min: e.min_value, max: e.max_value,
           step: e.step, 'aria-label': label }
-      : { class: 'input', type: 'text', maxlength: e.max_length, 'aria-label': label });
+      // A password text (mode 1) is never sent back: the box starts empty.
+      : { class: 'input', type: e.mode === 1 ? 'password' : 'text', maxlength: e.max_length, 'aria-label': label });
     const err = h('span', { class: 'field-error', 'aria-live': 'polite' });
     const save = () => {
       setText(err, '');

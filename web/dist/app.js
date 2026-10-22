@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '2f8ecdcc9ce5';
+const BUILD_ID = 'a9b07891ea9d';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -152,6 +152,16 @@ const E = {
   bleSession: 'text_sensor/BLE Session',
   bleGuard: 'switch/BLE Can Change Guard Limits',
   bleCalibration: 'switch/BLE Can Change Calibration',
+
+  // packages/mqtt.yaml (experiment/mqtt-trial)
+  mqtt: 'switch/MQTT',
+  mqttBroker: 'text/MQTT Broker',
+  mqttPort: 'number/MQTT Port',
+  mqttUsername: 'text/MQTT Username',
+  mqttPassword: 'text/MQTT Password',
+  mqttPrefix: 'text/MQTT Topic Prefix',
+  mqttPrefixInUse: 'text_sensor/MQTT Topic Prefix In Use',
+  mqttConnected: 'binary_sensor/MQTT Connected',
 };
 
 // ---- parse.js ----
@@ -1326,7 +1336,8 @@ function entityControl(id) {
     const input = h('input', isNum
       ? { class: 'input input-num', type: 'number', inputmode: 'decimal', min: e.min_value, max: e.max_value,
           step: e.step, 'aria-label': label }
-      : { class: 'input', type: 'text', maxlength: e.max_length, 'aria-label': label });
+      // A password text (mode 1) is never sent back: the box starts empty.
+      : { class: 'input', type: e.mode === 1 ? 'password' : 'text', maxlength: e.max_length, 'aria-label': label });
     const err = h('span', { class: 'field-error', 'aria-live': 'polite' });
     const save = () => {
       setText(err, '');
@@ -2503,6 +2514,21 @@ PAGES.configuration = {
 
     this.hw = this.hardwareCard();
 
+    // MQTT (packages/mqtt.yaml): the client and Home Assistant discovery, set up here.
+    const mqtt = group('MQTT', 'Publishes what Home Assistant sees, with discovery. Saved at once; the topic prefix ' +
+                       'is used after a restart.', [
+      setting('MQTT', null, E.mqtt),
+      setting('Broker', 'Host name or IP address.', E.mqttBroker),
+      setting('Port', null, E.mqttPort),
+      setting('Username', 'Empty: none.', E.mqttUsername),
+      setting('Password', 'Not shown once saved. Set to change it.', E.mqttPassword),
+      setting('Topic prefix', 'Empty: the device name.', E.mqttPrefix),
+    ]);
+    if (mqtt) {
+      this.timeRows.push(boundRow(mqtt, 'Connected', () => store.bool(E.mqttConnected) ? 'Yes' : 'No'),
+                         boundRow(mqtt, 'Prefix in use', () => store.text(E.mqttPrefixInUse)));
+    }
+
     this.pw = card('Settings password');
     this.pw.hidden = true;
     this.keys = card('Keys');
@@ -2523,7 +2549,7 @@ PAGES.configuration = {
     auth.loadNetwork();
 
     append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
-           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net));
+           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net), mqtt);
     this.update();
   },
 

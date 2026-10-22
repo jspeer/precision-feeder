@@ -1,0 +1,198 @@
+# Precision Feeder: MQTT, set up on the device (EXPERIMENT, branch experiment/mqtt-trial).
+#
+# Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# ESPHome's MQTT client beside the native API. Every entity Home Assistant sees over the API is also published over
+# MQTT, with Home Assistant discovery (`discovery`) and ESPHome's device discovery (`discover_ip`: the dashboard and
+# Home Assistant find the feeder's address through esphome/discover). Nothing about the broker is in the image: MQTT
+# is off until it is set up in the web app (Configuration, MQTT), and the settings are saved on the feeder.
+#
+# - MQTT (on/off), broker, port, username and password take effect at once (the client reconnects).
+# - The topic prefix applies at the next restart: ESPHome subscribes to the command topics while starting up.
+#   Empty means the device's name.
+# - The settings are web app only (internal, so neither Home Assistant nor MQTT itself can redirect the feeder to
+#   another broker) and need the settings password when one is set. The password is never sent back: the web app
+#   shows only that one is saved.
+# - Losing the broker never restarts the feeder (reboot_timeout 0s, AGENTS.md).
+#
+# Over MQTT, anyone the broker lets publish to <prefix>/.../command can change what Home Assistant can change
+# (feeds, still through the feed guard; the guard limits; calibration; pins). Give the broker accounts and ACLs.
+
+mqtt:
+  id: pf_mqtt
+  broker: ""                   # set on the device (MQTT Broker)
+  enable_on_boot: false        # turned on at boot when MQTT is on and a broker is set (below)
+  reboot_timeout: 0s
+  discovery: true
+  discover_ip: true
+  log_topic: null              # the live log stays on the web app's Diagnostics page
+
+web_server:
+  include_internal: true       # the MQTT settings below are internal: the web app still needs them
+
+precision_feeder:
+  protected_entities:
+    - switch/MQTT
+    - text/MQTT Broker
+    - number/MQTT Port
+    - text/MQTT Username
+    - text/MQTT Password
+    - text/MQTT Topic Prefix
+
+globals:
+  # False until the settings are read at boot: restoring the values must not reconnect anything.
+  - id: pf_mqtt_ready
+    type: bool
+    initial_value: "false"
+
+script:
+  # The broker settings into the client; reconnect when MQTT is on. `boot`: only set them, and let the client's own
+  # setup start it.
+  - id: pf_mqtt_apply
+    parameters:
+      boot: bool
+    then:
+      - lambda: |-
+          auto *m = id(pf_mqtt);
+          const std::string broker = id(pf_mqtt_broker).state;
+          m->set_broker_address(broker);
+          m->set_broker_port((uint16_t) id(pf_mqtt_port).state);
+          m->set_username(id(pf_mqtt_username).state);
+          m->set_password(id(pf_mqtt_password).state);
+          const bool on = id(pf_mqtt_enabled).state && !broker.empty();
+          if (boot) {
+            m->set_enable_on_boot(on);
+            return;
+          }
+          m->disable();
+          if (on)
+            m->enable();
+
+esphome:
+  on_boot:
+    # After the saved values are restored (HARDWARE), before the MQTT client and its entities start (AFTER_WIFI).
+    - priority: 600
+      then:
+        - lambda: |-
+            auto *m = id(pf_mqtt);
+            const std::string prefix = id(pf_mqtt_prefix).state;
+            if (!prefix.empty())
+              m->set_topic_prefix(prefix, "");
+            // ESPHome builds these from the YAML name, without the MAC suffix: follow the prefix in use instead.
+            const std::string status = m->get_topic_prefix() + "/status";
+            m->set_birth_message(mqtt::MQTTMessage{status, "online", 0, true});
+            m->set_last_will(mqtt::MQTTMessage{status, "offline", 0, true});
+            m->set_shutdown_message(mqtt::MQTTMessage{status, "offline", 0, true});
+            id(pf_mqtt_ready) = true;
+        - script.execute:
+            id: pf_mqtt_apply
+            boot: true
+
+switch:
+  - platform: template
+    id: pf_mqtt_enabled
+    name: "MQTT"
+    internal: true
+    icon: mdi:access-point-network
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - if:
+          condition:
+            lambda: return id(pf_mqtt_ready);
+          then:
+            - script.execute: { id: pf_mqtt_apply, boot: false }
+    on_turn_off:
+      - lambda: id(pf_mqtt).disable();
+
+text:
+  - platform: template
+    id: pf_mqtt_broker
+    name: "MQTT Broker"
+    internal: true
+    icon: mdi:server-network
+    entity_category: config
+    mode: text
+    max_length: 63
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value: &pf_mqtt_changed
+      - if:
+          condition:
+            lambda: return id(pf_mqtt_ready);
+          then:
+            - script.execute: { id: pf_mqtt_apply, boot: false }
+  - platform: template
+    id: pf_mqtt_username
+    name: "MQTT Username"
+    internal: true
+    icon: mdi:account
+    entity_category: config
+    mode: text
+    max_length: 63
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value: *pf_mqtt_changed
+  - platform: template
+    id: pf_mqtt_password
+    name: "MQTT Password"
+    internal: true
+    icon: mdi:form-textbox-password
+    entity_category: config
+    mode: password
+    max_length: 63
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value: *pf_mqtt_changed
+  - platform: template
+    id: pf_mqtt_prefix
+    name: "MQTT Topic Prefix"
+    internal: true
+    icon: mdi:folder-network
+    entity_category: config
+    mode: text
+    max_length: 63
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+
+number:
+  - platform: template
+    id: pf_mqtt_port
+    name: "MQTT Port"
+    internal: true
+    icon: mdi:numeric
+    entity_category: config
+    mode: box
+    min_value: 1
+    max_value: 65535
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 1883
+    on_value: *pf_mqtt_changed
+
+binary_sensor:
+  - platform: template
+    id: pf_mqtt_connected
+    name: "MQTT Connected"
+    internal: true
+    icon: mdi:lan-connect
+    entity_category: diagnostic
+    lambda: return id(pf_mqtt).is_connected();
+
+text_sensor:
+  # The topic prefix in use (the saved one applies after a restart).
+  - platform: template
+    id: pf_mqtt_prefix_in_use
+    name: "MQTT Topic Prefix In Use"
+    internal: true
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: return id(pf_mqtt).get_topic_prefix();
