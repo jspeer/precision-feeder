@@ -48,6 +48,7 @@ bool N20Motion::begin_(int32_t target, int32_t ticks, uint32_t now) {
 bool N20Motion::start(int32_t target, int32_t ticks, uint32_t now) {
   if (this->wiggle_)
     return false;
+  this->driven_since_edge_ = 0;
   return this->begin_(target, ticks, now);
 }
 
@@ -55,6 +56,7 @@ bool N20Motion::start_wiggle(int32_t amplitude, uint8_t cycles, int32_t ticks, u
   if (this->phase_ != Phase::IDLE || this->wiggle_ || amplitude <= 0 || cycles == 0)
     return false;
   this->wiggle_ = true;
+  this->driven_since_edge_ = 0;  // and not again between its legs: a lost encoder gets one budget for the wiggle
   this->center_ = ticks;
   this->amplitude_ = amplitude;
   this->cycles_ = cycles;
@@ -130,9 +132,19 @@ void N20Motion::finish_(uint32_t now, int32_t ticks) {
   this->status_ = Status::DONE;
 }
 
+uint32_t N20Motion::feedback_window_ms_() const {
+  if (this->feedback_ticks_ <= 0 || this->full_speed_ <= 0)
+    return this->t_.drive_stall_ms;
+  const uint32_t ms = static_cast<uint32_t>(std::lround(this->feedback_ticks_ / this->full_speed_));
+  return std::min<uint32_t>(std::max<uint32_t>(ms, FEEDBACK_MIN_MS), this->t_.drive_stall_ms);
+}
+
 Bridge N20Motion::step(uint32_t now, int32_t ticks) {
   const bool driving = this->bridge_.mode == BridgeMode::FORWARD || this->bridge_.mode == BridgeMode::REVERSE;
   const bool late = this->stepped_ && driving && now - this->last_step_ > this->t_.watchdog_ms;
+  // Powered time since the last encoder edge, in every closed-loop phase (an open-loop push is bounded by its time).
+  if (this->stepped_ && driving && this->phase_ != Phase::OPEN_DRIVE)
+    this->driven_since_edge_ += now - this->last_step_;
   this->last_step_ = now;
   this->stepped_ = true;
   if (late) {
@@ -165,6 +177,7 @@ Bridge N20Motion::step(uint32_t now, int32_t ticks) {
       if (ticks != this->last_ticks_) {
         this->last_ticks_ = ticks;
         this->last_edge_ = now;
+        this->driven_since_edge_ = 0;
       }
       const int64_t remaining = static_cast<int64_t>(this->target_ - ticks) * this->dir_;
       const uint32_t stall = this->phase_ == Phase::MOVING ? this->t_.drive_stall_ms : this->t_.stall_ms;
@@ -174,7 +187,9 @@ Bridge N20Motion::step(uint32_t now, int32_t ticks) {
         this->brake_(now, true, "");
       } else if (now - this->began_ >= this->timeout_ms_) {
         this->brake_(now, false, "the move took too long");
-      } else if (now - this->last_edge_ >= stall) {
+      } else if (now - this->last_edge_ >= stall || this->driven_since_edge_ >= this->feedback_window_ms_()) {
+        // No edge for the stall window, or driven for longer than a share of a slot takes at full speed without one
+        // (creep pulses grow while nothing is counted: an unplugged encoder must not let them carry the disc on).
         this->brake_(now, false, "no encoder motion (stalled, or the encoder is not counting)");
       } else if (this->phase_ == Phase::MOVING) {
         if (remaining <= this->approach_) {
@@ -295,6 +310,7 @@ void N20Mechanism::configure_motion_() {
   this->motion_.set_approach_ticks(this->value_[N20_BRAKING_DISTANCE]);
   this->motion_.set_travel_limit(turn / this->slots_ / 2);  // half a slot
   this->motion_.set_full_speed(turn * RATED_RPM / 60000.0);
+  this->motion_.set_feedback_ticks(turn * 3 / (4 * this->slots_));  // three quarters of a slot
 }
 
 int32_t N20Mechanism::degrees_to_ticks_(int32_t tenths) const {

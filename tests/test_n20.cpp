@@ -453,6 +453,60 @@ static void test_mechanism_faults() {
     CHECK(d.sim.x - at < 8344 / 15 / 2, "it ran less than half a slot uncounted (the short stall window at full power)");
   }
   {
+    // Codex review (2.1.1): creep allowed 500 ms without an edge, and its pulses grow while nothing is counted.
+    current = "disc fault: encoder unplugged while creeping (60 slots: every move creeps)";
+    Disc d(60);
+    const int32_t pitch = 8344 / 60;
+    CHECK(d.f->request_feed(1, Source::ESPHOME) == Result::OK, "feed");
+    d.run(5);
+    d.sim.count_frozen = d.sim.count();
+    const double at = d.sim.x;
+    d.sim.unplugged = true;
+    d.settle();
+    CHECK(d.f->position_unknown(), "a fault: unknown");
+    CHECK(d.f->faults_text().find("no encoder motion") != std::string::npos, "says why");
+    CHECK(d.sim.x - at < pitch, "it moved less than one slot pitch uncounted");
+  }
+  {
+    current = "disc: a 60-slot disc feeds normally within the bound";
+    Disc d(60);
+    d.f->set_min_gap_s(10);
+    d.f->set_max_portions_cmd(5);
+    d.f->set_daily_cap(5);
+    CHECK(d.f->request_feed(5, Source::ESPHOME) == Result::OK, "five portions");
+    d.settle(60000);
+    CHECK(!d.f->position_unknown() && d.f->position() == 5, "no false fault");
+    CHECK(std::abs(d.ticks() - grid(5, 0, 8344, 60)) <= 4, "on the slot");
+  }
+  {
+    current = "disc fault: encoder unplugged while creeping onto the slot (15 slots)";
+    Disc d;
+    CHECK(d.f->request_feed(1, Source::ESPHOME) == Result::OK, "feed");
+    while (d.sim.count() < grid(1) - 60)
+      d.run(1);
+    d.sim.count_frozen = d.sim.count();
+    const double at = d.sim.x;
+    d.sim.unplugged = true;
+    d.settle();
+    CHECK(d.f->position_unknown(), "a fault: unknown");
+    CHECK(d.sim.x - at < 8344 / 15 / 2, "less than half a slot uncounted");
+  }
+  {
+    current = "disc fault: encoder unplugged during the wiggle";
+    Disc d;
+    CHECK(d.f->request_feed(1, Source::ESPHOME) == Result::OK, "feed");
+    // Into the wiggle: the first drive back after reaching the slot.
+    while (!(d.sim.enable && d.sim.in2 > 0 && d.sim.in1 == 0) && d.f->tray_state() == TrayState::MOVING)
+      d.run(1);
+    d.sim.count_frozen = d.sim.count();
+    const double at = d.sim.x;
+    d.sim.unplugged = true;
+    d.settle();
+    CHECK(d.f->position_unknown(), "a fault: unknown");
+    CHECK(std::fabs(d.sim.x - at) < 8344 / 15 / 2, "less than half a slot uncounted, either way");
+    CHECK(d.sim.x > grid(0) + 8344 / 15 / 2, "never back to the slot it started from");
+  }
+  {
     current = "disc fault: the control loop stops";
     Disc d;
     CHECK(d.f->request_feed(1, Source::ESPHOME) == Result::OK, "feed");

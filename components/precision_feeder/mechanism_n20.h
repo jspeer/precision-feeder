@@ -77,6 +77,11 @@ class N20Motion {
   /// Encoder ticks per millisecond at full power: a move's time limit is timeout_base_ms plus three times its expected
   /// time at this speed (0: timeout_base_ms alone).
   void set_full_speed(double ticks_per_ms) { this->full_speed_ = ticks_per_ms; }
+  /// The most the disc may turn with the bridge driving and no encoder edge, in ticks (a share of a slot): the time it
+  /// takes at full speed, between FEEDBACK_MIN_MS and drive_stall_ms, bounds the powered time without feedback in
+  /// every closed-loop phase, creep and wiggle included (0: drive_stall_ms).
+  void set_feedback_ticks(int32_t ticks) { this->feedback_ticks_ = ticks; }
+  static constexpr uint32_t FEEDBACK_MIN_MS = 25;
 
   /// Move to `target`. False if busy, or already there.
   bool start(int32_t target, int32_t ticks, uint32_t now);
@@ -104,6 +109,7 @@ class N20Motion {
   void finish_(uint32_t now, int32_t ticks);
   bool advance_wiggle_(uint32_t now, int32_t ticks);
   bool fast_wiggle_() const { return this->wiggle_ && this->leg_ < 2 * this->cycles_; }
+  uint32_t feedback_window_ms_() const;
   Bridge drive_() const {
     return Bridge{this->dir_ > 0 ? BridgeMode::FORWARD : BridgeMode::REVERSE, this->duty_};
   }
@@ -113,6 +119,8 @@ class N20Motion {
   int32_t approach_{160};
   int32_t travel_limit_{0};
   double full_speed_{0};
+  int32_t feedback_ticks_{0};
+  uint32_t driven_since_edge_{0};  // ms the bridge drove since the last encoder edge (this move or wiggle)
 
   Status status_{Status::IDLE};
   const char *fault_{""};
