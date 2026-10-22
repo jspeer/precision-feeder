@@ -135,7 +135,37 @@ void FeederCore::clamp_loaded_() {
   }
 }
 
-void FeederCore::save_state_(bool flush) { this->hal_save_state(this->state_, flush); }
+bool FeederCore::save_state_(bool flush) {
+  const bool ok = this->hal_save_state(this->state_, flush);
+  if (flush) {
+    if (!ok && !this->storage_fault_)
+      this->log_(LogLevel::kError, "Saving the tray state to flash failed");
+    this->storage_fault_ = !ok;
+  }
+  return ok;
+}
+
+namespace legacy {
+State migrate_state_v2(const StateV2 &v2) {
+  State s;
+  std::memset(&s, 0, sizeof(s));
+  s.version = STATE_VERSION;
+  s.hold_until = v2.hold_until;
+  s.reload_until = v2.reload_until;
+  std::memcpy(s.fired, v2.fired, sizeof(s.fired));
+  s.last_feed_epoch = v2.last_feed_epoch;
+  for (uint8_t i = 0; i < HISTORY_SIZE_V2; i++) {
+    s.hist_ts[i] = v2.hist_ts[i];
+    s.hist_n[i] = v2.hist_n[i];
+    s.hist_src[i] = v2.hist_src[i];
+  }
+  s.position = v2.position;
+  s.moving_to = v2.moving_to;
+  s.unknown = v2.unknown;
+  s.last_src = v2.last_src;
+  return s;
+}
+}  // namespace legacy
 
 void FeederCore::cfg_changed() {
   this->project_dirty_ = true;
@@ -226,6 +256,9 @@ void FeederCore::save_calibration() {
 Result FeederCore::calibration_action(uint8_t action, int32_t arg) {
   if (!this->calibrating_)
     return Result::NOT_CALIBRATING;
+  // The mechanism may move: a power cut from here on must not leave a trusted position behind (Codex review, 2.1.1).
+  if (!this->invalidate_position_("the tray may move in calibration"))
+    return Result::STORAGE_FAILED;
   return this->mech_->calibration_action(action, arg, this->hal_millis()) ? Result::OK : Result::INVALID_ARG;
 }
 
@@ -294,6 +327,9 @@ Result FeederCore::set_tuning(uint8_t index, int32_t value) {
   }
   if (this->tuning_.values[index] == value)
     return Result::OK;
+  // A value that moves where the slots are: which slots hold food is no longer known, also after a power cut.
+  if (this->mech_->tuning_needs_calibration(index) && !this->invalidate_position_("the slots moved"))
+    return Result::STORAGE_FAILED;
   // From the first change on, the record is this mechanism's (one saved for another mechanism is replaced only now).
   std::strncpy(this->tuning_.mechanism, this->mech_->name(), MECHANISM_NAME_SIZE - 1);
   this->tuning_.layout = this->mech_->tuning_layout();
@@ -513,7 +549,42 @@ void FeederCore::core_loop() {
 // ---------------------------------------------------------------------------------------------
 
 bool FeederCore::moving_() const {
-  return this->phase_ == Phase::MOVE || this->phase_ == Phase::GAP || this->phase_ == Phase::POSITION;
+  // A positioning move counts until it has settled: the servo reports it done at once, while it is still turning.
+  return this->phase_ == Phase::MOVE || this->phase_ == Phase::GAP || this->phase_ == Phase::POSITION ||
+         (this->phase_ == Phase::SETTLE && this->positioning_);
+}
+
+bool FeederCore::busy() {
+  return this->moving_() || this->mech_->moving();
+}
+
+bool FeederCore::begin_positioning_(uint8_t target) {
+  this->state_.position = target;
+  this->state_.moving_to = target;
+  if (!this->save_state_(true)) {
+    this->log_(LogLevel::kError, "The move's intent could not be saved: not moving, tray position is now UNKNOWN");
+    this->state_.unknown = 1;
+    this->state_.moving_to = NO_MOVE;
+    this->positioning_ = false;
+    return false;
+  }
+  this->positioning_ = true;
+  return true;
+}
+
+bool FeederCore::invalidate_position_(const char *why) {
+  if (this->state_.unknown)
+    return true;
+  this->state_.unknown = 1;
+  this->state_.moving_to = NO_MOVE;
+  if (!this->save_state_(true)) {
+    this->log_(LogLevel::kError, "Could not save the tray position as unknown: refused");
+    this->state_.unknown = 0;
+    return false;
+  }
+  this->project_dirty_ = true;
+  this->log_(LogLevel::kWarn, "Tray position is now UNKNOWN (%s): reload the tray before feeding", why);
+  return true;
 }
 
 void FeederCore::positioned_() {
@@ -526,14 +597,20 @@ void FeederCore::positioned_() {
   this->phase_start_ = now;
 }
 
-void FeederCore::start_next_portion_() {
+bool FeederCore::start_next_portion_() {
   const uint8_t target = this->state_.position + 1;
-  // Persist the intent before moving, so a power loss mid-step is detected at the next boot.
+  // Persist the intent before moving, so a power loss mid-step is detected at the next boot. If that save failed, a
+  // power loss mid-step would not be detected: do not move.
   this->state_.moving_to = target;
-  this->save_state_(true);
+  if (!this->save_state_(true)) {
+    this->state_.moving_to = NO_MOVE;
+    this->log_(LogLevel::kError, "The feed's intent could not be saved: not moving");
+    return false;
+  }
   this->mech_->feed_one(this->state_.position, this->hal_millis());
   this->phase_ = Phase::MOVE;
   this->phase_start_ = this->hal_millis();
+  return true;
 }
 
 void FeederCore::commit_step_() {
@@ -577,11 +654,22 @@ void FeederCore::run_motion_() {
     case Phase::GAP:
       if (now - this->phase_start_ < static_cast<uint32_t>(this->cfg.portion_gap_s) * 1000UL)
         return;
-      this->start_next_portion_();
+      if (!this->start_next_portion_()) {
+        this->uncount_portions_(this->queue_);  // the rest never dropped
+        this->queue_ = 0;
+        this->phase_ = Phase::SETTLE;
+        this->phase_start_ = now;
+      }
       return;
     case Phase::SETTLE:
       if (now - this->phase_start_ < this->mech_->settle_ms())
         return;
+      if (this->positioning_) {
+        // The positioning move is over: the intent goes.
+        this->positioning_ = false;
+        this->state_.moving_to = NO_MOVE;
+        this->save_state_(true);
+      }
       if (!this->calibrating_)
         this->mech_->release();
       this->phase_ = Phase::IDLE;
@@ -607,12 +695,25 @@ void FeederCore::abort_motion_() {
     case Phase::POSITION:
       // Interrupted while moving for a reload or a restore: the tray may be anywhere.
       this->log_(LogLevel::kWarn, "Motion aborted while positioning: tray position is now UNKNOWN");
+      this->positioning_ = false;
       this->state_.unknown = 1;
       this->state_.moving_to = NO_MOVE;
       this->save_state_(true);
       this->queue_ = 0;
       this->phase_ = Phase::IDLE;
       this->mech_->stop();
+      break;
+    case Phase::SETTLE:
+      if (this->positioning_) {
+        // A positioning move that had not settled: the tray may be anywhere.
+        this->log_(LogLevel::kWarn, "Motion aborted while positioning: tray position is now UNKNOWN");
+        this->positioning_ = false;
+        this->state_.unknown = 1;
+        this->state_.moving_to = NO_MOVE;
+        this->save_state_(true);
+        this->phase_ = Phase::IDLE;
+        this->mech_->stop();
+      }
       break;
     case Phase::GAP:
       // Between portions of one feed: the remaining ones never dropped.
@@ -643,6 +744,11 @@ void FeederCore::uncount_portions_(uint8_t portions) {
 void FeederCore::stop() {
   this->log_(LogLevel::kInfo, "Stop requested");
   this->abort_motion_();
+  if (this->mech_->moving()) {
+    // A calibration move runs in the mechanism, outside the core's phases (Codex review, 2.1.1): stop it too. The
+    // position was saved as unknown before it could move.
+    this->mech_->stop();
+  }
 }
 
 bool FeederCore::reload_pause_active() {
@@ -660,9 +766,6 @@ void FeederCore::tray_reload() {
     return;
   }
   this->abort_motion_();
-  this->state_.position = 0;
-  this->state_.moving_to = NO_MOVE;
-  this->state_.unknown = 0;
   const uint32_t pause_ms = static_cast<uint32_t>(this->cfg.reload_pause_min) * 60000UL;
   this->reload_pause_ms_active_ = pause_ms > 0;
   this->reload_pause_until_ms_ = this->hal_millis() + pause_ms;
@@ -670,7 +773,10 @@ void FeederCore::tray_reload() {
       (pause_ms > 0 && this->time_valid())
           ? static_cast<uint32_t>(this->hal_epoch() + static_cast<int64_t>(this->cfg.reload_pause_min) * 60)
           : 0;
-  this->save_state_(true);
+  // Back to the closed slot, saved as an intent until it has settled (a power cut on the way leaves it unknown).
+  this->state_.unknown = 0;
+  if (!this->begin_positioning_(0))
+    return;
   this->mech_->reload(this->hal_millis());
   this->positioned_();
   this->project_dirty_ = true;
@@ -692,10 +798,9 @@ void FeederCore::declare_position(uint8_t position) {
   if (position > this->capacity() || this->calibrating_)
     return;
   this->abort_motion_();
-  this->state_.position = position;
-  this->state_.moving_to = NO_MOVE;
   this->state_.unknown = 0;
-  this->save_state_(true);
+  if (!this->begin_positioning_(position))
+    return;
   this->mech_->restore(position, this->hal_millis());
   this->positioned_();
   this->project_dirty_ = true;
@@ -729,7 +834,7 @@ void FeederCore::set_calibration_mode(bool on) {
       this->save_state_(true);
     }
     this->save_calibration();
-    if (!this->state_.unknown) {
+    if (!this->state_.unknown && this->begin_positioning_(this->state_.position)) {
       this->mech_->restore(this->state_.position, this->hal_millis());
       this->positioned_();
     } else {
@@ -978,7 +1083,12 @@ Result FeederCore::request_feed(uint8_t portions, Source source, uint8_t *accept
   this->have_last_feed_ms_ = true;
   this->queue_ = portions;
   this->project_dirty_ = true;
-  this->start_next_portion_();  // persists the intent and the history before the tray moves
+  if (!this->start_next_portion_()) {  // persists the intent and the history before the tray moves
+    this->uncount_portions_(portions);  // nothing dropped
+    this->queue_ = 0;
+    this->report_(source, requested, Result::STORAGE_FAILED);
+    return Result::STORAGE_FAILED;
+  }
   this->report_(source, portions, Result::OK);
   return Result::OK;
 }

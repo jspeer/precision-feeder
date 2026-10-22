@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **release 2.0.2, tested on a bench build** (section 15). This is the current design;
+Status: **firmware 2.1.2 (release 2.1.1), tested on bench builds** (section 15). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
@@ -61,12 +61,12 @@ Non-goals (v1)
 | 24 h pause (limited to a year or so) | Hold: any duration in hours, or until cancelled; no maximum |
 | Awake hours window (morning/night) | Covered by event times and solar anchors; no separate window |
 | Late-feed timeout | Not carried over: late feeds are skipped by design (section 5.5) |
-| Tray calibration (per-slot offsets) | Calibration mode, 7 signed offsets |
+| Tray calibration (per-slot offsets) | Calibration mode, 7 signed offsets (the servo tray; the disc has its own, section 3.3) |
 | Feed time log (last 6) | Last-feeds text sensor and BLE event log |
 | Web UI and dashboard | Built-in web app (`web_server` package, firmware 1.1.0): served from the firmware, no internet needed; plus HA |
 | WiFi setup portal | ESPHome WiFi, fallback AP and `captive_portal` |
 | Hostname, mDNS, timezone, NTP server | ESPHome native, plus YAML options |
-| Password and lockout | ESPHome `web_server` auth, API encryption, OTA password |
+| Password and lockout | The settings password (section 10.1: protected changes signed by the browser, a wait after failures), the API and BLE keys, encrypted OTA; ESPHome's `web_server` auth optional on top |
 | Periodic restarts (a workaround) | Not carried over: ESP-IDF memory management does not need them |
 | Upcoming-events list | Not carried over; a single "Next Feed" value instead |
 | WiFi connection wizard | Standard ESPHome `wifi: ap:` fallback and `captive_portal` |
@@ -249,6 +249,21 @@ States: `LOADED(n)` (position n, 0 to 5), `EMPTY` (position 6), `UNKNOWN`
   unfinished intent, the state is `UNKNOWN`: feeding is blocked until the user
   declares the position or reloads. (The reference saved after the move, so a
   power loss mid-move desynchronised it.)
+- **Positioning moves too (2.1.2).** A reload, a declared position and the move back at the end of calibration save
+  their target as the intent (`moving_to = target`) before the motor is told, and clear it only once the tray has
+  settled. Until then the tray counts as `MOVING`: the guard answers `BUSY`, and a restart (Restart, a firmware
+  upload) waits. A power cut or Stop on the way leaves it `UNKNOWN`. (Before 2.1.2 these saved the new position at
+  once and counted as stationary while the servo was still turning: Codex review.) The move to the saved position at
+  boot has no intent: the tray is normally already there.
+- **A save that must come first and fails stops the move (2.1.2).** The flash saves report whether they reached
+  flash (`hal_save_state`, `hal_save_settings`: written and synced). If a feed's intent cannot be saved, nothing moves
+  and the feed answers `STORAGE_FAILED` (17), uncounted; a positioning move that cannot save its intent leaves the
+  position `UNKNOWN` without moving. Faults shows "saving to flash failed" until a save works again.
+- **Calibration that can move the tray (2.1.2).** Before any calibration action of a mechanism that moves the tray
+  (the disc's), and before a change to a value that moves the slots, the position is saved as `UNKNOWN`, so a power
+  cut in calibration never leaves a trusted position behind (before, it was marked only when calibration was turned
+  off). The servo's calibration only points the servo at absolute angles and keeps the position. Stop stops a
+  calibration move too, and a restart waits for one (`FeederCore::busy()`, `Mechanism::moving()`).
 - On boot, command the servo to the saved position, never to 0.
 - Detach the PWM output after a short hold time to avoid jitter and heat.
   Needs a bench check that the tray does not drift when detached.
@@ -300,7 +315,10 @@ simulated motor and checks they drive the bridge identically, change for change 
 
 **Faults** (each stops the motor; the core then marks the position unknown, the portion counting as fed): the encoder
 counting more than 32 ticks the wrong way; no encoder edge for 500 ms (50 ms while driving at full power, so an encoder
-that stops counting cannot let the motor run on: at most about 240 ticks, under half a slot); a move taking longer
+that stops counting cannot let the motor run on: at most about 240 ticks, under half a slot); the bridge driving, in any
+closed-loop phase (creep and the wiggle included, either way), for longer without an edge than three quarters of a
+slot takes at full speed, 25 to 50 ms (2.1.2: before, creep had the 500 ms window while its pulses grew, and a lost
+encoder could carry a 60-slot disc about 4.8 slots in the simulation: Codex review); a move taking longer
 than 3 s plus three times its expected time at 35 rpm; ending more than half a slot past its target; the control step
 running late (more than 25 ms between steps while driving). The adapter's main loop also cuts STBY if the control
 timer stops while driving.
@@ -367,7 +385,7 @@ Every feed request, whatever its source, goes through one gate:
 | Rule | Default | Notes |
 |---|---|---|
 | Minimum gap between feeds | 60 s | the reference also paused 1 min after each feed |
-| Rolling 24 h cap | 4 portions | configurable 1 to the mechanism's capacity (6 for the servo). The count it uses can be edited in Home Assistant for debugging and recovery (decision 2026-10-14, section 13) |
+| Rolling 24 h cap | 4 portions | configurable 1 to the mechanism's capacity (6 for the servo). It counts the feed history, which keeps 64 feeds (`HISTORY_SIZE`, the largest capacity; 8 before 2.1.2, which let a disc's 9th feed in 24 h go uncounted: Codex review). The count it uses can be edited in Home Assistant for debugging and recovery (decision 2026-10-14, section 13; the web app shows it too, open item 25) |
 | Max portions per command | 1 | configurable 1 to the capacity ("drop all" is opt-in) |
 | Tray state | must be `LOADED` | empty or unknown rejects |
 | Calibration lockout | on | |
@@ -440,6 +458,16 @@ fired today is not repeated. The same rule means each event feeds at most once
 per day: an event that already fed today and is then moved later in the day
 next feeds tomorrow. "Next Feed" and the runway follow the same rule (fixed in
 0.3.1; before that they showed the moved event as due today).
+
+Since 2.1.2 (Codex review):
+- The day an event fed is saved **before** it feeds (the feed's own intent save carries it), and it only moves
+  forward. An occurrence on or before that day counts as fed, so a clock set back across a date (an NTP correction, a
+  clock pushed over BLE) never repeats an event. A mark more than 7 days ahead of the occurrence
+  (`FIRED_AHEAD_MAX_DAYS`) is taken to come from a wrong clock and is ignored, so a bad date cannot silence the
+  schedule for weeks.
+- A one-shot feed is saved as done, and flushed, before it feeds: a power cut after the feed can no longer repeat it
+  in the same minute. If that save fails, it does not feed (`STORAGE_FAILED`, reported once). A missed one-shot
+  beats a repeated one.
 
 ### 5.4 Runway
 
@@ -850,7 +878,9 @@ Hence application-layer authentication, plus link encryption where offered:
   stale sequence number is refused within a connection). The 30 s retry cache
   still makes exact retries safe.
 - Until AUTH, only Info and Auth carry data; nothing is notified.
-- After a failed AUTH: a new nonce and a one-second wait.
+- After a failed AUTH: a new nonce and a one-second wait. A failed AUTH that leaves the connection unauthenticated
+  also clears what the session published (Status, Profile, Config, Calibration, Response read as zeros again), as a
+  disconnect does (2.1.2; Codex review: before, they stayed readable).
 - `auth_req_mode: sc_bond` so a client that pairs gets an encrypted link (also
   hiding what it reads).
 - Not covered: the feeder does not prove its identity to the client, and
@@ -1218,6 +1248,24 @@ precision-feeder/
   - A build's own button or LED pin that the drive in use drives is turned off rather than refused, so the servo's
     button default (GPIO2) cannot stop a disc feeder (section 2.1).
 
+- **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
+  host test before it was fixed.
+  - The feed history holds 64 feeds (the largest cap), not 8: State version 3, migrated (section 4).
+  - Reload, declare and the end of calibration save their move as an intent and count as moving until settled
+    (section 3.1). The servo's golden trace was recorded again for it: every servo command and release, with its time,
+    is unchanged; only those saves differ.
+  - Safety-critical saves report failure, and a failure stops the move: result `STORAGE_FAILED` (17), a new code, not a
+    new layout or opcode, so BLE stays protocol 2 (section 3.1, PROTOCOL.md).
+  - Calibration that can move the tray saves the position as unknown first; Stop stops a calibration move; a restart
+    waits for one (section 3.1).
+  - An event's fed day only moves forward and is saved before it feeds; a one-shot is saved as done before it feeds
+    (section 5.3).
+  - The disc bounds powered motion without encoder feedback in every phase (section 3.3).
+  - BLE: event portions follow the capacity; a failed AUTH clears what the session published (section 10).
+  - `check.sh --compile` and `build_bins.sh` fail on a failed build (the exit status was masked).
+  - ESPHome 2026.10.0 (owner): the release builds and CI use it; the facts our code relies on were checked again in its
+    source (the app name's `StringRef name_`, the web server's status codes; its task stack is now 4,512 bytes).
+
 ## 14. Open items
 
 1. ~~Polar/no-sun fallback.~~ Decided 2026-10-14: fixed 06:00 / 18:00 fallback (section 5.2).
@@ -1395,7 +1443,16 @@ precision-feeder/
     protected entities read-only over MQTT (no command topic), or keep MQTT equal to Home Assistant and rely on the
     broker's accounts. Not decided (2026-10-21).
 
-## 15. Implementation status (v2.1.1)
+25. Editing the 24 h count (Portions Counted (24 h)). AGENTS.md allows it by hand in Home Assistant only (the owner's
+    exception, 2026-10-14), but the web app's Maintenance page also offers it, behind the settings password (found by a
+    Codex review of 2.1.1). To decide: allow it in the web app too (and say so in AGENTS.md), or take it out of the web
+    app. Unchanged until then (2026-10-22).
+
+## 15. Implementation status (v2.1.2)
+
+2.1.2 fixes the findings of two Codex reviews of 2.1.1 (decisions log; CHANGELOG.md), each with a host test that
+reproduces it, and builds with ESPHome 2026.10.0 (ESP-IDF 5.5.6). Not yet on hardware: the new positioning intents
+and the disc's feedback bound need the bench (open items 22 and 23).
 
 2.1.0 (the mechanism interface, the direct-drive disc, both drives in one firmware, MQTT; sections 3.0, 3.3, 3.4,
 9.6). The servo's behaviour is checked against a trace recorded from 2.0.2 (every servo command, release and saved
@@ -1403,7 +1460,8 @@ tray state, with its time), and the disc's motion against the owner's bench sket
 (docs/BENCH.md): the servo upgrade from 2.0.2, the disc's first run, the two-drive firmware switching on both rigs,
 BLE and MQTT on the disc, all with test builds of 2.1.0. Still to do: open items 22 and 23.
 
-Everything in sections 3 to 10 is built. On a bench build (Waveshare
+Everything in sections 3 to 10 is built, except what section 14 defers: profile names (item 8) and a factory reset
+(item 21). On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
 power cuts, schedules on NTP, Home Assistant and BLE time, every BLE command,
 the button, Needs Food and the over-cap warning; for 2.0, the upgrades from 1.1
@@ -1437,8 +1495,10 @@ Deviations from the first draft of this design, all deliberate:
 Saved data: four records, each with its own preference key and version
 (`feeder_core.h`): settings (schedule, guard, location), calibration (pulse range
 and offsets), tray state, and the device record (section 9.2); and since 2.1.0 a fifth, the mechanism's tuning
-values, written only by a mechanism that has a tuning table (never by the servo). A layout change gets a new key and a migration from
-the old layout; saved data is never simply discarded.
+values, written only by a mechanism that has a tuning table (never by the servo), and the disc's motor pins. The tray
+state is version 3 since 2.1.2 (64 feeds of history, key `precision_feeder.state.v3`); a version 2 record under the
+old key is migrated at boot with everything kept, an unfinished move included. A layout change gets a new key and a
+migration from the old layout; saved data is never simply discarded.
 
 Not yet exercised: a real daylight-saving changeover (event times use wall-clock
 conversion through the platform's timezone rules); a BLE client that pairs.

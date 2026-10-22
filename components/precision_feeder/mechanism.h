@@ -57,6 +57,10 @@ class Mechanism {
   virtual MoveStatus poll(uint32_t now_ms) = 0;
   /// Abort any move now and let go of the motor.
   virtual void stop() = 0;
+  /// Whether the motor may be turning for any reason: a verb from the core, or a calibration move the core did not
+  /// start (2.1.2). The core waits for it before a restart, and Stop stops it. A mechanism whose moves all finish
+  /// within a verb (the servo) can leave it false.
+  virtual bool moving() { return false; }
   /// Let go of the motor once the tray has been still for settle_ms() (servo: stop the PWM).
   virtual void release() = 0;
   virtual uint32_t settle_ms() const = 0;

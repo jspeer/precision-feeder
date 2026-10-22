@@ -444,6 +444,11 @@ void N20Mechanism::stop() {
   this->motion_.stop(this->now_);
 }
 
+bool N20Mechanism::moving() {
+  Guard g(this->lock_);
+  return this->job_ != Job::NONE || this->motion_.busy();
+}
+
 void N20Mechanism::queue_tuning_(uint8_t index, int32_t value) {
   if (this->pending_n_ < sizeof(this->pending_index_)) {
     this->pending_index_[this->pending_n_] = index;

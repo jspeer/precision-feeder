@@ -43,11 +43,11 @@ file lists the packages it wants, so a feature is switched on or off by one line
 
 ## Setting it up
 
-1. **Install ESPHome 2026.9.1** (the version this is built and tested with; newer versions may need small fixes).
+1. **Install ESPHome 2026.10.0** (the version this is built and tested with; newer versions may need small fixes).
    Use the ESPHome add-on in Home Assistant, or on a computer (Python 3.12 to 3.14):
    ```sh
    python3 -m venv .venv
-   .venv/bin/pip install esphome==2026.9.1
+   .venv/bin/pip install esphome==2026.10.0
    ```
 2. **Clone this repository into your ESPHome config folder** (the add-on's folder is `/config/esphome/`), so it sits
    there as `precision-feeder/`:

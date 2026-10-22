@@ -23,6 +23,9 @@ using namespace esphome::precision_feeder;
 struct Flash {
   bool have_settings{false};
   bool have_state{false};
+  bool have_state_v2{false};  // a version 2 record under the old key (firmware up to 2.1.1)
+  legacy::StateV2 state_v2{};
+  bool fail_saves{false};     // settings and state saves fail (an NVS write error): nothing reaches flash
   bool have_calibration{false};
   bool have_v3{false};
   bool have_device{false};
@@ -59,6 +62,10 @@ class FakeFeeder : public FeederCore {
 
   void start() {
     this->set_detach_delay(1000);
+    if (!flash_.have_state && flash_.have_state_v2 && flash_.state_v2.version == 2) {  // as the adapter migrates it
+      flash_.state = legacy::migrate_state_v2(flash_.state_v2);
+      flash_.have_state = true;
+    }
     this->core_start(flash_.have_settings ? &flash_.settings : nullptr,
                      flash_.have_calibration ? &flash_.calibration : nullptr,
                      flash_.have_state ? &flash_.state : nullptr, flash_.have_v3 ? &flash_.v3 : nullptr,
@@ -76,6 +83,8 @@ class FakeFeeder : public FeederCore {
     }
   }
   void set_clock_valid(bool v) { this->valid_ = v; }
+  /// Set the wall clock (a correction or a jump), uptime unchanged.
+  void jump_clock(int64_t epoch) { this->epoch_ms_ = epoch * 1000; }
   int64_t now() const { return this->epoch_ms_ / 1000; }
   int count(Source s, Result r) const {
     int n = 0;
@@ -148,11 +157,14 @@ class FakeFeeder : public FeederCore {
     this->releases++;
     this->note("release");
   }
-  void hal_save_settings(const Settings &s, bool flush) override {
+  bool hal_save_settings(const Settings &s, bool flush) override {
+    if (flash_.fail_saves)
+      return false;
     flash_.settings_saves++;
     flash_.settings_flushed = flush;
     flash_.settings = s;
     flash_.have_settings = true;
+    return true;
   }
   void hal_save_calibration(const Calibration &c, bool) override {
     this->note("calibration %d %d %d %d %d %d %d pulse %u-%u", c.offsets[0], c.offsets[1], c.offsets[2], c.offsets[3],
@@ -160,11 +172,14 @@ class FakeFeeder : public FeederCore {
     flash_.calibration = c;
     flash_.have_calibration = true;
   }
-  void hal_save_state(const State &s, bool flush) override {
+  bool hal_save_state(const State &s, bool flush) override {
     this->note("state pos=%u to=%u unknown=%u flush=%d", s.position, s.moving_to, s.unknown, flush ? 1 : 0);
+    if (flash_.fail_saves)
+      return false;
     flash_.state_flushed = flush;
     flash_.state = s;
     flash_.have_state = true;
+    return true;
   }
   void hal_apply_ntp(const std::vector<std::string> *servers) override {
     ntp_applied++;

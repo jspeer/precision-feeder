@@ -6,7 +6,11 @@ authoritative; the firmware (`components/precision_feeder_ble/protocol.h` and
 checked against the same byte vectors.
 
 *Written with the assistance of an AI (Anthropic's Claude); verify against the
-source if something looks wrong.*
+source if something looks wrong.* Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense),
+inspired by FlyingGyroscope's Precision Feeder Rev2
+([original firmware](https://github.com/FlyingGyroscope/PrecisionFeederRev2),
+[Printables model](https://www.printables.com/model/1673252-automated-precision-fish-feeder-with-wifi-rev2));
+none of the original code is used.
 
 ## Overview
 
@@ -103,7 +107,9 @@ session = HMAC-SHA256(key, "PF2 session" || nonce)      (all 32 bytes)
 
 After a failed AUTH the nonce changes (read Auth again), and AUTH is refused for
 one second. A disconnect ends the session; the next connection starts again at
-step 1.
+step 1. A failed AUTH on an authenticated connection ends its session too, and
+Status, Profile, Config, Calibration and Response read as zeros again until the
+next successful AUTH (firmware 2.1.2; before, they kept their last values).
 
 A valid AUTH on a connection that is already authenticated (a retry after a lost
 answer, or a replay of the same bytes) is answered OK and **changes nothing**: the
@@ -221,7 +227,7 @@ Argument lengths are exact (not counting the tag); a wrong length is INVALID_ARG
 | Code | Name | Meaning |
 |---|---|---|
 | 0 | OK | done |
-| 1 | BUSY | the tray is moving |
+| 1 | BUSY | the tray is moving (a feed, or a reload or SET_POSITION until the tray has settled, since firmware 2.1.2) |
 | 2 | TOO_SOON | inside the minimum gap after the last feed |
 | 3 | DAILY_CAP | would exceed the rolling 24 h portion cap |
 | 4 | EMPTY | no portions remain |
@@ -237,6 +243,7 @@ Argument lengths are exact (not counting the tag); a wrong length is INVALID_ARG
 | 14 | UNSUPPORTED | unknown or reserved opcode |
 | 15 | NOT_CALIBRATING | JOG needs calibration mode |
 | 16 | NOT_AUTHORIZED | see [NOT_AUTHORIZED details](#not_authorized-details) |
+| 17 | STORAGE_FAILED | the feeder could not save what must be on flash before the tray moves (a feed's intent), so it did not move (firmware 2.1.2). Clients must treat any code they do not know as a refusal |
 
 ### Setting the clock
 
@@ -304,7 +311,8 @@ immediately; they are answered on Response with this `seq`, opcode `0x80`,
 - Event `01, profile, event, flags, offset i16, portions, days` (8 bytes).
   `flags` bit 0 enabled, bits 1 to 2 anchor (0 clock, 1 sunrise, 2 sunset).
   `offset` is minutes after midnight (0 to 1439) for a clock event, or signed
-  minutes from the sun (-720 to +720). `portions` 1 to 6 (`positions - 1`); `days` is a weekday
+  minutes from the sun (-720 to +720). `portions` 1 to `positions - 1` (6 on the servo; firmware 2.1.0 and 2.1.1
+  still refused more than 6); `days` is a weekday
   mask like `fast_mask`.
 - Query `02, profile, event` (3 bytes; event `FF` means the header): selects which
   record the next **read** returns, in the formats above (no seq, no tag).

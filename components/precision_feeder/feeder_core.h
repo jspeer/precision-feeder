@@ -35,7 +35,11 @@ constexpr uint8_t CAPACITY_MAX = 64;  // the most portions per load any mechanis
 constexpr uint8_t NUM_PROFILES = 3;
 constexpr uint8_t EVENTS_PER_PROFILE = 4;
 constexpr uint8_t MAX_ONESHOTS = 8;
-constexpr uint8_t HISTORY_SIZE = 8;
+// Feed history: one entry per feed command (1 portion or more). The daily cap counts it, so it holds as many entries as
+// the largest cap: with more feeds than that in 24 h, the ones kept already add up to more than any cap (2.1.2; 8
+// before, enough for the servo's 6 but not a disc's).
+constexpr uint8_t HISTORY_SIZE = CAPACITY_MAX;
+constexpr uint8_t HISTORY_SIZE_V2 = 8;
 constexpr uint8_t NO_MOVE = 0xFF;
 constexpr uint32_t HOLD_FOREVER = UINT32_MAX;  // State::hold_until marker: until the user cancels it
 // On a day with no sunrise or no sunset (polar night or midnight sun), sun events use these local times instead
@@ -46,7 +50,7 @@ constexpr int POLAR_SUNSET_MIN = 18 * 60;
 // keep the old layout below (namespace legacy) and migrate it in core_start(). Never just discard saved data.
 constexpr uint32_t SETTINGS_VERSION = 4;       // 2: no late start; 3: servo pulse range; 4: calibration moved out
 constexpr uint32_t CALIBRATION_VERSION = 1;
-constexpr uint32_t STATE_VERSION = 2;          // 2: reload pause persisted
+constexpr uint32_t STATE_VERSION = 3;          // 2: reload pause persisted; 3: 64 history entries (2.1.2)
 constexpr uint32_t DEVICE_VERSION = 2;         // 2: NTP servers (firmware 2.0.2)
 constexpr uint32_t TUNING_VERSION = 1;         // firmware 2.1.0
 constexpr uint32_t MOTOR_PINS_VERSION = 1;     // firmware 2.1.0 (D19)
@@ -228,6 +232,8 @@ enum class Result : uint8_t {
   BLE_TIME_DISABLED = 13,   // a clock pushed over BLE was refused by policy
   UNSUPPORTED = 14,         // unknown or reserved BLE opcode
   NOT_CALIBRATING = 15,     // the command needs calibration mode
+  // 16 is the BLE layer's NOT_AUTHORIZED.
+  STORAGE_FAILED = 17,      // a safety-critical save to flash failed, so nothing moved (2.1.2)
   NONE = 255,
 };
 
@@ -352,6 +358,22 @@ struct DeviceV1 {
 /// The current record from a version 1 one: every field kept, no NTP servers (the build's).
 Device migrate_device_v1(const DeviceV1 &v1);
 
+/// The tray state as saved by firmware 1.0 to 2.1.1 (version 2, 8 history entries). Migrated, not discarded.
+struct StateV2 {
+  uint32_t version;
+  uint32_t hold_until;
+  uint32_t reload_until;
+  uint32_t fired[NUM_PROFILES][EVENTS_PER_PROFILE];
+  uint32_t last_feed_epoch;
+  uint32_t hist_ts[HISTORY_SIZE_V2];
+  uint8_t hist_n[HISTORY_SIZE_V2];
+  uint8_t hist_src[HISTORY_SIZE_V2];
+  uint8_t position;
+  uint8_t moving_to;
+  uint8_t unknown;
+  uint8_t last_src;
+};
+
 /// Settings as saved by firmware 0.3.0 to 0.4.x (version 3, with the calibration inside). Migrated, not discarded.
 struct SettingsV3 {
   uint32_t version;
@@ -373,7 +395,9 @@ struct SettingsV3 {
 };
 }  // namespace legacy
 
-/// Runtime state that must survive a reboot (flushed to flash on every feed).
+/// Runtime state that must survive a reboot (flushed to flash on every feed and before every move).
+/// moving_to: the target of a move in progress, a feed's step or a positioning move (reload, declare, the move at
+/// the end of calibration); a boot that finds one marks the position unknown.
 struct State {
   uint32_t version;
   uint32_t hold_until;                               // epoch; 0 = no hold; HOLD_FOREVER = until cancelled
@@ -388,6 +412,11 @@ struct State {
   uint8_t unknown;    // 1 when the position cannot be trusted
   uint8_t last_src;
 };
+
+namespace legacy {
+/// The current record from a version 2 one: every field kept; the history's newer entries empty.
+State migrate_state_v2(const StateV2 &v2);
+}  // namespace legacy
 
 /// The outcome of one feed request, reported to the listener (the BLE event log).
 struct FeedRecord {
@@ -504,8 +533,11 @@ class FeederCore : private ServoOutput {
   /// Before loading the tray: get it ready to load (the servo returns to its closed slot 0; position 0) and pause
   /// scheduled feeding briefly.
   void tray_reload();
-  /// Abort any motion. An interrupted step leaves the position unknown.
+  /// Abort any motion, calibration moves included. An interrupted step leaves the position unknown.
   void stop();
+  /// Whether anything may be moving: a feed, a positioning move until it settles, or a calibration move. A restart
+  /// waits while this is true (an interrupted move would leave the position unknown).
+  bool busy();
   /// Tell the firmware where the tray really is (after UNKNOWN).
   void declare_position(uint8_t position);
   /// Hold scheduled feeding for N minutes (no upper limit). Needs a valid clock.
@@ -841,9 +873,11 @@ class FeederCore : private ServoOutput {
   virtual int64_t hal_local_to_epoch(int year, int month, int day, int hour, int minute) = 0;
   virtual void hal_servo_write(float angle_degrees) = 0;
   virtual void hal_servo_release() = 0;
-  virtual void hal_save_settings(const Settings &settings, bool flush) = 0;
+  /// Settings and State saves return whether they reached flash (a flushed save: written and synced). The core
+  /// refuses to move when a save that must come first did not.
+  virtual bool hal_save_settings(const Settings &settings, bool flush) = 0;
   virtual void hal_save_calibration(const Calibration &calibration, bool flush) = 0;
-  virtual void hal_save_state(const State &state, bool flush) = 0;
+  virtual bool hal_save_state(const State &state, bool flush) = 0;
   virtual void hal_save_device(const Device &device) = 0;  // always written at once
   virtual void hal_save_tuning(const Tuning &tuning, bool flush) = 0;
   virtual void hal_save_motor_pins(const MotorPins &pins) = 0;  // always written at once
@@ -873,7 +907,12 @@ class FeederCore : private ServoOutput {
   void set_device_flag_(uint8_t flag, bool on, const char *what);
   void timezone_changed_();
   void migrate_v3_(const legacy::SettingsV3 &v3, bool take_calibration);
-  void save_state_(bool flush);
+  bool save_state_(bool flush);
+  /// A positioning move (reload, declare, the end of calibration) to `target`: saved as an intent first. False (the
+  /// position then unknown, nothing moves) when that save fails.
+  bool begin_positioning_(uint8_t target);
+  /// Before the mechanism may move in calibration: the position is saved as unknown first. False if that failed.
+  bool invalidate_position_(const char *why);
 
   // ServoOutput: the servo mechanism's commands go to the hal hooks.
   void servo_write(float angle_degrees) final { this->hal_servo_write(angle_degrees); }
@@ -883,7 +922,12 @@ class FeederCore : private ServoOutput {
   /// After reload() or restore(): wait while the mechanism moves, then settle.
   void positioned_();
   void load_tuning_(const Tuning *saved);
-  void start_next_portion_();
+  bool start_next_portion_();
+  /// An event fed (or was reported) for `day`: remember it, never moving the mark back (a clock set back).
+  void mark_fired_(uint8_t profile, uint8_t event, int32_t day);
+  /// How far ahead of an occurrence an event's last fired day may be and still count as "fed" (a clock correction);
+  /// further ahead, the mark is taken to come from a wrong clock.
+  static constexpr int64_t FIRED_AHEAD_MAX_DAYS = 7;
   void commit_step_();
   void run_motion_();
   void abort_motion_();
@@ -980,6 +1024,8 @@ class FeederCore : private ServoOutput {
   uint32_t phase_start_{0};
   uint8_t queue_{0};
   bool calibrating_{false};
+  bool positioning_{false};    // the phase is a positioning move with a saved intent (cleared when it settles)
+  bool storage_fault_{false};  // the last flushed save failed
   uint8_t cal_pos_{0};
 
   std::function<void(const FeedRecord &)> feed_listener_;

@@ -128,7 +128,7 @@ There are two ways to run it:
 1. **Prebuilt firmware (most people).** Flash a release from
    **<https://jspeer.github.io/precision-feeder/>** in Chrome or Edge, then follow the setup wizard. Nothing to
    build. Guide: [docs/INSTALL.md](docs/INSTALL.md).
-2. **Build your own from YAML (advanced).** ESPHome 2026.9.1 and the packages in this repository, for full control of
+2. **Build your own from YAML (advanced).** ESPHome 2026.10.0 and the packages in this repository, for full control of
    what is compiled in. Guide: [docs/BUILDING.md](docs/BUILDING.md).
 
 Then, either way:

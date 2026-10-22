@@ -181,6 +181,13 @@ static void test_auth_flow() {
   r.advance(600);
   CHECK(r.transport.notified[proto::CHANNEL_STATUS] >= 1 && r.transport.value.at(proto::CHANNEL_STATUS) != Bytes(20, 0),
         "Status sent after AUTH");
+  // Codex review of 2.1.1: a refused AUTH ends the session, and must take what it published with it.
+  r.client->key[0] ^= 1;
+  resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[2] == proto::RES_NOT_AUTHORIZED && !r.engine->authorized(), "a bad AUTH: no longer authenticated");
+  CHECK(r.transport.value.at(proto::CHANNEL_STATUS) == Bytes(20, 0), "Status reads as zeros again");
+  r.advance(2000);
+  CHECK(r.transport.value.at(proto::CHANNEL_STATUS) == Bytes(20, 0), "and is not published again");
 }
 
 static void test_feed_retry_and_replay() {
@@ -288,6 +295,8 @@ static void test_records() {
   CHECK(r.transport.value.at(proto::CHANNEL_CONFIG) == (Bytes{proto::CFG_MIN_GAP_S, 60, 0, 0, 0}), "Config query read");
   CHECK(c.record(proto::CHANNEL_CONFIG, {proto::CFG_MIN_PULSE_US, 0x60, 0x09, 0, 0})[2] == proto::RES_INVALID_ARG,
         "pulse pair closer than 500 us refused");
+  CHECK(c.record(proto::CHANNEL_PROFILE, {0x01, 0, 2, 0x05, 0xB4, 0x00, 7, 0x3E})[2] == proto::RES_INVALID_ARG,
+        "7 portions refused on the servo (6 a load)");
   resp = c.record(proto::CHANNEL_PROFILE, {0x01, 0, 2, 0x05, 0xB4, 0x00, 2, 0x3E});
   const Event &e = r.feeder->cfg.profiles[0].ev[2];
   CHECK(resp[2] == proto::RES_OK && e.enabled && e.anchor == 2 && e.offset_min == 180 && e.portions == 2,
@@ -527,6 +536,8 @@ static void test_permissions() {
   }
   CHECK(!r.feeder->calibration_mode(), "calibration mode stayed off");
   CHECK(c.command(proto::OP_SET_POSITION, {0})[2] == proto::RES_OK, "SET_POSITION is everyday recovery");
+  CHECK(c.command(proto::OP_FEED, {1})[2] == static_cast<uint8_t>(Result::BUSY), "the tray is moving to it (2.1.2)");
+  r.feeder->advance(2000);
   CHECK(c.command(proto::OP_FEED, {1})[2] == proto::RES_OK, "feeding is unaffected");
   CHECK(r.engine->stats().refused == refused + 9, "counted as refused");
 
@@ -578,6 +589,12 @@ static void test_other_mechanism() {
   CHECK(c.write(proto::CHANNEL_CONFIG, c.signed_(proto::CHANNEL_CONFIG, body))[2] == proto::RES_UNSUPPORTED,
         "pulse range: unsupported");
   CHECK(c.record(proto::CHANNEL_CALIBRATION, {0, 5, 0})[2] == proto::RES_INVALID_ARG, "no calibration offsets");
+  // Event portions follow the capacity (2.1.2; the check kept 6 before).
+  CHECK(c.record(proto::CHANNEL_PROFILE, {0x01, 0, 1, 0x01, 0xE0, 0x01, 7, 0x7F})[2] == proto::RES_OK &&
+            r.feeder->cfg.profiles[0].ev[1].portions == 7, "an event of 7 portions");
+  CHECK(c.record(proto::CHANNEL_PROFILE, {0x01, 0, 1, 0x01, 0xE0, 0x01, 14, 0x7F})[2] == proto::RES_OK, "of 14");
+  CHECK(c.record(proto::CHANNEL_PROFILE, {0x01, 0, 1, 0x01, 0xE0, 0x01, 15, 0x7F})[2] == proto::RES_INVALID_ARG,
+        "15 refused");
 }
 
 int main() {

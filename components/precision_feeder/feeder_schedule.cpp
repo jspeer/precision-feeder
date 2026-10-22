@@ -209,6 +209,14 @@ void FeederCore::update_solar_fault_() {
 
 static bool deferrable(Result r) { return r == Result::BUSY || r == Result::TOO_SOON; }
 
+void FeederCore::mark_fired_(uint8_t profile, uint8_t event, int32_t day) {
+  // Only forward, except past a last day that came from a wrong clock (far ahead).
+  uint32_t &last = this->state_.fired[profile][event];
+  const int64_t ahead = static_cast<int64_t>(last) - day;
+  if (ahead <= 0 || ahead > FIRED_AHEAD_MAX_DAYS)
+    last = static_cast<uint32_t>(day);
+}
+
 template<typename Fn> void FeederCore::for_each_occurrence_(int32_t first_day, int32_t last_day, Fn &&fn) {
   if (!this->cfg.scheduler_enabled)
     return;  // one-shot feeds are separate and run regardless
@@ -228,8 +236,11 @@ template<typename Fn> void FeederCore::for_each_occurrence_(int32_t first_day, i
       const int64_t epoch = this->wall_to_epoch_(d.day_no, minutes);
       if (epoch < 0)
         continue;
-      // Each event feeds at most once per (anchor) day, also when it is moved later after it fed.
-      const bool fed = this->state_.fired[ap][e] == static_cast<uint32_t>(d.day_no);
+      // Each event feeds at most once per (anchor) day, also when it is moved later after it fed, and never again for
+      // a day on or before the last one it fired for: a clock set back across a date must not repeat it (Codex review,
+      // 2.1.1). A last day far ahead (more than FIRED_AHEAD_MAX_DAYS) came from a wrong clock: then only that day.
+      const int64_t last = static_cast<int64_t>(this->state_.fired[ap][e]);
+      const bool fed = last == d.day_no || (last > d.day_no && last - d.day_no <= FIRED_AHEAD_MAX_DAYS);
       fn(Occurrence{d.day_no, e, epoch, ev.portions, fed});
     }
   }
@@ -253,7 +264,7 @@ void FeederCore::fire_due_() {
       // Window closed. If it was refused while open, report that once; otherwise it was simply missed.
       if (pending_here) {
         this->report_(Source::SCHEDULE, o.portions, static_cast<Result>(pending));
-        this->state_.fired[ap][o.event] = static_cast<uint32_t>(o.day_no);
+        this->mark_fired_(ap, o.event, o.day_no);
         pending = NO_PENDING;
         state_dirty = true;
       }
@@ -272,8 +283,9 @@ void FeederCore::fire_due_() {
       this->pending_day_[ap][o.event] = o.day_no;
       return;
     }
+    // Marked before it feeds, so the feed's own save (its intent) carries it: a power cut cannot repeat it.
+    this->mark_fired_(ap, o.event, o.day_no);
     this->request_feed(o.portions, Source::SCHEDULE);  // reports the outcome, accepted or refused
-    this->state_.fired[ap][o.event] = static_cast<uint32_t>(o.day_no);
     pending = NO_PENDING;
     state_dirty = true;
   });
@@ -309,10 +321,18 @@ void FeederCore::fire_due_() {
       pending = static_cast<uint8_t>(check);
       continue;
     }
-    this->request_feed(os.portions, Source::ONE_SHOT);
+    // Done first, and on flash, before it feeds: otherwise a power cut after the feed and before the settings' delayed
+    // save would feed it again in the same minute (Codex review, 2.1.1). A missed one-shot beats a repeated one.
     pending = NO_PENDING;
     os.done = 1;
-    cfg_dirty = true;
+    if (!this->hal_save_settings(this->cfg, true)) {
+      this->log_(LogLevel::kError, "Saving the one-shot feed as done failed: not feeding it");
+      this->storage_fault_ = true;
+      this->report_(Source::ONE_SHOT, os.portions, Result::STORAGE_FAILED);
+      cfg_dirty = true;
+      continue;
+    }
+    this->request_feed(os.portions, Source::ONE_SHOT);
   }
   if (state_dirty)
     this->save_state_(false);

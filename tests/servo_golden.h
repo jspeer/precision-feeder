@@ -1,6 +1,8 @@
 // The golden servo trace: what firmware 2.0.2 (before the mechanism interface) did in servo_session()
 // (test_core.cpp): every servo command, release and tray-state save, with its time in milliseconds since boot.
 // Recorded from 2.0.2 on 2026-10-21. Record again only for an intended behaviour change (see test_core.cpp).
+// Recorded again for 2.1.2: a reload, a declare and the end of calibration now save their move as an intent (to=<slot>)
+// and clear it once settled (Codex review). Every servo command and release, with its time, is unchanged.
 //
 // Part of the Precision Feeder ESPHome firmware (public domain, The Unlicense).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
@@ -41,9 +43,10 @@ static const char SERVO_GOLDEN[] = R"golden(0 servo 2.500
 108500 feed 1 no wiggle -> ok
 109500 state pos=5 to=255 unknown=0 flush=1
 110500 release
-111500 state pos=0 to=255 unknown=0 flush=1
+111500 state pos=0 to=0 unknown=0 flush=1
 111500 servo 2.500
 111500 reload
+112500 state pos=0 to=255 unknown=0 flush=1
 112500 release
 113500 servo 2.500
 113500 calibration on
@@ -55,8 +58,10 @@ static const char SERVO_GOLDEN[] = R"golden(0 servo 2.500
 113500 pulse 600-2300 -> ok
 113500 feed while calibrating -> calibrating
 114500 calibration 0 0 15 -7 0 0 0 pulse 600-2300
+114500 state pos=0 to=0 unknown=0 flush=1
 114500 servo 2.500
 114500 calibration off
+115500 state pos=0 to=255 unknown=0 flush=1
 115500 release
 126500 state pos=0 to=255 unknown=0 flush=1
 126500 state pos=0 to=1 unknown=0 flush=1
@@ -65,9 +70,10 @@ static const char SERVO_GOLDEN[] = R"golden(0 servo 2.500
 127000 state pos=0 to=255 unknown=1 flush=1
 127000 release
 129000 feed while unknown -> position unknown
-129000 state pos=2 to=255 unknown=0 flush=1
+129000 state pos=2 to=2 unknown=0 flush=1
 129000 servo 54.000
 129000 declared 2
+130000 state pos=2 to=255 unknown=0 flush=1
 130000 release
 140000 state pos=2 to=255 unknown=0 flush=1
 140000 state pos=2 to=3 unknown=0 flush=1
@@ -86,9 +92,10 @@ static const char SERVO_GOLDEN[] = R"golden(0 servo 2.500
 157250 power cut
 0 state pos=3 to=255 unknown=1 flush=1
 1000 state pos=3 to=255 unknown=1 flush=0
-1500 state pos=0 to=255 unknown=0 flush=1
+1500 state pos=0 to=0 unknown=0 flush=1
 1500 servo 2.500
 1500 button (reload)
+2500 state pos=0 to=255 unknown=0 flush=1
 2500 release
 5500 calibration 0 0 15 -7 0 0 0 pulse 600-2300
 601000 state pos=0 to=255 unknown=0 flush=0
@@ -105,8 +112,9 @@ static const char SERVO_GOLDEN[] = R"golden(0 servo 2.500
 613000 state pos=2 to=255 unknown=0 flush=1
 614000 release
 723500 after the 08:10 event
-723500 state pos=5 to=255 unknown=0 flush=1
+723500 state pos=5 to=5 unknown=0 flush=1
 723500 servo 127.500
+724500 state pos=5 to=255 unknown=0 flush=1
 724500 release
 734500 state pos=5 to=255 unknown=0 flush=1
 734500 state pos=5 to=6 unknown=0 flush=1
@@ -117,8 +125,9 @@ static const char SERVO_GOLDEN[] = R"golden(0 servo 2.500
 737500 state pos=6 to=255 unknown=0 flush=1
 738500 release
 745500 feed empty -> tray empty
-745500 state pos=0 to=255 unknown=0 flush=1
+745500 state pos=0 to=0 unknown=0 flush=1
 745500 servo 2.500
 745500 button (empty: reload)
+746500 state pos=0 to=255 unknown=0 flush=1
 746500 release
 )golden";

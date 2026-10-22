@@ -390,6 +390,7 @@ static void test_mechanism_feeds() {
   d.f->tray_reload();
   d.run(500);
   CHECK(d.ticks() == before && d.f->remaining() == 14, "reload: full again, and the disc did not move");
+  d.f->set_portions_24h(0);  // 14 already today: the cap counts all of them (2.1.2)
   CHECK(d.f->request_feed(1, Source::ESPHOME) == Result::OK, "the 15th slot");
   d.settle();
   CHECK(std::abs(d.ticks() - 8344) <= 4, "15 slots: exactly one turn (8344 ticks), never rounding up");
@@ -538,6 +539,9 @@ static void test_mechanism_faults() {
     Disc d;
     CHECK(d.f->set_tuning(N20_REVERSE_ENCODER, 1) == Result::NOT_CALIBRATING, "not outside calibration mode");
     CHECK(set_in_calibration(d, N20_REVERSE_ENCODER, 1) == Result::OK, "in calibration mode");
+    CHECK(d.f->position_unknown() && d.flash.state.unknown, "which way is forward changed: unknown, on flash too");
+    d.f->tray_reload();
+    d.run(10);
     d.f->request_feed(1, Source::ESPHOME);
     d.settle();
     CHECK(d.f->position_unknown() && d.f->faults_text().find("wrong way") != std::string::npos, "a fault");
@@ -800,6 +804,7 @@ static void test_slot_count() {
   d.f->set_calibration_mode(false);
   CHECK(d.f->position_unknown(), "another slot count: reload before feeding");
   d.f->tray_reload();
+  d.run(10);  // a reload counts as moving until it has settled (2.1.2)
   CHECK(d.f->remaining() == 15, "a full load of 15");
   const int32_t origin = d.ticks();
   d.f->request_feed(1, Source::ESPHOME);
@@ -1003,6 +1008,48 @@ static void test_single_binary() {
   }
 }
 
+
+// ---- Codex review of 2.1.1: calibration moves (2.1.2) ----------------------------------------------------------------
+static void test_calibration_stop_and_power_cut() {
+  {
+    current = "2.1.2: Stop stops a calibration move";
+    Disc d;
+    d.f->set_calibration_mode(true);
+    CHECK(d.f->calibration_action(N20_CAL_START) == Result::OK, "the direction test starts");
+    d.run(20);
+    CHECK(d.f->busy(), "busy while it moves (a restart waits)");
+    d.f->stop();
+    d.run(20);
+    const int32_t at = d.ticks();
+    d.run(60);
+    CHECK(std::abs(d.ticks() - at) <= 2, "stopped: the disc stays where it is");
+    CHECK(!d.sim.enable || (d.sim.in1 == 255 && d.sim.in2 == 255), "the bridge brakes or is off");
+    d.run(500);
+    CHECK(!d.f->busy(), "not busy once stopped");
+  }
+  {
+    current = "2.1.2: a power cut in calibration leaves the position unknown";
+    Disc d;
+    CHECK(!d.f->position_unknown(), "a trusted position");
+    d.f->set_calibration_mode(true);
+    CHECK(d.flash.state.unknown == 0, "turning calibration on moves nothing");
+    d.cal(N20_CAL_NUDGE, 50);
+    CHECK(d.flash.state.unknown == 1, "unknown on flash before the disc moved");
+    d.boot();  // the power goes, calibration still on
+    CHECK(d.f->position_unknown() && d.f->feed_guard_text() == "position unknown", "after the reboot: unknown");
+  }
+  {
+    current = "2.1.2: a calibration action refused when its save fails";
+    Disc d;
+    d.f->set_calibration_mode(true);
+    d.flash.fail_saves = true;
+    const int32_t at = d.ticks();
+    CHECK(d.f->calibration_action(N20_CAL_START) == Result::STORAGE_FAILED, "refused");
+    d.run(300);
+    CHECK(d.ticks() == at, "the disc did not move");
+  }
+}
+
 int main() {
   test_motion_matches_sketch();
   test_mechanism_feeds();
@@ -1021,6 +1068,7 @@ int main() {
   test_smaller_load_keeps_settings();
   test_motor_pins();
   test_single_binary();
+  test_calibration_stop_and_power_cut();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

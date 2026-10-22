@@ -817,9 +817,9 @@ class DstFeeder : public FeederCore {
   }
   void hal_servo_write(float) override {}
   void hal_servo_release() override {}
-  void hal_save_settings(const Settings &, bool) override {}
+  bool hal_save_settings(const Settings &, bool) override { return true; }
   void hal_save_calibration(const Calibration &, bool) override {}
-  void hal_save_state(const State &, bool) override {}
+  bool hal_save_state(const State &, bool) override { return true; }
   void hal_save_device(const Device &) override {}
   void hal_save_tuning(const Tuning &, bool) override {}
   void hal_save_motor_pins(const MotorPins &) override {}
@@ -1745,7 +1745,9 @@ static void test_mechanism_capacity_and_motion() {
   f->advance(11000);
   CHECK(f->request_feed(1, Source::ESPHOME) == Result::EMPTY, "empty refuses");
   f->tray_reload();
-  CHECK(m.reloads == 1 && f->remaining() == 14 && f->tray_state() == TrayState::LOADED, "reload: full again");
+  CHECK(m.reloads == 1 && f->tray_state() == TrayState::MOVING, "reload: moving until it has settled");
+  f->advance(2000);
+  CHECK(f->remaining() == 14 && f->tray_state() == TrayState::LOADED, "reload: full again");
   CHECK(f->angles.empty(), "the servo was never driven");
 }
 
@@ -1834,6 +1836,7 @@ static void test_mechanism_servo_only_calibration() {
   f->calibration_select(3);
   CHECK(f->calibration_position() == 0 && m.shows == 0, "nothing to select");
   f->set_calibration_mode(false);
+  f->advance(2000);
   CHECK(f->tray_state() == TrayState::LOADED && f->angles.empty(), "back to loaded; the servo was never driven");
 }
 
@@ -1940,6 +1943,146 @@ static void test_servo_golden_trace() {
   CHECK(got == SERVO_GOLDEN, "the servo does exactly what firmware 2.0.2 did");
 }
 
+
+// ---- Codex reviews of 2.1.1 (fixed in 2.1.2) ------------------------------------------------------------------
+static void test_review_212() {
+  {
+    current = "2.1.2: the daily cap counts every feed of a large load";
+    Flash flash;
+    FakeMechanism m;
+    auto f = boot_with(flash, m);
+    f->set_min_gap_s(10);
+    f->set_daily_cap(9);
+    int ok = 0;
+    Result last = Result::OK;
+    for (int i = 0; i < 10; i++) {
+      last = f->request_feed(1, Source::ESPHOME);
+      ok += last == Result::OK;
+      f->advance(11000);
+    }
+    CHECK(ok == 9 && last == Result::DAILY_CAP, "nine single feeds, the tenth refused");
+    CHECK(f->portions_24h() == 9 && f->position() == 9, "all nine counted");
+  }
+  {
+    current = "2.1.2: a version 2 tray state is migrated";
+    Flash flash;
+    flash.have_state_v2 = true;
+    legacy::StateV2 &v2 = flash.state_v2;
+    v2.version = 2;
+    v2.position = 3;
+    v2.moving_to = NO_MOVE;
+    v2.hist_ts[0] = static_cast<uint32_t>(T0 - 600);
+    v2.hist_n[0] = 2;
+    v2.hist_src[0] = static_cast<uint8_t>(Source::ESPHOME);
+    v2.last_feed_epoch = static_cast<uint32_t>(T0 - 600);
+    v2.fired[0][1] = 20000;
+    auto f = boot(flash, T0);
+    CHECK(f->position() == 3 && !f->position_unknown(), "position kept");
+    CHECK(f->portions_24h() == 2, "history kept");
+    CHECK(flash.state.version == STATE_VERSION && flash.state.fired[0][1] == 20000, "saved as version 3, all kept");
+    Flash cut;
+    cut.have_state_v2 = true;
+    cut.state_v2 = v2;
+    cut.state_v2.moving_to = 4;  // a move in progress when 2.1.1 lost power
+    auto g = boot(cut, T0);
+    CHECK(g->position_unknown(), "an unfinished move in a version 2 record still means unknown");
+  }
+  {
+    current = "2.1.2: a reload is a move until it has settled";
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->declare_position(5);
+    f->advance(2000);
+    f->tray_reload();
+    CHECK(flash.state.position == 0 && flash.state.moving_to == 0 && flash.state_flushed, "its intent is on flash");
+    CHECK(f->busy() && f->tray_state() == TrayState::MOVING, "busy: no restart, no feed");
+    CHECK(f->feed_guard_text() == "busy", "the guard says so");
+    auto g = std::make_unique<FakeFeeder>(flash, f->now() * 1000, true);  // the power goes now
+    g->start();
+    CHECK(g->position_unknown(), "a power cut on the way: unknown");
+    f->advance(2000);
+    CHECK(!f->busy() && flash.state.moving_to == NO_MOVE && f->feed_guard_text() == "ready", "settled: ready");
+    f->declare_position(3);
+    CHECK(flash.state.moving_to == 3 && f->busy(), "a declare too");
+    f->stop();
+    CHECK(f->position_unknown() && flash.state.unknown, "stopped on the way: unknown");
+  }
+  {
+    current = "2.1.2: a one-shot never feeds twice after a power cut";
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->set_wiggle(false);
+    f->set_min_gap_s(10);
+    CHECK(f->add_oneshot("2026-10-14 08:00", 1), "one-shot at 08:00");
+    for (int i = 0; i < 2000 && f->count(Source::ONE_SHOT, Result::OK) == 0; i++)
+      f->advance(250);
+    CHECK(f->count(Source::ONE_SHOT, Result::OK) == 1, "fed");
+    CHECK(flash.settings.oneshots[0].done == 1 && flash.settings_flushed, "done on flash before it moved");
+    f->advance(1250);  // the move is over; the settings' delayed save has not run
+    CHECK(flash.state.position == 1 && flash.state.moving_to == NO_MOVE, "the step committed");
+    auto g = std::make_unique<FakeFeeder>(flash, f->now() * 1000, true);  // power cut, back in the same minute
+    g->start();
+    g->advance(5000);
+    CHECK(g->count(Source::ONE_SHOT, Result::OK) == 0 && g->position() == 1, "not fed again");
+  }
+  {
+    current = "2.1.2: a failed save stops the move";
+    Flash flash;
+    auto f = boot(flash, T0);
+    const size_t commands = f->angles.size();
+    flash.fail_saves = true;
+    CHECK(f->request_feed(1, Source::ESPHOME) == Result::STORAGE_FAILED, "refused");
+    f->advance(3000);
+    CHECK(f->angles.size() == commands && f->position() == 0 && !f->position_unknown(), "nothing moved");
+    CHECK(f->faults_text().find("saving to flash failed") != std::string::npos, "and Faults says so");
+    CHECK(f->portions_24h() == 0, "nothing counted");
+    f->tray_reload();
+    f->advance(2000);
+    CHECK(f->angles.size() == commands && f->position_unknown(), "a reload that cannot save its intent: unknown");
+    flash.fail_saves = false;
+    f->tray_reload();
+    f->advance(2000);
+    f->advance(60000);
+    CHECK(f->request_feed(1, Source::ESPHOME) == Result::OK, "saves work again: feeds work again");
+    f->advance(5000);
+    CHECK(f->faults_text().find("saving to flash failed") == std::string::npos, "and the fault clears");
+  }
+  {
+    current = "2.1.2: a failed save of a one-shot means no feed";
+    Flash flash;
+    auto f = boot(flash, T0);
+    CHECK(f->add_oneshot("2026-10-14 08:00", 1), "one-shot at 08:00");
+    f->advance(2000);
+    flash.fail_saves = true;
+    f->advance(6 * 60 * 1000);
+    CHECK(f->count(Source::ONE_SHOT, Result::OK) == 0 && f->count(Source::ONE_SHOT, Result::STORAGE_FAILED) == 1,
+          "refused, reported once");
+    CHECK(f->position() == 0, "nothing fed");
+  }
+  {
+    current = "2.1.2: a clock set back across a date does not repeat an event";
+    Flash flash;
+    auto f = boot(flash, T0);
+    f->set_daily_cap(6);
+    f->set_min_gap_s(10);
+    enable_event(*f, 0, 0, Anchor::CLOCK, 8 * 60);
+    f->advance(6 * 60 * 1000);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 1, "Oct 14 08:00 fed");
+    f->jump_clock(local_epoch(2026, 10, 15, 7, 59));
+    f->advance(3 * 60 * 1000);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 2, "Oct 15 08:00 fed");
+    f->jump_clock(local_epoch(2026, 10, 14, 7, 59));  // corrected back a day
+    f->advance(3 * 60 * 1000);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 2, "Oct 14 08:00 not fed again");
+    f->jump_clock(local_epoch(2026, 11, 30, 7, 59));  // a wrong clock, far ahead
+    f->advance(3 * 60 * 1000);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 3, "fed on the wrong date");
+    f->jump_clock(local_epoch(2026, 10, 16, 7, 59));  // corrected: far back
+    f->advance(3 * 60 * 1000);
+    CHECK(f->count(Source::SCHEDULE, Result::OK) == 4, "the schedule is not silenced for weeks");
+  }
+}
+
 int main() {
 #ifdef PRINT_SERVO_TRACE
   std::fputs(servo_session().c_str(), stdout);
@@ -1986,6 +2129,7 @@ int main() {
   test_setup_flag();
   test_firmware_upload();
   test_ntp_servers();
+  test_review_212();
   if (failures == 0)
     std::printf("All core tests passed\n");
   return failures == 0 ? 0 : 1;

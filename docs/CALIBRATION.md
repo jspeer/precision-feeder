@@ -3,9 +3,9 @@
 This guide is for the servo fan tray, and below for the direct-drive disc. A feeder with another mechanism (another
 motor and tray, [MECHANISMS.md](MECHANISMS.md)) has its own section here or on its branch.
 
-The tray is moved by a servo to absolute angles: 7 positions, 25 degrees apart
-across a 175 degree sweep (both are configurable). Mechanical tolerances mean
-each position needs a small correction.
+The tray is moved by a servo to absolute angles: 7 positions, 25 degrees apart, so the servo turns 150 degrees from
+position 0 to position 6. (`sweep_degrees`, 175, is the span of the seven slots' 25-degree widths, not the servo's
+travel: DESIGN.md section 3.0.1.) Mechanical tolerances mean each position needs a small correction.
 
 *Written with the assistance of an AI (Anthropic's Claude); verify against your
 own build.*

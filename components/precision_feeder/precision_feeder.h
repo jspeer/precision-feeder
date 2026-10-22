@@ -193,9 +193,9 @@ class PrecisionFeeder : public Component, public FeederCore {
   int64_t hal_local_to_epoch(int year, int month, int day, int hour, int minute) override;
   void hal_servo_write(float angle_degrees) override;
   void hal_servo_release() override;
-  void hal_save_settings(const Settings &settings, bool flush) override;
+  bool hal_save_settings(const Settings &settings, bool flush) override;
   void hal_save_calibration(const Calibration &calibration, bool flush) override;
-  void hal_save_state(const State &state, bool flush) override;
+  bool hal_save_state(const State &state, bool flush) override;
   void hal_save_device(const Device &device) override;
   void hal_save_tuning(const Tuning &tuning, bool flush) override;
   void hal_save_motor_pins(const MotorPins &pins) override;

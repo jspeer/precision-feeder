@@ -92,39 +92,39 @@ int main() {
     ProfileEventRec d;
     CHECK(decode_profile_event(want, sizeof(want), d), "event decodes");
     CHECK(d.enabled == 1 && d.anchor == 2 && d.offset_min == 180 && d.portions == 2 && d.days == 0x3E, "event fields");
-    CHECK(valid_profile_event(d), "event valid");
+    CHECK(valid_profile_event(d, 6), "event valid");
 
     const uint8_t clock_ev[] = {0x01, 0x02, 0x03, 0x01, 0xE0, 0x01, 0x01, 0x7F};  // clock 08:00
-    CHECK(decode_profile_event(clock_ev, sizeof(clock_ev), d) && d.anchor == 0 && d.offset_min == 480 && valid_profile_event(d),
+    CHECK(decode_profile_event(clock_ev, sizeof(clock_ev), d) && d.anchor == 0 && d.offset_min == 480 && valid_profile_event(d, 6),
           "clock 08:00 event");
     const uint8_t sunrise_ev[] = {0x01, 0x01, 0x00, 0x02, 0xE2, 0xFF, 0x01, 0x7F};  // sunrise -30
     CHECK(decode_profile_event(sunrise_ev, sizeof(sunrise_ev), d) && d.anchor == 1 && d.offset_min == -30 && d.enabled == 0 &&
-              valid_profile_event(d),
+              valid_profile_event(d, 6),
           "sunrise -30 event");
 
     // Range checks.
     d.anchor = 0;
     d.offset_min = 1440;
-    CHECK(!valid_profile_event(d), "clock 24:00 invalid");
+    CHECK(!valid_profile_event(d, 6), "clock 24:00 invalid");
     d.offset_min = -1;
-    CHECK(!valid_profile_event(d), "negative clock invalid");
+    CHECK(!valid_profile_event(d, 6), "negative clock invalid");
     d.offset_min = 1439;
-    CHECK(valid_profile_event(d), "clock 23:59 valid");
+    CHECK(valid_profile_event(d, 6), "clock 23:59 valid");
     d.anchor = 1;
     d.offset_min = 721;
-    CHECK(!valid_profile_event(d), "solar +721 invalid");
+    CHECK(!valid_profile_event(d, 6), "solar +721 invalid");
     d.offset_min = -720;
-    CHECK(valid_profile_event(d), "solar -720 valid");
+    CHECK(valid_profile_event(d, 6), "solar -720 valid");
     d.portions = 0;
-    CHECK(!valid_profile_event(d), "0 portions invalid");
+    CHECK(!valid_profile_event(d, 6), "0 portions invalid");
     d.portions = 7;
-    CHECK(!valid_profile_event(d), "7 portions invalid");
+    CHECK(!valid_profile_event(d, 6), "7 portions invalid");
     d.portions = 6;
     d.event = 4;
-    CHECK(!valid_profile_event(d), "event 4 invalid");
+    CHECK(!valid_profile_event(d, 6), "event 4 invalid");
     d.event = 3;
     d.anchor = 3;
-    CHECK(!valid_profile_event(d), "anchor 3 invalid");
+    CHECK(!valid_profile_event(d, 6), "anchor 3 invalid");
   }
 
   // ---- Config keys (value ranges are FeederCore's; tested through the engine in test_ble_engine.cpp) ----

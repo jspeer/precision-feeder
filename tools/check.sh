@@ -80,12 +80,18 @@ for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml; do
   "$ESPHOME" config "$CONFIG/$f" >/dev/null
 done
 if [ "${1:-}" = "--compile" ]; then
-  for f in basic.yaml ble.yaml ble_key_on_device.yaml; do
+  for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml; do
     echo "== esphome compile examples/$f"
-    "$ESPHOME" compile "$CONFIG/$f" 2>&1 | tee "$OUT/compile.log" | grep -E "^(RAM|Flash):" || true
-    if grep -q "warning:" "$OUT/compile.log"; then
-      echo "compiler warnings in $f:"
-      grep "warning:" "$OUT/compile.log"
+    # ESPHome's own exit status decides (the filter below only prints the sizes); a failed build fails the check.
+    if ! "$ESPHOME" compile "$CONFIG/$f" > "$OUT/compile.log" 2>&1; then
+      echo "compiling $f failed:"
+      tail -40 "$OUT/compile.log"
+      exit 1
+    fi
+    grep -E "^(RAM|Flash):" "$OUT/compile.log" || true
+    if grep -qiE "warning:|error:" "$OUT/compile.log"; then
+      echo "compiler warnings or errors in $f:"
+      grep -iE "warning:|error:" "$OUT/compile.log"
       exit 1
     fi
   done

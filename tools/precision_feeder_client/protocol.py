@@ -78,6 +78,7 @@ RESULTS = {
     14: "unsupported",
     15: "calibration mode is off",
     16: "not authorized",
+    17: "saving to flash failed",
 }
 AUTH_DETAILS = {
     0: "not authenticated (send AUTH first)",

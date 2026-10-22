@@ -153,6 +153,8 @@ void BleEngine::handle_auth_(uint8_t seq, const uint8_t *proof, size_t n) {
     this->log_(LogLevel::kWarn, "BLE authentication refused (detail %u)", detail);
     if (detail == proto::AUTH_DETAIL_BAD_PROOF)
       this->new_nonce_();  // a guess is never tried against the same challenge twice
+    if (!this->session_.authenticated())
+      this->clear_reads_();  // no longer authenticated: nothing published for the session stays readable (2.1.2)
   }
   this->add_activity_(ActivityKind::AUTH, proto::OP_AUTH, seq, result, detail);
   this->respond_(seq, proto::OP_AUTH, result, detail);
@@ -406,7 +408,7 @@ BleEngine::Answer BleEngine::handle_profile_(const uint8_t *d, size_t n) {
     }
     case PROFILE_TAG_EVENT: {
       ProfileEventRec r;
-      if (!decode_profile_event(d, n, r) || !valid_profile_event(r))
+      if (!decode_profile_event(d, n, r) || !valid_profile_event(r, f.capacity()))
         return {RES_INVALID_ARG, profile_hint};
       Event &e = f.cfg.profiles[r.profile].ev[r.event];
       e.enabled = r.enabled;

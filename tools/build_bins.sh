@@ -49,10 +49,16 @@ for variant in full no-ble; do
   fi
   echo "== esphome compile firmware/$variant.yaml"
   touch "$WORK/.started-$variant"
-  "$ESPHOME" compile "$WORK/precision-feeder-$variant.yaml" 2>&1 | tee "$WORK/compile-$variant.log" | grep -E "^(RAM|Flash):" || true
-  if grep -q "warning:" "$WORK/compile-$variant.log"; then
-    echo "compiler warnings in $variant:"
-    grep "warning:" "$WORK/compile-$variant.log"
+  # ESPHome's own exit status decides; the filter only prints the sizes. A failed build fails the release.
+  if ! "$ESPHOME" compile "$WORK/precision-feeder-$variant.yaml" > "$WORK/compile-$variant.log" 2>&1; then
+    echo "compiling $variant failed:"
+    tail -40 "$WORK/compile-$variant.log"
+    exit 1
+  fi
+  grep -E "^(RAM|Flash):" "$WORK/compile-$variant.log" || true
+  if grep -qiE "warning:|error:" "$WORK/compile-$variant.log"; then
+    echo "compiler warnings or errors in $variant:"
+    grep -iE "warning:|error:" "$WORK/compile-$variant.log"
     exit 1
   fi
   # Both variants have the device name precision-feeder, so they share a build folder: take the image just made.

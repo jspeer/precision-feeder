@@ -34,8 +34,9 @@ button:
     entity_category: config
     on_press:
       - lambda: |-
-          // Not in the middle of a feed: an interrupted move would leave the tray position unknown.
-          if (id(feeder).tray_state() == precision_feeder::TrayState::MOVING) {
+          // Not while anything moves (a feed, a reload, a calibration move): an interrupted move would leave the tray
+          // position unknown.
+          if (id(feeder).busy()) {
             ESP_LOGW("precision_feeder", "Restart refused: the tray is moving");
             return;
           }

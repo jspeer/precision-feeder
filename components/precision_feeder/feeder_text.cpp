@@ -226,6 +226,8 @@ const char *FeederCore::result_name(Result r) {
       return "clock from BLE disabled";
     case Result::UNSUPPORTED:
       return "unsupported";
+    case Result::STORAGE_FAILED:
+      return "saving to flash failed";
     case Result::NOT_CALIBRATING:
       return "calibration mode is off";
     case Result::NONE:
@@ -350,6 +352,8 @@ std::string FeederCore::faults_text() {
     if (this->mech_->fault_text()[0] != '\0')
       add((std::string("motor fault: ") + this->mech_->fault_text()).c_str());
   }
+  if (this->storage_fault_)
+    add("saving to flash failed (feeds are refused while it fails)");
   if (this->state_.position >= this->capacity())
     add("tray empty");
   else if (this->needs_food())

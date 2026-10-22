@@ -100,7 +100,9 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
 | "Feed refused: daily cap" | More portions in 24 hours than **Daily Portion Cap**. **Edited Profile** warns when a profile's day exceeds the cap. |
 | Slots do not line up, worse towards slot 6 | The servo's pulse range: calibrate **Servo Max Pulse** first ([CALIBRATION.md](CALIBRATION.md)). |
 | Servo buzzes or strains at one end | The pulse range is too wide for your servo; narrow **Servo Min/Max Pulse**. |
-| Tray position "unknown" | Power was cut or Stop pressed during a move. Declare the position or press Tray Reload. |
+| Tray position "unknown" | Power was cut or Stop pressed during a move (a feed, a reload or a declared position), or the disc was calibrated. Declare the position or press Tray Reload. |
+| The board restarts when it feeds | The servo's supply sags: check the capacitor across the servo's power (found on the bench with it off). The move is then cut short, so the position is unknown. |
+| Faults: "saving to flash failed" | The feeder could not save before a move, so it did not move (2.1.2). Restart it; if it persists, the flash may be failing. |
 | The clock is not set | No NTP answer: check the network, or set **NTP Servers** to one your network can reach. **Time Source** and the clock's age (Diagnostics) show when it last synced. |
 | Wrong times (an hour off) | The time zone: the web app's (Configuration), otherwise the build's, or Home Assistant's with the `time_homeassistant` package unless the build pins one. |
 | Home Assistant does not find it | Another network segment: add the ESPHome integration by IP with the API key (port 6053). |

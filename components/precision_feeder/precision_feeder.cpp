@@ -50,7 +50,8 @@ void PrecisionFeeder::setup() {
   this->pref_settings_ = global_preferences->make_preference<Settings>(fnv1_hash("precision_feeder.settings.v4"));
   this->pref_calibration_ =
       global_preferences->make_preference<Calibration>(fnv1_hash("precision_feeder.calibration.v1"));
-  this->pref_state_ = global_preferences->make_preference<State>(fnv1_hash("precision_feeder.state"));
+  // Version 3 (2.1.2, 64 history entries) under its own key; version 2's is migrated below.
+  this->pref_state_ = global_preferences->make_preference<State>(fnv1_hash("precision_feeder.state.v3"));
   this->pref_device_ = global_preferences->make_preference<Device>(fnv1_hash("precision_feeder.device.v2"));
   Settings settings;
   Calibration calibration;
@@ -58,7 +59,16 @@ void PrecisionFeeder::setup() {
   Device device;
   const bool have_settings = this->pref_settings_.load(&settings);
   const bool have_calibration = this->pref_calibration_.load(&calibration);
-  const bool have_state = this->pref_state_.load(&state);
+  bool have_state = this->pref_state_.load(&state);
+  if (!have_state) {  // firmware 1.0 to 2.1.1: the tray position, its intent and the history kept
+    legacy::StateV2 v2;
+    auto pref_v2 = global_preferences->make_preference<legacy::StateV2>(fnv1_hash("precision_feeder.state"));
+    if (pref_v2.load(&v2) && v2.version == 2) {
+      state = legacy::migrate_state_v2(v2);
+      have_state = true;
+      ESP_LOGI(TAG, "Tray state migrated from version 2 (position, intent and history kept)");
+    }
+  }
   const bool have_device = this->pref_device_.load(&device);
   legacy::DeviceV1 device_v1;
   bool have_device_v1 = false;
@@ -113,7 +123,7 @@ void PrecisionFeeder::restart_if_due_() {
     return;
   // Not in the middle of a feed: an interrupted move would leave the tray position unknown. Feeding goes on until
   // the tray stops; the image waits in the update partition.
-  if (this->tray_state() == TrayState::MOVING)
+  if (this->busy())  // a feed, a positioning move or a calibration move
     return;
   this->restart_at_.store(0);
   ESP_LOGI(TAG, "Restarting into the uploaded firmware");
@@ -181,8 +191,8 @@ Device PrecisionFeeder::load_device_early_() {
 
 // ESPHome sets the name once, from the YAML (App.pre_setup(), before any component starts) and has no setter. A name
 // saved on the device replaces it here, before Wi-Fi (DHCP host name), mDNS, the API, BLE and the access point read it.
-// The derived class only gives access to the protected member (checked against ESPHome 2026.9.1: `StringRef name_`);
-// if ESPHome renames it, this stops compiling rather than misbehaving.
+// The derived class only gives access to the protected member (checked against ESPHome 2026.9.1 and 2026.10.0:
+// `StringRef name_`); if ESPHome renames it, this stops compiling rather than misbehaving.
 namespace {
 struct AppName : Application {
   static void set(const char *name, size_t len) { App.*(&AppName::name_) = StringRef(name, len); }
@@ -433,10 +443,11 @@ void PrecisionFeeder::hal_servo_release() {
     this->output_->set_level(0.0f);
 }
 
-void PrecisionFeeder::hal_save_settings(const Settings &settings, bool flush) {
-  this->pref_settings_.save(&settings);
+bool PrecisionFeeder::hal_save_settings(const Settings &settings, bool flush) {
+  bool ok = this->pref_settings_.save(&settings);
   if (flush)
-    global_preferences->sync();
+    ok = global_preferences->sync() && ok;  // on flash, or not: the core refuses to feed a one-shot it could not save
+  return ok;
 }
 
 void PrecisionFeeder::hal_save_calibration(const Calibration &calibration, bool flush) {
@@ -445,10 +456,11 @@ void PrecisionFeeder::hal_save_calibration(const Calibration &calibration, bool 
     global_preferences->sync();
 }
 
-void PrecisionFeeder::hal_save_state(const State &state, bool flush) {
-  this->pref_state_.save(&state);
+bool PrecisionFeeder::hal_save_state(const State &state, bool flush) {
+  bool ok = this->pref_state_.save(&state);
   if (flush)
-    global_preferences->sync();
+    ok = global_preferences->sync() && ok;  // a move's intent that did not reach flash stops the move
+  return ok;
 }
 
 void PrecisionFeeder::hal_save_tuning(const Tuning &tuning, bool flush) {
@@ -610,9 +622,10 @@ class SettingsGuard : public AsyncWebHandler {
     return action != std::string::npos && action > 0 && this->feeder_->is_protected(url.substr(1, action - 1));
   }
 
-  // The web server's task has a small stack (ESP-IDF's 4 KB plus 256 bytes in ESPHome 2026.9.1), and a protected write
-  // passed on below runs the web server's own handler and the entity's action on top of ours. So everything of ours
-  // (the URL buffer, the routes) lives in handle_own_(), whose frame is gone before the web server's handler starts.
+  // The web server's task has a small stack (ESP-IDF's 4 KB plus 256 bytes in ESPHome 2026.9.1, 4,512 bytes in
+  // 2026.10.0), and a protected write passed on below runs the web server's own handler and the entity's action on top
+  // of ours. So everything of ours (the URL buffer, the routes) lives in handle_own_(), whose frame is gone before the
+  // web server's handler starts.
   // Inlined into one frame, they overflowed that stack on every protected write (found on the bench, 2.0.0 N8).
   void handleRequest(AsyncWebServerRequest *request) override {
     if (!this->handle_own_(request))
@@ -738,8 +751,8 @@ class SettingsGuard : public AsyncWebHandler {
     char body[64];
     std::snprintf(body, sizeof(body), "{\"error\":\"%s\",\"wait\":%u}", ERRORS[static_cast<uint8_t>(result)],
                   static_cast<unsigned>(wait));
-    // ESPHome's ESP-IDF request (2026.9.1) knows only 200, 204, 400, 401, 404, 409 and 422 and sends anything else as
-    // 500 (found on the bench), so these two go straight to ESP-IDF, which takes any status line.
+    // ESPHome's ESP-IDF request (2026.9.1 and 2026.10.0) knows only 200, 204, 400, 401, 404, 409 and 422 and sends
+    // anything else as 500 (found on the bench), so these two go straight to ESP-IDF, which takes any status line.
     httpd_req_t *raw = *request;
     httpd_resp_set_status(raw, result == AuthResult::WAIT ? "429 Too Many Requests" : "403 Forbidden");
     httpd_resp_set_type(raw, "application/json");

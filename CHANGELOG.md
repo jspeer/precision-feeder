@@ -6,6 +6,39 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.1.2: safety fixes from two code reviews, and ESPHome 2026.10.0 (not released yet)
+
+Two reviews of 2.1.1 (OpenAI Codex) found paths where a power cut, a lost encoder or a failed flash write could feed
+twice or leave a position trusted that is not. Each was reproduced in a host test, then fixed. Nothing changes in
+everyday use, except that a reload or a declared position now counts as moving for a moment (the guard answers
+"busy" until the tray has settled).
+
+- **Daily cap on a large disc:** the cap counted only the last 8 feeds, enough for the servo's 6 portions but not a
+  disc's: a 9th feed in 24 h went uncounted. The history now keeps 64. The tray state record moves to version 3 under
+  a new key; a 2.1.1 record is migrated at the first boot with everything kept.
+- **Reload, declare and the end of calibration** saved the new position at once and counted as stationary while the
+  servo was still turning: a power cut on the way left a trusted position, and a restart did not wait. They now save
+  the move as an intent first and count as moving until the tray has settled.
+- **Disc calibration:** Stop did not stop a calibration move; a restart did not wait for one; and a power cut in
+  calibration left the old position trusted. Now the position is saved as unknown before the disc can move in
+  calibration (and before a change of slot count, ticks per turn, trim or direction), Stop stops it, and a restart
+  waits.
+- **Disc, lost encoder:** while creeping onto a slot, or in the wiggle, the motor could drive for up to 500 ms with no
+  encoder edge, its pulses growing: in the simulation a 60-slot disc moved about 4.8 slots uncounted. Powered time
+  without an edge is now bounded in every phase to three quarters of a slot at full speed (25 to 50 ms).
+- **One-shot feeds** could feed twice after a power cut within their minute (marked done two seconds after the
+  feed). They are saved as done first.
+- **Events and the clock:** a clock set back across a date could repeat an event that had already fed. An event's
+  fed day now only moves forward and is saved before it feeds.
+- **Flash write failures** were ignored. A feed whose intent cannot be saved now does not move and answers
+  `STORAGE_FAILED` (BLE result 17, new); Faults says "saving to flash failed".
+- **BLE:** an event could not have more than 6 portions, even on a disc (now up to the portions per load); a failed
+  AUTH on an authenticated connection left Status and the other records readable (now cleared, as on a disconnect).
+- **Checks:** `tools/check.sh --compile` and `tools/build_bins.sh` reported success when ESPHome failed to build.
+- **ESPHome 2026.10.0** (ESP-IDF 5.5.6) for the prebuilt binaries and CI; YAML builds should use it too.
+- Docs: DESIGN.md's status and password line, the servo's travel in CALIBRATION.md (150 degrees from slot 0 to 6),
+  the protocol document's credits.
+
 ## 2.1.1: MQTT topic prefix (2026-10-21)
 
 The first release of 2.1. 2.0.2's feeders update to it directly; 2.1.0 was never released (its bench run found the

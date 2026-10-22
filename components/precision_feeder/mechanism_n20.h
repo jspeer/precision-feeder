@@ -216,6 +216,7 @@ class N20Mechanism : public Mechanism {
   void stop() override;
   void release() override {}  // the motion releases the bridge itself after every move
   uint32_t settle_ms() const override { return 0; }
+  bool moving() override;
   const char *fault_text() const override { return this->fault_; }
 
   bool calibration_action(uint8_t action, int32_t arg, uint32_t now_ms) override;

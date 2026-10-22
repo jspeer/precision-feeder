@@ -231,9 +231,11 @@ inline bool decode_profile_event(const uint8_t *p, size_t n, ProfileEventRec &r)
   return true;
 }
 
-inline bool valid_profile_event(const ProfileEventRec &r) {
-  if (r.profile >= PROFILES || r.event >= EVENTS_PER_PROFILE || r.anchor > 2 || r.portions < 1 || r.portions > 6 ||
-      r.days > 0x7F)
+/// `max_portions`: the feeder's portions per load (Info positions - 1), which an event may not exceed (firmware 2.1.0
+/// made it the mechanism's; this check kept 6 until 2.1.2).
+inline bool valid_profile_event(const ProfileEventRec &r, uint8_t max_portions) {
+  if (r.profile >= PROFILES || r.event >= EVENTS_PER_PROFILE || r.anchor > 2 || r.portions < 1 ||
+      r.portions > max_portions || r.days > 0x7F)
     return false;
   if (r.anchor == 0)
     return r.offset_min >= 0 && r.offset_min <= 24 * 60 - 1;
