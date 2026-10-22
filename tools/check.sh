@@ -31,6 +31,10 @@ echo "== C++ host tests"
   components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp -o "$OUT/test_n20"
 "$OUT/test_n20"
 "$OUT/test_ble_engine"
+# MQTT's own topics (feeder_mqtt.*, 2.2.0).
+"$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder -Itests tests/test_mqtt.cpp \
+  components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp -o "$OUT/test_mqtt"
+"$OUT/test_mqtt"
 
 echo "== Python tests (client, and limits consistency)"
 (cd tools && python3 -m unittest -q test_precision_feeder_ble test_make_release test_check_scopes)

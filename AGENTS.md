@@ -111,7 +111,8 @@ substitutions.
   `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`,
-  `c++ -std=c++17 -I../components/precision_feeder -I. -Ireference test_n20.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`; and
+  `c++ -std=c++17 -I../components/precision_feeder -I. -Ireference test_n20.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`,
+  `c++ -std=c++17 -I../components/precision_feeder -I. test_mqtt.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`; and
   `python3 -m unittest test_precision_feeder_ble test_make_release test_check_scopes` in `tools/`. The C++ and
   Python protocol tests share golden byte vectors; change them together.
 - Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
@@ -216,11 +217,13 @@ components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock;
               interface, mechanism_servo.* the servo fan tray, mechanism_n20.* the direct-drive disc; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; feeder_password.cpp
               settings password, BLE key and BLE permissions; feeder_pins.cpp runtime pins and pin validator;
-              feeder_network.cpp name, access-point password and Wi-Fi checks; calendar.h and
+              feeder_network.cpp name, access-point password and Wi-Fi checks; feeder_mqtt.cpp MQTT's
+              own topics (2.2.0); calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
               and precision_feeder_ble/ (optional BLE protocol: protocol.h and BleEngine in
               engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)
               and precision_feeder_n20/ (the disc on the device: DRV8833 through LEDC, encoder through PCNT)
+              and precision_feeder_mqtt/ (MQTT's own topics on the device; their logic is feeder_mqtt.*, pure)
 packages/     reusable YAML packages (core.yaml includes mechanism_servo.yaml and tray_recovery.yaml;
               mechanism_n20.yaml adds the direct-drive disc and drive_select.yaml; mqtt.yaml is optional)
 examples/     basic.yaml, ble.yaml, disc.yaml

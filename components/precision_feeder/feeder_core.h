@@ -61,6 +61,7 @@ constexpr int32_t MIN_GAP_S_LO = 10, MIN_GAP_S_HI = 3600;           // minimum s
 constexpr int32_t PORTION_GAP_S_LO = 1, PORTION_GAP_S_HI = 60;      // seconds between portions of one feed
 constexpr int32_t RELOAD_PAUSE_MIN_LO = 0, RELOAD_PAUSE_MIN_HI = 60;
 constexpr int32_t REFILL_DAYS_LO = 1, REFILL_DAYS_HI = 30;
+constexpr int32_t EVERY_N_LO = 1, EVERY_N_HI = 14;                  // a profile's cadence: feed every N days
 // The daily cap, the portions per command and an event's portions go from 1 up to the mechanism's capacity() (6 for the
 // servo). The YAML repeats that as ${tray_capacity}, which the mechanism's package sets.
 constexpr int32_t DAILY_CAP_LO = 1;                                 // portions in any rolling 24 h
@@ -92,7 +93,8 @@ constexpr unsigned PASSWORD_HASH_SIZE = 32;            // SHA-256
 constexpr uint8_t DEVICE_SETUP_DONE = 0x01;        // the setup wizard has finished
 constexpr uint8_t DEVICE_BLE_GUARD = 0x02;         // BLE may change the guard limits (default on)
 constexpr uint8_t DEVICE_BLE_CALIBRATION = 0x04;   // BLE may change the calibration (default on)
-constexpr uint8_t DEVICE_FLAGS_KNOWN = DEVICE_SETUP_DONE | DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION;
+constexpr uint8_t DEVICE_MQTT_GUARD = 0x08;        // MQTT may change the guard limits (default off; 2.2.0, D24)
+constexpr uint8_t DEVICE_FLAGS_KNOWN = DEVICE_SETUP_DONE | DEVICE_BLE_GUARD | DEVICE_BLE_CALIBRATION | DEVICE_MQTT_GUARD;
 
 // Settings password (DESIGN.md section 10.1). The browser derives a key from the password with PBKDF2 and proves it
 // knows the key with an HMAC over a one-time challenge, so the password never crosses plain HTTP.
@@ -234,6 +236,7 @@ enum class Result : uint8_t {
   NOT_CALIBRATING = 15,     // the command needs calibration mode
   // 16 is the BLE layer's NOT_AUTHORIZED.
   STORAGE_FAILED = 17,      // a safety-critical save to flash failed, so nothing moved (2.1.2)
+  NOT_ALLOWED = 18,         // this channel may not change that (MQTT's guard limits with their switch off; 2.2.0)
   NONE = 255,
 };
 
@@ -608,6 +611,19 @@ class FeederCore : private ServoOutput {
   static bool parse_days(const std::string &text, uint8_t &mask);
   std::string event_time_text();
   bool set_event_time_text(const std::string &text);
+
+  // ---- the schedule by profile and event (MQTT, 2.2.0; the editor's setters above use these) ----
+  // Each checks its profile, event and value (INVALID_ARG and no change when out of range) and saves shortly after.
+  Result set_event_enabled(uint8_t profile, uint8_t event, bool on);
+  /// The offset resets when switching between clock and solar (12:00, or 0 minutes from the sun).
+  Result set_event_anchor(uint8_t profile, uint8_t event, uint8_t anchor);
+  /// "HH:MM" for a clock event; "+HH:MM", "-HH:MM" or "+90" (minutes) from the sun, at most 12 hours.
+  Result set_event_time(uint8_t profile, uint8_t event, const std::string &text);
+  Result set_event_portions(uint8_t profile, uint8_t event, int32_t portions);  // 1 to capacity()
+  Result set_event_days(uint8_t profile, uint8_t event, uint8_t mask);
+  Result set_profile_every_n(uint8_t profile, int32_t every_n);  // EVERY_N_LO to EVERY_N_HI
+  Result set_profile_fast_days(uint8_t profile, uint8_t mask);
+  std::string event_time_text(uint8_t profile, uint8_t event) const;
   bool add_oneshot(const std::string &local_datetime, uint8_t portions);
   void clear_oneshots();
 
@@ -785,6 +801,11 @@ class FeederCore : private ServoOutput {
   bool ble_may_change_guard() const { return (this->dev_.flags & DEVICE_BLE_GUARD) != 0; }
   bool ble_may_change_calibration() const { return (this->dev_.flags & DEVICE_BLE_CALIBRATION) != 0; }
   void set_ble_may_change_guard(bool allowed) { this->set_device_flag_(DEVICE_BLE_GUARD, allowed, "guard limits"); }
+  /// MQTT may change the guard limits (its policy topics, docs/MQTT.md). Off by default; web app only (D24).
+  bool mqtt_may_change_guard() const { return (this->dev_.flags & DEVICE_MQTT_GUARD) != 0; }
+  void set_mqtt_may_change_guard(bool allowed) {
+    this->set_device_flag_(DEVICE_MQTT_GUARD, allowed, "guard limits");
+  }
   void set_ble_may_change_calibration(bool allowed) {
     this->set_device_flag_(DEVICE_BLE_CALIBRATION, allowed, "calibration");
   }

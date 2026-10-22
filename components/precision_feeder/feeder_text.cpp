@@ -30,14 +30,65 @@ void FeederCore::restart_cadence_today(int profile) {
 }
 
 void FeederCore::set_event_anchor(uint8_t anchor) {
-  Event &e = this->edit_event();
-  anchor = std::min<uint8_t>(anchor, static_cast<uint8_t>(Anchor::SUNSET));
+  this->set_event_anchor(this->editor_profile, this->editor_event,
+                         std::min<uint8_t>(anchor, static_cast<uint8_t>(Anchor::SUNSET)));
+}
+
+// ---- the schedule by profile and event (2.2.0) ----
+
+static bool event_ok(uint8_t profile, uint8_t event) { return profile < NUM_PROFILES && event < EVENTS_PER_PROFILE; }
+
+Result FeederCore::set_event_enabled(uint8_t profile, uint8_t event, bool on) {
+  if (!event_ok(profile, event))
+    return Result::INVALID_ARG;
+  this->cfg.profiles[profile].ev[event].enabled = on ? 1 : 0;
+  this->cfg_changed();
+  return Result::OK;
+}
+
+Result FeederCore::set_event_anchor(uint8_t profile, uint8_t event, uint8_t anchor) {
+  if (!event_ok(profile, event) || anchor > static_cast<uint8_t>(Anchor::SUNSET))
+    return Result::INVALID_ARG;
+  Event &e = this->cfg.profiles[profile].ev[event];
   const bool was_clock = e.anchor == static_cast<uint8_t>(Anchor::CLOCK);
   const bool now_clock = anchor == static_cast<uint8_t>(Anchor::CLOCK);
   if (was_clock != now_clock)
     e.offset_min = now_clock ? 12 * 60 : 0;
   e.anchor = anchor;
   this->cfg_changed();
+  return Result::OK;
+}
+
+Result FeederCore::set_event_portions(uint8_t profile, uint8_t event, int32_t portions) {
+  if (!event_ok(profile, event) || portions < 1 || portions > this->capacity())
+    return Result::INVALID_ARG;
+  this->cfg.profiles[profile].ev[event].portions = static_cast<uint8_t>(portions);
+  this->cfg_changed();
+  return Result::OK;
+}
+
+Result FeederCore::set_event_days(uint8_t profile, uint8_t event, uint8_t mask) {
+  if (!event_ok(profile, event) || mask > 0x7F)
+    return Result::INVALID_ARG;
+  this->cfg.profiles[profile].ev[event].days = mask;
+  this->cfg_changed();
+  return Result::OK;
+}
+
+Result FeederCore::set_profile_every_n(uint8_t profile, int32_t every_n) {
+  if (profile >= NUM_PROFILES || every_n < EVERY_N_LO || every_n > EVERY_N_HI)
+    return Result::INVALID_ARG;
+  this->cfg.profiles[profile].every_n = static_cast<uint8_t>(every_n);
+  this->cfg_changed();
+  return Result::OK;
+}
+
+Result FeederCore::set_profile_fast_days(uint8_t profile, uint8_t mask) {
+  if (profile >= NUM_PROFILES || mask > 0x7F)
+    return Result::INVALID_ARG;
+  this->cfg.profiles[profile].fast_days = mask;
+  this->cfg_changed();
+  return Result::OK;
 }
 
 std::string FeederCore::format_days(uint8_t mask) {
@@ -102,8 +153,12 @@ bool FeederCore::parse_days(const std::string &text, uint8_t &mask) {
   return true;
 }
 
-std::string FeederCore::event_time_text() {
-  const Event &e = this->edit_event();
+std::string FeederCore::event_time_text() { return this->event_time_text(this->editor_profile, this->editor_event); }
+
+std::string FeederCore::event_time_text(uint8_t profile, uint8_t event) const {
+  if (!event_ok(profile, event))
+    return "";
+  const Event &e = this->cfg.profiles[profile].ev[event];
   char buf[16];
   if (e.anchor == static_cast<uint8_t>(Anchor::CLOCK)) {
     std::snprintf(buf, sizeof(buf), "%02d:%02d", e.offset_min / 60, e.offset_min % 60);
@@ -115,7 +170,13 @@ std::string FeederCore::event_time_text() {
 }
 
 bool FeederCore::set_event_time_text(const std::string &text) {
-  Event &e = this->edit_event();
+  return this->set_event_time(this->editor_profile, this->editor_event, text) == Result::OK;
+}
+
+Result FeederCore::set_event_time(uint8_t profile, uint8_t event, const std::string &text) {
+  if (!event_ok(profile, event))
+    return Result::INVALID_ARG;
+  Event &e = this->cfg.profiles[profile].ev[event];
   const char *s = text.c_str();
   while (*s == ' ')
     s++;
@@ -130,24 +191,24 @@ bool FeederCore::set_event_time_text(const std::string &text) {
   int minutes;
   if (std::sscanf(s, "%d:%d", &h, &m) == 2) {
     if (h < 0 || m < 0 || m > 59)
-      return false;
+      return Result::INVALID_ARG;
     minutes = h * 60 + m;
   } else if (std::sscanf(s, "%d", &h) == 1 && h >= 0 && has_sign) {
     minutes = h;  // "+90" means plus 90 minutes (solar anchors only)
   } else {
-    return false;
+    return Result::INVALID_ARG;
   }
   if (e.anchor == static_cast<uint8_t>(Anchor::CLOCK)) {
     if (has_sign || minutes > 24 * 60 - 1)
-      return false;
+      return Result::INVALID_ARG;
     e.offset_min = static_cast<int16_t>(minutes);
   } else {
     if (minutes > 720)
-      return false;
+      return Result::INVALID_ARG;
     e.offset_min = static_cast<int16_t>(sign * minutes);
   }
   this->cfg_changed();
-  return true;
+  return Result::OK;
 }
 
 bool FeederCore::add_oneshot(const std::string &local_datetime, uint8_t portions) {
@@ -169,6 +230,11 @@ bool FeederCore::add_oneshot(const std::string &local_datetime, uint8_t portions
     return false;
   if (this->time_valid() && at <= this->hal_epoch())
     return false;  // in the past
+  // The same feed again (a command sent twice, or kept by an MQTT broker and sent at every reconnect): already there.
+  for (const OneShot &os : this->cfg.oneshots) {
+    if (os.epoch == static_cast<uint32_t>(at) && !os.done && os.portions == portions)
+      return true;
+  }
   for (uint8_t i = 0; i < MAX_ONESHOTS; i++) {
     OneShot &os = this->cfg.oneshots[i];
     if (os.epoch == 0 || os.done) {
@@ -228,6 +294,8 @@ const char *FeederCore::result_name(Result r) {
       return "unsupported";
     case Result::STORAGE_FAILED:
       return "saving to flash failed";
+    case Result::NOT_ALLOWED:
+      return "not allowed";
     case Result::NOT_CALIBRATING:
       return "calibration mode is off";
     case Result::NONE:

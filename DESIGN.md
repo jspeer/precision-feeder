@@ -832,10 +832,10 @@ binary's config.
   (1,619,707 bytes, RAM 48.1%), **no-BLE 69.8%** (1,281,675 bytes, RAM 38.9%); the examples basic 61.1%, BLE 79.7%,
   disc 62.4%. No 8 MB variant needed.
 
-### 9.6 MQTT (firmware 2.1.0, D20)
+### 9.6 MQTT (firmware 2.1.0, D20; scopes and own topics 2.2.0, D22 to D24)
 
 `packages/mqtt.yaml`, optional, in the prebuilt binaries: ESPHome's MQTT client beside the native API. It publishes
-every entity Home Assistant sees over the API, with Home Assistant discovery (unique IDs from the MAC, so feeders
+every entity Home Assistant sees over the API (since 2.2.0 the slim set, section 7), with Home Assistant discovery (unique IDs from the MAC, so feeders
 never clash), and answers ESPHome's device discovery (`discover_ip`: `esphome/discover` and `esphome/ping/<name>`,
 which the dashboard and Home Assistant use to find the feeder's addresses). The live log is not published.
 
@@ -855,9 +855,22 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   restart too. (2.1.0 and 2.1.1 said "at once"; found on the bench with 2.2.0, fixed in 2.1.2.) The topic prefix
   applies at the next restart: ESPHome subscribes to the command topics while starting up.
 - **No restart on loss** (`reboot_timeout: 0s`), as for the API (AGENTS.md).
-- **Trust:** whoever the broker lets publish to `<prefix>/.../command` can do what Home Assistant can: feed (still
-  through the feed guard), and change the guard limits, the calibration and the pins. The settings password does
-  not apply over MQTT. Use broker accounts and ACLs (docs/SECURITY.md); open item 24.
+- **Its own topics (2.2.0, docs/MQTT.md):** plain topics, one value each, under `<prefix>/feeder/`: the schedule
+  (`schedule/<A|B|C>/event/<1-4>/{enabled,anchor,time,portions,days}`, `every_n_days`, `fast_days`, `restart_cycle`),
+  one-shot feeds (`oneshot/add`, `oneshot/clear`, `oneshot/list`) and the feed guard's limits
+  (`policy/{daily_cap,min_gap_s,portion_gap_s,max_portions_cmd}`), each with a retained state topic and `/set`. The
+  limits apply only with **MQTT Can Change Guard Limits** on (a Device flag, `DEVICE_MQTT_GUARD`, off by default; web
+  app only, protected); refused otherwise with `NOT_ALLOWED` (18). Every value goes through FeederCore's setters
+  (`set_event_*`, `set_profile_*`, `set_daily_cap` ...), which the web app's editor uses too. The routing is
+  `FeederMqtt` (feeder_mqtt.*, pure, tests/test_mqtt.cpp); `components/precision_feeder_mqtt` subscribes to
+  `<prefix>/feeder/#` at run time (a YAML `on_message` topic is fixed at build time, the prefix is not), publishes
+  what changed once a second (so changes from the web app, BLE and the schedule reach MQTT) and everything again after
+  a reconnect, a few messages per loop pass. A refused value is answered with the one in force, plus a `result`
+  topic. Never calibration, pins, keys, network or the 24 h count. A one-shot identical to a pending one is not added
+  again (a retained `oneshot/add`). Cost: 8.8 KB of flash.
+- **Trust:** whoever the broker lets publish to the feeder's topics can feed (through the feed guard), edit the
+  schedule and, with the switch on, change the guard's limits. The settings password does not apply over MQTT. Use
+  broker accounts and ACLs (docs/SECURITY.md). Components are never on MQTT (D26; closes open item 24).
 - Cost: about 132 KB of flash (mostly per-entity discovery code, generated for every entity even when internal).
 
 ## 10. BLE security
@@ -1465,10 +1478,10 @@ precision-feeder/
     which way the disc turns, by eye. And the feed time: about 3.9 s on the first run against the sketch's 2.5 s,
     2.3 s on a later feed; not explained.
 
-24. MQTT and the protected settings (section 9.6). Over MQTT, whoever the broker lets publish can change the guard
-    limits, the calibration and the pins, which the web app guards with the settings password. To decide: make the
-    protected entities read-only over MQTT (no command topic), or keep MQTT equal to Home Assistant and rely on the
-    broker's accounts. Not decided (2026-10-21).
+24. MQTT and the protected settings (section 9.6). Over MQTT, whoever the broker let publish could change the guard
+    limits, the calibration and the pins, which the web app guards with the settings password. **Decided 2026-10-22
+    (firmware 2.2.0, D22 to D26):** MQTT sees only the slim set; its own topics edit the schedule, and the guard's
+    limits only with MQTT Can Change Guard Limits on; components never.
 
 25. Editing the 24 h count (Portions Counted (24 h)). AGENTS.md allowed it by hand in Home Assistant only (the owner's
     exception, 2026-10-14), but the web app's Maintenance page also offered it, behind the settings password (found by

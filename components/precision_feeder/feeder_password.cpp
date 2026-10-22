@@ -175,7 +175,8 @@ void FeederCore::set_device_flag_(uint8_t flag, bool on, const char *what) {
     return;
   this->dev_.flags = static_cast<uint8_t>(on ? this->dev_.flags | flag : this->dev_.flags & ~flag);
   this->hal_save_device(this->dev_);
-  this->log_(LogLevel::kInfo, "BLE may %s change the %s", on ? "now" : "no longer", what);
+  this->log_(LogLevel::kInfo, "%s may %s change the %s", flag == DEVICE_MQTT_GUARD ? "MQTT" : "BLE",
+             on ? "now" : "no longer", what);
 }
 
 void FeederCore::boot_button(bool pressed) {

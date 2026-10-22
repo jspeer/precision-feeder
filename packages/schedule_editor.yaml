@@ -79,12 +79,10 @@ switch:
     lambda: return id(feeder).edit_event().enabled != 0;
     turn_on_action:
       - lambda: |-
-          id(feeder).edit_event().enabled = 1;
-          id(feeder).cfg_changed();
+          id(feeder).set_event_enabled(id(feeder).editor_profile, id(feeder).editor_event, true);
     turn_off_action:
       - lambda: |-
-          id(feeder).edit_event().enabled = 0;
-          id(feeder).cfg_changed();
+          id(feeder).set_event_enabled(id(feeder).editor_profile, id(feeder).editor_event, false);
 
 text:
   - platform: template
@@ -114,8 +112,7 @@ text:
       - lambda: |-
           uint8_t mask;
           if (precision_feeder::PrecisionFeeder::parse_days(x, mask)) {
-            id(feeder).edit_event().days = mask;
-            id(feeder).cfg_changed();
+            id(feeder).set_event_days(id(feeder).editor_profile, id(feeder).editor_event, mask);
           } else {
             ESP_LOGW("schedule_editor", "Days '%s' not understood", x.c_str());
           }
@@ -134,8 +131,7 @@ text:
       - lambda: |-
           uint8_t mask;
           if (precision_feeder::PrecisionFeeder::parse_days(x, mask)) {
-            id(feeder).edit_profile().fast_days = mask;
-            id(feeder).cfg_changed();
+            id(feeder).set_profile_fast_days(id(feeder).editor_profile, mask);
           } else {
             ESP_LOGW("schedule_editor", "Days '%s' not understood", x.c_str());
           }
@@ -170,8 +166,7 @@ number:
     mode: box
     set_action:
       - lambda: |-
-          id(feeder).edit_event().portions = (uint8_t) x;
-          id(feeder).cfg_changed();
+          id(feeder).set_event_portions(id(feeder).editor_profile, id(feeder).editor_event, (int32_t) x);
     update_interval: never
 
   - platform: template
@@ -186,8 +181,7 @@ number:
     # 1 = every day, 2 = every other day, and so on. The cycle starts on the day it was first set; use "Restart Cycle Today" to move it.
     set_action:
       - lambda: |-
-          id(feeder).edit_profile().every_n = (uint8_t) x;
-          id(feeder).cfg_changed();
+          id(feeder).set_profile_every_n(id(feeder).editor_profile, (int32_t) x);
     update_interval: never
 
   - platform: template
