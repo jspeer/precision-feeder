@@ -710,5 +710,5 @@ firmware upload; `no-ble` then `full` on each rig.
   no resets; the saved state then showed "unfinished move", as designed after a reset mid-move.
 - **Disc rig:** each fed after the upload's restart (2.33 s and 2.25 s, whole feed), the drive, calibration, pins
   (button GPIO3) and BLE key kept. MQTT: topics under the name saved on the feeder (`precision-feeder-disc/`, the
-  2.1.1 fix), `offline` then `online` across the restart, 122 entities discovered, a feed over MQTT ok (9 -> 8).
+  2.1.1 fix), `offline` then `online` across the restart, every discovery config under that prefix, a feed over MQTT ok (9 -> 8).
   BLE selftest 13/13. Left on `full` 2.1.1.
