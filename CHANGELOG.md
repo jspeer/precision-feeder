@@ -6,7 +6,16 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.1.0: two drives, the direct-drive disc, and MQTT (not released yet)
+## 2.1.1: MQTT topic prefix (not released yet)
+
+The first release of 2.1. 2.0.2's feeders update to it directly; 2.1.0 was never released (its bench run found the
+fault below), and its changes are listed under 2.1.0.
+
+- Fixed on the bench: with no MQTT topic prefix set, the feeder published under the build's name
+  (`precision-feeder-<6 hex digits>` in the prebuilt firmware) instead of a name saved on the feeder. It now uses the
+  name in use.
+
+## 2.1.0: two drives, the direct-drive disc, and MQTT (not released; see 2.1.1)
 
 Nothing changes for a servo feeder: same entities, same behaviour, same saved settings, same BLE protocol, and the
 prebuilt firmware still starts as a servo feeder. Underneath, the firmware no longer assumes a servo: it carries a

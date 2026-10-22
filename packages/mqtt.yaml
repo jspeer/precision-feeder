@@ -81,8 +81,9 @@ esphome:
         - lambda: |-
             auto *m = id(pf_mqtt);
             const std::string prefix = id(pf_mqtt_prefix).state;
-            if (!prefix.empty())
-              m->set_topic_prefix(prefix, "");
+            // Empty: the device's name, as it is now. ESPHome set the prefix from the build's name before a name
+            // saved on the feeder was applied (found on the bench).
+            m->set_topic_prefix(prefix.empty() ? std::string(App.get_name().c_str()) : prefix, "");
             // ESPHome builds these from the YAML name, without the MAC suffix: follow the prefix in use instead.
             const std::string status = m->get_topic_prefix() + "/status";
             m->set_birth_message(mqtt::MQTTMessage{status, "online", 0, true});

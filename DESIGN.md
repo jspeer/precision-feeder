@@ -804,7 +804,8 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   shows them (`include_internal`), and they are protected settings (section 10.1). The password is a password-mode
   text: the web server sends only a mask, never the value (the web app's box starts empty).
 - **At boot** (on_boot, after the values are restored and before the client starts): the saved settings go into
-  the client, the birth, will and shutdown messages follow the topic prefix in use (ESPHome builds them from the
+  the client, the topic prefix is the saved one or else the device's name in use (ESPHome works its default out
+  from the build's name, before a name saved on the feeder is applied: found on the bench, fixed in 2.1.1), the birth, will and shutdown messages follow the topic prefix in use (ESPHome builds them from the
   YAML name, without the MAC suffix), and the client starts if MQTT is on and a broker is set.
 - **At run time:** on/off, the broker, port and login apply at once (the client is disabled and enabled again).
   The topic prefix applies at the next restart: ESPHome subscribes to the command topics while starting up.
@@ -1394,7 +1395,7 @@ precision-feeder/
     protected entities read-only over MQTT (no command topic), or keep MQTT equal to Home Assistant and rely on the
     broker's accounts. Not decided (2026-10-21).
 
-## 15. Implementation status (v2.1.0)
+## 15. Implementation status (v2.1.1)
 
 2.1.0 (the mechanism interface, the direct-drive disc, both drives in one firmware, MQTT; sections 3.0, 3.3, 3.4,
 9.6). The servo's behaviour is checked against a trace recorded from 2.0.2 (every servo command, release and saved

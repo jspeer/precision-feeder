@@ -679,3 +679,22 @@ The disc rig with the two-drive firmware, BLE and (second build) `packages/mqtt.
     now uses the MAC (`discovery_unique_id_generator: mac`).
 - The web app's MQTT card did not show at first: the firmware had been compiled before the web app was rebuilt.
   Rebuilt and reflashed, it showed (a browser holding the old app needs a reload).
+
+## Release builds of 2.1.0, and 2.1.1 (2026-10-22)
+
+The images from a manual run of the Release workflow (GitHub Actions, ESPHome 2026.9.1), checked against the
+manifest's SHA-256, uploaded through the web app's firmware upload (`POST /feeder/firmware`, no settings password set).
+
+- **Servo rig** (from the two-drive test build): `no-ble` then `full`. Each came up as 2.1.0 with its variant,
+  Mechanism `servo`, Drive Servo, the settings kept; a feed each (6 -> 5, 5 -> 4); the MQTT entities and the web
+  app's MQTT card present; BLE absent in `no-ble`, present in `full` (no key yet, as a prebuilt image starts).
+- **Disc rig** (from a YAML build with its Wi-Fi in the YAML): the `no-ble` image has no network, so it came up
+  as its setup access point; Wi-Fi was given back over USB (Improv). Then: Drive still the disc, the calibration
+  kept (8349 ticks per turn, 15 slots, trim -0.7 degrees), the daily cap 14 and max per command 3 kept. **A feed
+  took 2.46 s** (the move 756 ms), the bench sketch's time; the first run's 3.9 s is not seen with this build.
+  - The button came up off: the prebuilt's button default, GPIO2, is the disc's IN2 (the 2.1.0 rule); Button Pin
+    set to GPIO3 on the feeder, after a restart it was in use.
+  - `full`: the BLE key saved on the feeder (Configuration, Keys); the selftest passed 13/13.
+  - MQTT against Mosquitto: connected, 124 discovery configs, unique IDs from the MAC. **Found:** the topics used
+    the build's name (`precision-feeder-b00604`), not the name saved on the feeder (`precision-feeder-disc`). Fixed in
+    2.1.1.

@@ -31,7 +31,7 @@ It does everything the [original Arduino firmware](https://github.com/FlyingGyro
 adds minute-accurate scheduling with sunrise and sunset events, three switchable schedule profiles, and a feed guard
 that protects the fish from being over-fed.
 
-> **Status: release 2.1.0.** One complete servo feeder (Waveshare ESP32-S3-Zero, MG90S servo) has
+> **Status: release 2.1.1.** One complete servo feeder (Waveshare ESP32-S3-Zero, MG90S servo) has
 > been calibrated and tested on real hardware: feeding, schedules, power cuts, Home Assistant, BLE, and for 2.0 the
 > install page, the setup wizard, firmware updates, NTP servers and upgrades from 1.1. For 2.1 the direct-drive disc
 > has been calibrated and fed on a bench rig (with BLE and MQTT), and the two-drive firmware switched drives on both
