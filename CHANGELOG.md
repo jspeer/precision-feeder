@@ -6,7 +6,7 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.1.1: MQTT topic prefix (not released yet)
+## 2.1.1: MQTT topic prefix (2026-10-21)
 
 The first release of 2.1. 2.0.2's feeders update to it directly; 2.1.0 was never released (its bench run found the
 fault below), and its changes are listed under 2.1.0.

@@ -698,3 +698,17 @@ manifest's SHA-256, uploaded through the web app's firmware upload (`POST /feede
   - MQTT against Mosquitto: connected, 124 discovery configs, unique IDs from the MAC. **Found:** the topics used
     the build's name (`precision-feeder-b00604`), not the name saved on the feeder (`precision-feeder-disc`). Fixed in
     2.1.1.
+
+## Release 2.1.1 on both rigs (2026-10-21)
+
+The 2.1.1 images from the Release workflow (manual run), checked against the manifest, uploaded through the web app's
+firmware upload; `no-ble` then `full` on each rig.
+
+- **Servo rig:** each came up as 2.1.1 with its variant and fed after the upload's restart (three feeds on `full`,
+  two on `no-ble`, all ok, uptime unbroken). An earlier run of the same steps rebooted the board at each feed: the
+  servo's supply capacitor had fallen off, so the servo browned the board out at the start of a move. With it back,
+  no resets; the saved state then showed "unfinished move", as designed after a reset mid-move.
+- **Disc rig:** each fed after the upload's restart (2.33 s and 2.25 s, whole feed), the drive, calibration, pins
+  (button GPIO3) and BLE key kept. MQTT: topics under the name saved on the feeder (`precision-feeder-disc/`, the
+  2.1.1 fix), `offline` then `online` across the restart, 122 entities discovered, a feed over MQTT ok (9 -> 8).
+  BLE selftest 13/13. Left on `full` 2.1.1.
