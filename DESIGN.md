@@ -817,7 +817,9 @@ binary's config.
   ESPHome's own `/update` stays off (`ota: false`): it is guarded only by web auth.
 - Flash (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 79.1%** (1,451,555 bytes), **no-BLE 61.1%**
   (1,120,447 bytes) in 2.0.2; 78.9% and 60.9% in N7. 2.1.0 with both drives and MQTT: **full 88.5%** (1,623,115
-  bytes, RAM 48.2%); **no-BLE 70.4%** (1,291,243 bytes, RAM 39.0%). No 8 MB variant needed.
+  bytes, RAM 48.2%); **no-BLE 70.4%** (1,291,243 bytes, RAM 39.0%). 2.1.2 with ESPHome 2026.10.0: **full 88.3%**
+  (1,619,707 bytes, RAM 48.1%), **no-BLE 69.8%** (1,281,675 bytes, RAM 38.9%); the examples basic 61.1%, BLE 79.7%,
+  disc 62.4%. No 8 MB variant needed.
 
 ### 9.6 MQTT (firmware 2.1.0, D20)
 
