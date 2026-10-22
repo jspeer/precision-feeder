@@ -27,6 +27,9 @@ mqtt:
   reboot_timeout: 0s
   discovery: true
   discover_ip: true
+  # Unique IDs from the MAC: the default ("legacy") gives every feeder the same ones (ESPsensortray_state), so a
+  # second feeder's entities would clash in Home Assistant.
+  discovery_unique_id_generator: mac
   log_topic: null              # the live log stays on the web app's Diagnostics page
 
 web_server:
