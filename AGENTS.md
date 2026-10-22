@@ -7,7 +7,9 @@ Guidance for AI agents (and humans) working on this repository.
 ESPHome firmware for the Precision Feeder Rev2 fish feeder, a servo-driven
 tray with 7 positions (position 0 closed, positions 1 to 6 open, so 6 portions
 per load). Since 2.1.0 what moves the tray is a *mechanism* (the servo fan tray is
-the reference one), so other motor formats can be added; see "Adding a mechanism". It recreates the original Arduino firmware with full parity, then
+the reference one), so other motor formats can be added; see "Adding a mechanism". The second is
+the direct-drive disc (a GA12-N20 gear motor and encoder behind a DRV8833); one firmware carries both, and the drive
+is chosen on the device. It recreates the original Arduino firmware with full parity, then
 improves on it: minute-accurate on-board scheduling with sunrise/sunset
 anchors, three profiles, a source-agnostic feed guard, Home Assistant control,
 and an optional BLE GATT control plane for external controllers.
@@ -105,12 +107,13 @@ substitutions.
   The individual commands, if you need one: With any C++17 compiler, from `tests/`:
   `c++ -std=c++17 -I../components/precision_feeder test_core.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`,
   `c++ -std=c++17 -I../components/precision_feeder test_logic.cpp`,
-  `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`; and
+  `c++ -std=c++17 -I../components/precision_feeder_ble test_protocol.cpp`,
+  `c++ -std=c++17 -I../components/precision_feeder -I. -Ireference test_n20.cpp ../components/precision_feeder/feeder_*.cpp ../components/precision_feeder/mechanism_*.cpp`; and
   `python3 -m unittest test_precision_feeder_ble test_make_release` in `tools/`. The C++ and Python
   protocol tests share golden byte vectors; change them together.
 - Feeder logic belongs in `FeederCore` (`feeder_core.h`, implemented in `feeder_core.cpp`,
   `feeder_schedule.cpp`, `feeder_text.cpp`, `feeder_password.cpp`, `feeder_pins.cpp` and `feeder_network.cpp`; the timezone parser is `tz_rules.h`, SHA-256 and
-HMAC are `crypto.h`; what moves the tray is a mechanism, `mechanism.h`, the servo's in `mechanism_servo.*`), which must stay free of
+HMAC are `crypto.h`; what moves the tray is a mechanism, `mechanism.h`, the servo's in `mechanism_servo.*`, the disc's in `mechanism_n20.*`), which must stay free of
   ESPHome includes so it can be tested on a host. Anything that needs the device
   (clock, servo, flash, log) goes through a `hal_*` hook implemented in
   `precision_feeder.cpp`. New behaviour gets a test in `tests/test_core.cpp`.
@@ -166,8 +169,10 @@ driver and the tray or disc it moves. The servo fan tray (`mechanism_servo.*`,
    entity, the Tuning record), one package `packages/mechanism_<name>.yaml` (its
    `tray_capacity`, pins as substitutions with documented defaults, its tuning and
    calibration entities, protected and in the config category), and an example.
-   `core.yaml` includes exactly one mechanism package; a build for another mechanism
-   changes that one line. Its motor pins go through `offer_motor_pins()` (chosen on the device,
+   `core.yaml` always includes the servo's; another mechanism's package is added beside
+   it in the build's YAML and becomes a drive chosen on the device (Drive, DESIGN.md
+   section 3.4), its driver never set up while it is not the drive. The prebuilt
+   binaries default to the servo. Its motor pins go through `offer_motor_pins()` (chosen on the device,
    checked by `check_pin()`, reserved from the button and LED) and get pin selects in its package.
 6. **The web app follows the device.** A mechanism adds its description to
    `MECHANISMS` in `web/src/mechanisms.js` under its `name()` (its tray drawing, its
@@ -183,7 +188,7 @@ driver and the tray or disc it moves. The servo fan tray (`mechanism_servo.*`,
    `variant/<name>` branch: never tagged, no prebuilt binaries, its own
    `fw_variant` and version suffix (`2.1.0-<name>.N`), and a README banner. It moves
    to main only with the owner's decision, and then joins CI and, if wanted, the
-   release.
+   release. The direct-drive disc moved to main in 2.1.0 (owner, 2026-10-21).
 9. **Docs.** DESIGN.md gets a subsection under section 3 for it (geometry, motion,
    faults, calibration, decisions), docs/CALIBRATION.md a section, CHANGELOG.md an
    entry.
@@ -202,21 +207,24 @@ docs/         user guides: INSTALL.md (prebuilt firmware), BUILDING.md (YAML bui
               SCHEDULING.md, CALIBRATION.md, SECURITY.md; PROTOCOL.md (BLE, authoritative); BENCH.md (hardware
               results); plans/ (release plans)
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; mechanism.h the mechanism
-              interface and mechanism_servo.* the servo fan tray; feeder_schedule.cpp
+              interface, mechanism_servo.* the servo fan tray, mechanism_n20.* the direct-drive disc; feeder_schedule.cpp
               scheduler and projection; feeder_text.cpp editor and status texts; feeder_password.cpp
               settings password, BLE key and BLE permissions; feeder_pins.cpp runtime pins and pin validator;
               feeder_network.cpp name, access-point password and Wi-Fi checks; calendar.h and
               solar.h, pure and host-tested; precision_feeder: the ESPHome adapter)
               and precision_feeder_ble/ (optional BLE protocol: protocol.h and BleEngine in
               engine.*, all host-tested; precision_feeder_ble.* is the ESPHome adapter)
-packages/     reusable YAML packages (core.yaml includes the mechanism's: mechanism_servo.yaml)
-examples/     basic.yaml, ble.yaml
+              and precision_feeder_n20/ (the disc on the device: DRV8833 through LEDC, encoder through PCNT)
+packages/     reusable YAML packages (core.yaml includes mechanism_servo.yaml and tray_recovery.yaml;
+              mechanism_n20.yaml adds the direct-drive disc and drive_select.yaml; mqtt.yaml is optional)
+examples/     basic.yaml, ble.yaml, disc.yaml
 firmware/     full.yaml, no-ble.yaml: the prebuilt binaries (tools/build_bins.sh; nothing secret may reach them)
 install/      index.html: the install page, published to GitHub Pages by .github/workflows/release.yml
 web/          the web app: src/ (plain JavaScript and CSS, no dependencies; tz_zones.js is generated by
               tools/gen_tz_zones.py) and dist/ (built by
               tools/build_web.py, committed; packages/web_server.yaml embeds it)
-tests/        host-side C++ tests (test_core, test_logic, test_protocol, test_ble_engine; fake_feeder.h),
+tests/        host-side C++ tests (test_core, test_logic, test_protocol, test_ble_engine, test_n20 with motor_sim.h and
+              reference/, the disc's bench sketch; fake_feeder.h),
               test_consistency.py, and test_web.mjs (the web app's parsers, run with Node)
 tools/        precision_feeder_ble.py (entry point) and precision_feeder_client/ (protocol: pure, no
               dependencies; client: bleak; selftest; cli), with tests; check.sh runs every check;

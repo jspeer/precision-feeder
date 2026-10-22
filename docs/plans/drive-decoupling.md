@@ -1,9 +1,13 @@
 # Plan: a feeder mechanism interface, then a direct-drive N20 variant
 
-Status: **stage 1 built on `release/2.1.0-mechanism` (2026-10-21), host-tested; not merged, not on hardware.**
-**Stage 2 built on `variant/n20-direct-drive` (2026-10-21), host-tested and compiled; not on hardware, not pushed.**
-S2.1 to S2.7 and S2.9's docs are done; S2.0, S2.0b and S2.8 need the feeder on the bench. D6 checked (GPIO3: Espressif's ESP-IDF JTAG guide for the ESP32-S3). Nothing replaces a
-working binary before it has been on its own branch.
+Status: **done, in firmware 2.1.0 on main (2026-10-21).** Stage 1, stage 2 and the single binary (S2.0b, D17) were
+built on their branches, run on the bench (docs/BENCH.md) and merged together, with MQTT (DESIGN.md section 9.6, D20).
+The single binary defaults to the servo; the disc is a second drive chosen on the device (DESIGN.md section 3.4). What
+is still unchecked on hardware is in DESIGN.md section 14, items 22 and 23. The notes below are the plan as it was
+built, kept for the record.
+
+Earlier status: stage 1 built on `release/2.1.0-mechanism` and stage 2 on `variant/n20-direct-drive` (2026-10-21),
+host-tested and compiled; D6 checked (GPIO3: Espressif's ESP-IDF JTAG guide for the ESP32-S3).
 
 Stage 1 validation (2026-10-21, host only; no hardware attached):
 - The golden servo trace (S1.0, recorded from 2.0.2) matches exactly.

@@ -132,8 +132,10 @@ pin saved on the device wins, and "Build Default" goes back to the YAML's.
     firmware 2.1.0, D6), 33 to 37 (octal flash or PSRAM on some modules, for
     example N8R8) and 43, 44 (UART0: boot messages at every reset);
   - two parts on one pin are refused; the servo always needs a pin;
-  - pins a mechanism other than the servo drives are set in its YAML only (D4, firmware 2.1.0); it reserves them
-    (`reserve_pin`), and the button and LED are refused on them.
+  - pins a mechanism other than the servo drives (the disc's five) are chosen on the device too (D19, section 3.3)
+    and reserved while it is the drive: the button and LED are refused on them, and a build's own button or LED pin
+    that falls on one (the servo's button default, GPIO2, is the disc's IN2) is left off with a warning until another
+    pin is chosen.
   The pin selects offer exactly the pins not refused (`tests/test_consistency.py`).
 - **A bad saved record** (a refused pin, or a clash) falls back to the build's pins at
   boot, with a warning in the log, so a damaged record cannot stop the feeder.
@@ -181,11 +183,11 @@ and keeps everything else itself:
   mechanism's table by one setter (`set_tuning`). A record for another mechanism or table layout is not used (and is
   left as it is until a value changes). The servo has no tuning table: its settings are the YAML's, and its pulse
   range and offsets stay in the Calibration record, so a servo build never writes the Tuning record.
-- **Entities:** Mechanism (`servo`) and Capacity (6), both diagnostic. The web app picks the mechanism's tray drawing,
+- **Entities:** Mechanism (`servo` or `n20-direct`) and Capacity (6, or the disc's), both diagnostic. The web app picks the mechanism's tray drawing,
   wording and calibration cards by Mechanism (`web/src/mechanisms.js`), the servo's when a firmware reports none.
 - Adding one: AGENTS.md, "Adding a mechanism", and [docs/MECHANISMS.md](docs/MECHANISMS.md). The first other
-  mechanism is a direct-drive N20 disc on the branch `variant/n20-direct-drive`
-  ([docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md), stage 2).
+  mechanism is the direct-drive disc (section 3.3; [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md),
+  stage 2), carried beside the servo in one firmware (section 3.4).
 
 ### 3.0.1 The servo fan tray
 
@@ -263,25 +265,24 @@ States: `LOADED(n)` (position n, 0 to 5), `EMPTY` (position 6), `UNKNOWN`
 - Calibration mode: jog the servo, save per-position offsets. Scheduled and
   remote feeds are rejected while calibrating.
 
-### 3.3 The direct-drive disc (branch `variant/n20-direct-drive`)
+### 3.3 The direct-drive disc (firmware 2.1.0)
 
-The first mechanism after the servo, for the owner's own print; it lives on its branch and is not released (AGENTS.md,
-"Adding a mechanism", rule 8). Plan and decisions: [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md),
-stage 2 (D2, D7 to D18).
+The first mechanism after the servo, built for the owner's own print on its branch and moved to main in 2.1.0 (owner,
+2026-10-21; AGENTS.md, "Adding a mechanism", rule 8). Plan and decisions:
+[docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md), stage 2 (D2, D7 to D19). Package
+`packages/mechanism_n20.yaml`, example `examples/disc.yaml`.
 
 **Pins chosen on the device (D19, owner 2026-10-21; replaces D4).** The disc's five pins (IN1, IN2, STBY, encoder A
 and B) are chosen on the feeder like the servo's: the YAML's are the starting values, the MotorPins record
 (`precision_feeder.motor_pins.v1`, read at boot before any driver starts) wins, a change applies at the next restart
 (Restart Needed). The same validator refuses a pin the chip cannot spare, two motor pins on one GPIO, and the button's
 or the LED's; a damaged record falls back to the build's pins. Restart, Restart Needed and Pins In Use moved to
-`packages/restart.yaml`, which hardware.yaml includes and the disc builds include directly.
-**Direction (D17 answered, owner 2026-10-21):** the single binary is the way forward, with selectable pins; how the
-branches come together is still to settle.
+`packages/restart.yaml`, which hardware.yaml includes.
 
 **Hardware.** A GA12-N20 gear motor (6 V, 35 rpm) with a two-channel Hall encoder, behind channel A of a DRV8833,
 turns a 3D-printed disc of open slots directly: 15 on the bench print, 24 degrees apart. Wiring: AIN1 GPIO1, AIN2
 GPIO2, STBY GPIO6, encoder C1 GPIO4 and C2 GPIO5, encoder VCC 3V3, VM 5V, grounds common, 100 µF across 5V and GND.
-The button moves to GPIO3 (GPIO2 is AIN2). The pins are chosen on the device (D19, above) and reserved, so the button
+The button goes on GPIO3 (GPIO2 is AIN2; examples/disc.yaml sets it). The pins are chosen on the device (D19, above) and reserved, so the button
 and LED cannot be moved onto them.
 
 **Model.** All slots are open and one is always over the chute, so a load holds slots − 1 = 14 portions (D8). The
@@ -333,6 +334,31 @@ Slots made the tuning table layout 2; it only appends, so values saved under lay
 
 **Recovery** after a power cut mid-move: in calibration mode, nudge forward until a slot is over the hole, then
 Declare Tray Position (portions fed since the last reload); the grid restarts from where the disc is.
+
+### 3.4 Two drives in one firmware (firmware 2.1.0, D17)
+
+`core.yaml` always carries the servo. Including `packages/mechanism_n20.yaml` adds the disc as a second drive, and
+**Drive** (`packages/drive_select.yaml`, included by the disc's package; Build Default, Servo, Direct-drive disc)
+chooses which one the feeder uses. The prebuilt binaries carry both.
+
+- **Chosen at boot, before any driver starts.** `PinLoader` reads the Device record (the choice is in
+  `reserved[0]`, so the record's layout is unchanged) and the feeder uses that drive; the other's driver is put in
+  ESPHome's "loop done" state before its setup, so it never claims its pins (the servo's LEDC, or the disc's LEDC,
+  PCNT, timer and STBY). A change applies at the next restart (Restart Needed).
+- **Build Default:** the servo, unless the disc's package says otherwise (`disc_build_default`, the component's
+  `build_default`). The prebuilt binaries default to the servo, so every feeder flashed before 2.1.0 stays a servo
+  feeder; `examples/disc.yaml` defaults to the disc.
+- **A change of drive marks the tray position unknown.** The drive the last boot used is in `reserved[1]`; a
+  different one, or none recorded (a firmware from before 2.1.0), means the saved position belongs to another tray,
+  so it is reloaded before anything is fed.
+- **Saved limits are kept as set.** The guard limits are saved up to the largest capacity any drive may have
+  (`CAPACITY_MAX`) and held to the drive's capacity only when used, so a round trip through the servo never cuts a
+  disc's daily cap to 6. Portions above the capacity: scheduled ones are clamped, manual ones refused.
+- **Entities.** Both drives' entities exist (Home Assistant shows the disc's in a servo feeder and the other way
+  round); the web app shows the drive in use (Mechanism). The servo's pin is offered only while the servo is the
+  drive; the disc's pins only while the disc is. Calibration Mode and the recovery entities, which both use, are in
+  `packages/tray_recovery.yaml`, included by `core.yaml`.
+- Cost: about 4.4 KB of flash for the second drive.
 
 ## 4. Feed guard (source-agnostic)
 
@@ -647,10 +673,12 @@ sets at run time. 2.0.0 laid out every field the milestones needed; 2.0.2 added 
 | `ble_key` | BLE key (section 10) | all zero (no key set here) | N4 (built) |
 | `password_scheme`, `password_salt`, `password_hash` | settings password (0: none) | | N2 |
 | `ntp_servers` | up to three NTP servers, "a,b,c" (version 2) | empty | 2.0.2 |
+| `reserved[0]`, `reserved[1]` | the drive chosen on the device, and the drive the last boot used (section 3.4); spare bytes until 2.1.0, so the layout is unchanged | 0 (the build's) | 2.1.0 |
 
 The mechanism's tuning values (firmware 2.1.0) are not in the Device record but in their own, `Tuning`
 (`precision_feeder.tuning.v1`): the mechanism's name, its table layout and up to 16 values. Only a mechanism with a
-tuning table creates it; a value is checked against the table when it is set and again when it is loaded.
+tuning table creates it; a value is checked against the table when it is set and again when it is loaded. The disc's
+motor pins are in a third, `MotorPins` (`precision_feeder.motor_pins.v1`, D19), read at boot before any driver starts.
 
 - **The YAML stays in charge until the device is changed.** A fresh record says "use
   the build's value" everywhere, so a YAML build keeps following edits to its YAML. A
@@ -730,7 +758,8 @@ uses Configuration's own controls and saves as it goes; any step, or the rest, c
 GitHub Actions builds two variants from `firmware/full.yaml` (with BLE) and `firmware/no-ble.yaml`
 (`tools/build_bins.sh`), each as a factory image (first flash, from address 0) and an OTA image. They carry nothing
 personal: no Wi-Fi network, no API key (`api_key_on_device`), no BLE key, a UTC timezone, `name_add_mac_suffix` on,
-and every package except none (the button and status LED included; their pins can be "none"). The fallback access
+and every package except none (the button and status LED included; their pins can be "none"). Since 2.1.0 they
+carry both drives, servo first (section 3.4), and MQTT, off until set up (section 9.6). The fallback access
 point is **open** on a clean flash (owner, 2026-10-16); the wizard strongly recommends setting a password, and
 `GET /feeder/network` reports `"ap":"open"` until one is set (`"ap_build_open"` says the build has none, so
 removing a saved one leaves it open). `tools/build_bins.sh --config` (in check.sh) fails if any secret reaches a
@@ -759,7 +788,31 @@ binary's config.
   `sha256`, `incomplete`, `flash`). The Firmware page checks for the app description too. Then it restarts half a second later, or once the tray stops if it is moving.
   ESPHome's own `/update` stays off (`ota: false`): it is guarded only by web auth.
 - Flash (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 79.1%** (1,451,555 bytes), **no-BLE 61.1%**
-  (1,120,447 bytes) in 2.0.2; 78.9% and 60.9% in N7. No 8 MB variant needed.
+  (1,120,447 bytes) in 2.0.2; 78.9% and 60.9% in N7. 2.1.0 with both drives and MQTT: **full 88.5%** (1,623,115
+  bytes, RAM 48.2%); **no-BLE 70.4%** (1,291,243 bytes, RAM 39.0%). No 8 MB variant needed.
+
+### 9.6 MQTT (firmware 2.1.0, D20)
+
+`packages/mqtt.yaml`, optional, in the prebuilt binaries: ESPHome's MQTT client beside the native API. It publishes
+every entity Home Assistant sees over the API, with Home Assistant discovery (unique IDs from the MAC, so feeders
+never clash), and answers ESPHome's device discovery (`discover_ip`: `esphome/discover` and `esphome/ping/<name>`,
+which the dashboard and Home Assistant use to find the feeder's addresses). The live log is not published.
+
+- **Nothing about the broker is in the image.** MQTT, MQTT Broker, Port, Username, Password and Topic Prefix are
+  template entities saved on the feeder (restore_value), set in the web app (Configuration, MQTT). They are
+  `internal`, so neither Home Assistant nor MQTT itself can point the feeder at another broker; the web server
+  shows them (`include_internal`), and they are protected settings (section 10.1). The password is a password-mode
+  text: the web server sends only a mask, never the value (the web app's box starts empty).
+- **At boot** (on_boot, after the values are restored and before the client starts): the saved settings go into
+  the client, the birth, will and shutdown messages follow the topic prefix in use (ESPHome builds them from the
+  YAML name, without the MAC suffix), and the client starts if MQTT is on and a broker is set.
+- **At run time:** on/off, the broker, port and login apply at once (the client is disabled and enabled again).
+  The topic prefix applies at the next restart: ESPHome subscribes to the command topics while starting up.
+- **No restart on loss** (`reboot_timeout: 0s`), as for the API (AGENTS.md).
+- **Trust:** whoever the broker lets publish to `<prefix>/.../command` can do what Home Assistant can: feed (still
+  through the feed guard), and change the guard limits, the calibration and the pins. The settings password does
+  not apply over MQTT. Use broker accounts and ACLs (docs/SECURITY.md); open item 24.
+- Cost: about 132 KB of flash (mostly per-entity discovery code, generated for every entity even when internal).
 
 ## 10. BLE security
 
@@ -917,22 +970,27 @@ precision-feeder/
                                     (name, access-point password, Wi-Fi checks), crypto.h,
                                     feeder_internal.h, calendar.h, solar.h, tz_rules.h (POSIX TZ
                                     parser), firmware_upload.h (the checked upload); mechanism.h (the
-                                    mechanism interface), mechanism_servo.* (the servo fan tray); precision_feeder.*
+                                    mechanism interface), mechanism_servo.* (the servo fan tray), mechanism_n20.*
+                                    (the direct-drive disc's motion and calibration); precision_feeder.*
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
+  components/precision_feeder_n20/  the direct-drive disc on the device: DRV8833 through LEDC, the encoder through
+                                    PCNT, the 1 ms control timer
   components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
                                     BleEngine (engine.*: every handler), all host-tested;
                                     precision_feeder_ble.* is the thin ESPHome adapter
-  packages/            core (which includes mechanism_servo), status, controls, schedule_editor, calibration,
-                       status_led, web_server, button, hardware, time_homeassistant,
-                       diagnostics, network_info, ble_gatt, api_key_on_device
-  examples/            basic.yaml, ble.yaml, secrets.example.yaml
+  packages/            core (which includes mechanism_servo and tray_recovery), status, controls, schedule_editor,
+                       calibration, mechanism_n20 (the disc, with drive_select), status_led, web_server, button,
+                       hardware (with restart), time_homeassistant, diagnostics, network_info, ble_gatt,
+                       api_key_on_device, mqtt
+  examples/            basic.yaml, ble.yaml, disc.yaml, secrets.example.yaml
   firmware/            full.yaml, no-ble.yaml: the prebuilt binaries (built by tools/build_bins.sh)
   install/             index.html: the install page (ESP Web Tools), published with each release
   .github/workflows/   ci.yml (tools/check.sh), release.yml (binaries, GitHub release, Pages)
   web/                 the web app: src/ (plain JavaScript and CSS, no dependencies; mechanisms.js holds each
                        mechanism's dial, wording and cards), dist/ (built by
                        tools/build_web.py, committed, embedded by packages/web_server.yaml)
-  tests/               host-side C++ tests (core, logic, protocol, BLE engine); servo_golden.h (the servo's
+  tests/               host-side C++ tests (core, logic, protocol, BLE engine, n20: the disc against the bench
+                       sketch on a simulated motor, motor_sim.h; reference/ holds the sketch); servo_golden.h (the servo's
                        2.0.2 behaviour, which test_core checks); test_consistency.py;
                        test_web.mjs (the web app's parsers, under Node); tz_golden.h (generated by
                        tools/gen_tz_golden.py)
@@ -1125,13 +1183,13 @@ precision-feeder/
 
 - **Mechanisms (firmware 2.1.0; owner, 2026-10-20; [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md)):**
   - D1: a Mechanism interface of verbs (section 3.0); one mechanism per firmware, chosen in the YAML (a dual build
-    may be tried later). The servo moved behind it with its behaviour unchanged: a golden trace recorded from 2.0.2
+    may be tried later). Superseded by D17: two drives in one firmware, chosen on the device. The servo moved behind it with its behaviour unchanged: a golden trace recorded from 2.0.2
     (tests/servo_golden.h) must still match exactly.
   - D1a: the saved position means portions fed since reload, so remaining = capacity − position; no State change.
   - D1b: the guard limits go up to the mechanism's capacity instead of 6.
   - D3: no existing YAML, saved setting or servo behaviour breaks (the owner runs a servo feeder).
   - D4: a non-servo mechanism's motor pins are YAML-only; no Device record change. Reverses, for those pins only,
-    "a pin saved on the device wins" (AGENTS.md).
+    "a pin saved on the device wins" (AGENTS.md). Replaced by D19.
   - D5: BLE stays protocol 2 while no packet layout or opcode changes: Info's positions and its calibration and
     pulse-range capability bits follow the mechanism; Config keys 10 and 11 answer UNSUPPORTED without the servo.
   - D6: GPIO3 accepted with a warning (section 2.1), after checking Espressif's documentation.
@@ -1141,6 +1199,23 @@ precision-feeder/
   - Built differently from the plan: the tuning values got their own record instead of a block in a Calibration
     version 2, so no existing record changes layout; the web app's descriptions are one file, `mechanisms.js`, not a
     folder, to stay within the 64 KB budget.
+
+- **The direct-drive disc, both drives and MQTT (firmware 2.1.0; owner, 2026-10-21):**
+  - D17: one firmware carries both drives, chosen on the device (section 3.4); the single binary is the way forward,
+    with selectable pins. The prebuilt binaries default to the servo (owner: "it can default to servo"), so no
+    existing feeder changes.
+  - D18: the disc does not rewind (dropped for this version; plan stage 2).
+  - D19: the disc's five motor pins are chosen on the device (MotorPins record; section 3.3). Replaces D4.
+  - The disc moves from its branch to main and joins CI and the release (AGENTS.md, "Adding a mechanism", rule 8).
+  - D20: MQTT as an optional package (section 9.6), configured on the device, publishing what Home Assistant sees
+    (the owner: "expose the same to MQTT as we do for Home Assistant"). ESPHome stays (MQTT was first tried as an
+    experiment, with the API swapped out: the API costs only about 28 KB, so it stays too).
+  - The web app's size budget is 66 KB gzipped (was 64 KB): the disc's calibration cards and the MQTT card. The
+    binaries still have about 210 KB of flash to spare.
+  - Calibration Mode and position recovery moved to `packages/tray_recovery.yaml` in `core.yaml`, shared by both
+    drives (ESPHome does not merge a package included twice).
+  - A build's own button or LED pin that the drive in use drives is turned off rather than refused, so the servo's
+    button default (GPIO2) cannot stop a disc feeder (section 2.1).
 
 ## 14. Open items
 
@@ -1300,23 +1375,32 @@ precision-feeder/
 21. Factory reset: listed among the protected settings (owner, 2026-10-15) but not built in 2.0. Wiping a feeder is
     an erase-and-flash from the install page (docs/INSTALL.md, Recovery). To decide: a protected "factory reset" in
     the web app (erase our records and ESPHome's Wi-Fi slot), or keep erase-and-flash.
-22. 2.1.0 on the bench (servo): host tests only so far. To check on the feeder: an upgrade from 2.0.2 keeps settings,
-    calibration, pins and the tray state; a feed, a multi-portion feed, reload, calibration and a power cut mid-feed
-    behave as before; the web app's Dashboard and Maintenance; the BLE selftest; dump_config shows "Mechanism:
-    servo, 6 portions per load". And GPIO3 as the button pin: boots normally with the button held at power-up.
+22. 2.1.0 on the bench (servo). Checked 2026-10-21 (docs/BENCH.md): the upgrade from 2.0.2 kept settings,
+    calibration, pins and the tray state; a feed, reload, calibration and the guard behaved as before; the
+    two-drive firmware fed as a servo. Still to check: a multi-portion feed, a power cut mid-feed, the BLE selftest on
+    the servo, the release build itself (the two-drive firmware with MQTT, as published), and GPIO3 as the button pin
+    with the button held at power-up.
 
-23. The direct-drive disc on the bench (section 3.3, plan S2.0 and S2.8): host-tested only so far. To check: the
-    control timer's gaps with Wi-Fi, the API and the web server busy (Motor Loop Max Gap, and the grid error over
-    15 slots); the guided calibration end to end; 300 feed cycles; feeds from every source; the wiggle with real food;
-    a power cut mid-move; a held disc and an unplugged encoder; the STBY level at power-up (and whether a pull-down is
-    needed); the encoder's count direction under PCNT (the direction test handles either).
+23. The direct-drive disc on the bench (section 3.3, plan S2.0 and S2.8). Checked 2026-10-21 (docs/BENCH.md): one
+    turn is exactly 8344 ticks; feeds land within 2 ticks of the grid; the control timer's only long gap (about
+    52 ms) is at boot; feeds from the web app, BLE and MQTT; switching drives both ways. Still to check: the guided
+    calibration end to end with a slot lined up by eye; 300 feed cycles; the wiggle with real food; a power cut
+    mid-move; a held disc and an unplugged encoder; the STBY level at power-up (and whether a pull-down is needed);
+    which way the disc turns, by eye. And the feed time: about 3.9 s on the first run against the sketch's 2.5 s,
+    2.3 s on a later feed; not explained.
+
+24. MQTT and the protected settings (section 9.6). Over MQTT, whoever the broker lets publish can change the guard
+    limits, the calibration and the pins, which the web app guards with the settings password. To decide: make the
+    protected entities read-only over MQTT (no command topic), or keep MQTT equal to Home Assistant and rely on the
+    broker's accounts. Not decided (2026-10-21).
 
 ## 15. Implementation status (v2.1.0)
 
-2.1.0 (the mechanism interface, section 3.0) is host-tested only: no hardware was attached while it was built. The
-servo's behaviour is checked against a trace recorded from 2.0.2 (every servo command, release and saved tray state,
-with its time), and both examples' resolved ESPHome configuration is unchanged apart from the new `tray_capacity`.
-Still to do on the bench: open item 22.
+2.1.0 (the mechanism interface, the direct-drive disc, both drives in one firmware, MQTT; sections 3.0, 3.3, 3.4,
+9.6). The servo's behaviour is checked against a trace recorded from 2.0.2 (every servo command, release and saved
+tray state, with its time), and the disc's motion against the owner's bench sketch on a simulated motor. On the bench
+(docs/BENCH.md): the servo upgrade from 2.0.2, the disc's first run, the two-drive firmware switching on both rigs,
+BLE and MQTT on the disc, all with test builds of 2.1.0. Still to do: open items 22 and 23.
 
 Everything in sections 3 to 10 is built. On a bench build (Waveshare
 ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
@@ -1331,8 +1415,8 @@ calendar and sun maths, the timezone parser, the settings password, the firmware
 upload, the BLE protocol and its cryptography, the web app's parsers and the Python
 client. Version history: [CHANGELOG.md](CHANGELOG.md).
 
-Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries, 2.0.2): 61.1% of the
-1.8 MB app partition without BLE, 79.1% with it (section 9.5). 2.1.0, the examples: basic 60.7%, BLE 78.9%.
+Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries, 2.1.0, both drives and MQTT): 70.4% of the
+1.8 MB app partition without BLE, 88.5% with it (section 9.5; 2.0.2: 61.1% and 79.1%).
 
 Deviations from the first draft of this design, all deliberate:
 - A feed with more portions than remain is clamped to what remains (design said

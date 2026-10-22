@@ -608,7 +608,7 @@ upgrade of the saved data, not a fresh device.
   cap reached, cap 2).
 - Not run this time: the BLE selftest (it needs the Terminal panel), a power cut mid-feed, the web app on the device.
 
-## The direct-drive disc, first run (2026-10-21, firmware 2.1.0-n20.1)
+## The direct-drive disc, first run (2026-10-21, the disc's branch build, 2.1.0-n20.1)
 
 The disc firmware (DESIGN.md section 3.3) on the owner's bench rig: Waveshare ESP32-S3-Zero, DRV8833, GA12-N20
 (35 rpm, encoder), wired as in packages/mechanism_n20.yaml, the 15-slot disc fitted. Built from `examples/basic.yaml`
@@ -631,3 +631,51 @@ The disc firmware (DESIGN.md section 3.3) on the owner's bench rig: Waveshare ES
   during start-up, before anything can move; while running, the 25 ms watchdog was never reached.
 - Not run yet: the calibration with a slot lined up by eye, real food, a power cut mid-move, a held disc and an
   unplugged encoder, STBY at power-up, the 300-cycle endurance run.
+
+## One firmware with both drives, on both rigs (2026-10-21, a test build of 2.1.0)
+
+The disc and the servo in one firmware, the drive chosen on the device (D17), built as `firmware/full.yaml` is with
+the disc package added; flashed over USB to both rigs. Carrying both drives cost 4.4 KB of flash.
+
+- **Disc rig:** it booted as the disc and fed. **Drive → Servo**, then Restart: it came up as the servo, capacity 6,
+  the tray position unknown and feeds refused until a reload. The disc's driver was never set up (the encoder stayed
+  at 0, its control loop never ran). A reload and a feed in servo mode sent servo pulses down GPIO1, the bridge's
+  AIN1, and the bridge stayed asleep (STBY low). **Drive → Direct-drive disc**: capacity 14 again, the calibration
+  kept (8349 ticks per turn), and after a reload it fed normally.
+- **Servo rig** (from plain 2.1.0): Drive set to Servo; it fed normally (slot 0 -> 1).
+- **Found and fixed:**
+  - A daily cap of 14 became 6 for good after a round trip through the servo: the saved limits were clamped to the
+    drive's capacity at boot and saved. Saved limits are now kept as set and held to the capacity only when used; a
+    second round trip kept 14 (and Max Portions Per Command 3).
+  - "Servo Pin: Invalid option none" logged every second in disc mode: the servo's pin is now published only while
+    the servo is the drive.
+  - The first boot after a single-drive firmware trusted the old tray position (that firmware never recorded its
+    drive). An unrecorded drive now counts as a change, so the tray must be reloaded (host-tested; both boards were
+    past that boot).
+- One disc feed took 2.3 s (whole feed), close to the bench sketch's 2.5 s, where the first run's took about 3.9 s.
+  Not explained yet.
+
+## BLE and MQTT on the disc (2026-10-21, a test build of 2.1.0)
+
+The disc rig with the two-drive firmware, BLE and (second build) `packages/mqtt.yaml`; the disc the drive.
+
+- **BLE:** it advertised as "Feeder Disc"; the Python client's selftest passed 13/13 (protocol 2, Info positions 15,
+  every Config key readable, idempotent retries, a tampered or replayed write refused). Status: 14 portions, loaded,
+  clock from NTP.
+- **MQTT, against Mosquitto 2.1.2 with an account (anonymous refused):** 88.4% of the app partition, 48.0% of RAM.
+  - Set up in the web app's MQTT card. Broker, username and password took effect without a restart (the client
+    reconnected to a changed broker at once); MQTT off stopped the attempts.
+  - The feeder's network (an IoT VLAN) first could not reach the broker on another VLAN: a firewall rule for MQTT
+    from that VLAN fixed it. Nothing on the feeder's side.
+  - 120 Home Assistant discovery configs (44 sensors, 23 numbers, 21 buttons, 14 selects, 7 switches, 6 texts,
+    5 binary sensors), `<name>/status online`; none for the MQTT settings themselves, and the password never
+    appeared on the broker.
+  - ESPHome's device discovery: `esphome/discover` answered with the IPv4 and IPv6 addresses, API port and MAC.
+  - Feed One Portion pressed over MQTT fed one portion (14 -> 13, 2.3 s); two presses at once fed one, the second
+    refused by the minimum gap.
+  - After a restart the settings were kept and it reconnected by itself. The broker saw the old session "taken over"
+    rather than an `offline` message.
+  - Found: ESPHome's default discovery unique IDs (`ESPsensortray_state`) are the same on every feeder. The package
+    now uses the MAC (`discovery_unique_id_generator: mac`).
+- The web app's MQTT card did not show at first: the firmware had been compiled before the web app was rebuilt.
+  Rebuilt and reflashed, it showed (a browser holding the old app needs a reload).

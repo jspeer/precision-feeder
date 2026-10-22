@@ -71,11 +71,16 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
   the board can read them.
 - **One challenge at a time** for the whole feeder: two pages making protected changes in the same second can
   spoil each other's challenge; the app's next try works.
+- **MQTT is as safe as your broker.** With the `mqtt` package set up, anyone your broker lets publish to the
+  feeder's command topics can do what Home Assistant can: feed (through the feed guard), and change the safety
+  limits, the calibration and the pins. The settings password does not apply over MQTT. Give the broker accounts and
+  access rules, and do not use an open broker. The MQTT settings themselves (broker, login) can only be changed from
+  the web app, and the password is never sent back (DESIGN.md section 14, item 24).
 - **ESPHome's own web upload (`/update`) is off.** Firmware goes only through the signed upload, ESPHome's encrypted
   OTA, or USB.
 
 ## What the feeder talks to
 
-Only NTP (time) and, if you use it, Home Assistant. The update check runs in your browser, which reads a manifest
+Only NTP (time) and, if you use them, Home Assistant and your MQTT broker. The update check runs in your browser, which reads a manifest
 from GitHub Pages; the feeder itself never contacts the internet for updates, so a feeder blocked from the internet
 loses nothing.

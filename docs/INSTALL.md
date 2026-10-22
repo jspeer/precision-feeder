@@ -21,10 +21,12 @@ add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 | Variant | What it has | App slot used (of 1.8 MB) | RAM used at boot |
 |---|---|---|---|
-| `full` | everything, including the BLE control plane for a PLC or a phone app | 79.1% (1,451,555 bytes) | 44.3% |
-| `no-ble` | Wi-Fi, the web app and Home Assistant; no Bluetooth | 61.1% (1,120,447 bytes) | 35.3% |
+| `full` | everything, including the BLE control plane for a PLC or a phone app | 88.5% (1,623,115 bytes) | 48.2% |
+| `no-ble` | Wi-Fi, the web app, Home Assistant and MQTT; no Bluetooth | 70.4% (1,291,243 bytes) | 39.0% |
 
-Measured for 2.0.2 with ESPHome 2026.9.1 on the 4 MB layout. Both images run on larger flash too. Each comes as
+Both carry both drives (the servo tray, which they start with, and the direct-drive disc: choose it in Configuration,
+Drive) and MQTT (off until you set a broker in Configuration, MQTT). Measured for 2.1.0 with ESPHome 2026.9.1 on the
+4 MB layout (static RAM; 2.0.2 used 79.1% and 61.1%). Both images run on larger flash too. Each comes as
 `precision-feeder-<variant>-<version>.factory.bin` (the first flash, written from address 0: bootloader, partition
 table and app) and `.ota.bin` (updates through the web app). You can switch variants later by uploading the other
 one's `.ota.bin`; settings are kept.
@@ -69,6 +71,9 @@ Maintenance hold the same settings later, and Configuration (Device) starts the 
   it). Adopt it promptly: until a key is set, whoever reaches it first can set one. You can also make or enter a key
   in the web app (Configuration, Keys) and give that key to Home Assistant. Updates over ESPHome's own OTA then use
   this key; plaintext OTA is refused.
+- **MQTT** (2.1.0): instead of or beside the ESPHome integration, set your broker in the web app (Configuration,
+  MQTT); Home Assistant's MQTT integration then discovers every entity. Use a broker with accounts
+  ([SECURITY.md](SECURITY.md)).
 - **Bluetooth** (`full`): the feeder refuses every BLE client until a key is made in the web app (Configuration,
   Keys; shown once). Give that key to your PLC bridge or the Python client. The BLE name is `Feeder-<6 hex digits>`.
 

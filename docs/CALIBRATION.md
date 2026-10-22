@@ -1,6 +1,6 @@
 # Calibration
 
-This guide is for the servo fan tray, the mechanism `main` builds. A feeder with another mechanism (another
+This guide is for the servo fan tray, and below for the direct-drive disc. A feeder with another mechanism (another
 motor and tray, [MECHANISMS.md](MECHANISMS.md)) has its own section here or on its branch.
 
 The tray is moved by a servo to absolute angles: 7 positions, 25 degrees apart
@@ -109,11 +109,14 @@ From the first calibrated feeder ([BENCH.md](BENCH.md), 2026-10-14):
 - The tray stays put once the servo is released (checked with an empty tray; recheck with
   food in it). Still to watch in daily use: whether the servo strains at position 6.
 
-## The direct-drive disc (branch `variant/n20-direct-drive`)
+## The direct-drive disc
 
 A disc of open slots turned directly by a gear motor with an encoder (DESIGN.md section 3.3). The servo steps above do
 not apply: there are no slot offsets and no pulse range. Instead the firmware measures how many encoder ticks one turn
 of the disc takes, and checks every slot.
+
+**Choose the drive first** if the firmware starts as a servo feeder (the prebuilt firmware does): Configuration,
+Drive, Direct-drive disc, then Restart. Its pins are under the same card.
 
 **Empty the disc first.** The calibration turns it, and every open slot passes over the hole.
 

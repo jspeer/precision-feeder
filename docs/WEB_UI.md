@@ -36,7 +36,7 @@ else the feeder lists under Faults.
 ## Pages
 
 - **Dashboard:**
-  - the tray as a dial of its seven slots, the next feed and how long the food lasts;
+  - the tray as a dial of its slots (seven on the servo tray, the disc's own count on the disc), the next feed and how long the food lasts;
   - **Feed now**: it asks first, shows whether the feeder is ready (the feed guard's
     answer), and reports the feeder's own result ("too soon", "daily cap reached", ...);
   - today's feeds with their state, status, recent feeds;
@@ -57,7 +57,9 @@ else the feeder lists under Faults.
   - network: the name (used after a restart), joining another Wi-Fi network (at once), and
     the fallback access point's password (used after a restart). Passwords are never shown
     or sent back;
-  - board and pins (with the `hardware` package): a board preset or each pin, saved at
+  - drive, board and pins (with the `hardware` package): the drive (servo or direct-drive
+    disc, in a build with the disc's package), a board preset or each pin (the servo's
+    while the servo is the drive, the disc's five motor pins while the disc is), saved at
     once and used after a restart (Restart is offered when one is waiting); only pins
     the chip can spare are listed, and "none" for a button or LED that is not fitted;
   - the settings password: set, unlock (for this page, until it is reloaded), lock,
@@ -66,7 +68,10 @@ else the feeder lists under Faults.
   - keys: where the Home Assistant and Bluetooth keys come from (none, your YAML, or
     saved on the feeder); generate one (made in the browser and shown once), enter
     your own, or clear the Home Assistant key, where the build allows it; and the two
-    switches for what Bluetooth may change. The feeder never sends a key back.
+    switches for what Bluetooth may change. The feeder never sends a key back;
+  - MQTT (with the `mqtt` package, 2.1.0): on or off, the broker, port, username,
+    password and topic prefix, whether it is connected and the prefix in use. Saved at
+    once; the prefix is used after a restart. The password is never shown or sent back.
 - **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
   Configuration (Device). Steps: welcome, network, time zone (by place) and location,
   board and pins, keys, settings password, calibration. Each saves as it goes and can be
@@ -80,7 +85,8 @@ else the feeder lists under Faults.
   settings password, and the feeder checks it again before restarting into it.
 - **Maintenance:**
   - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
-    and the servo pulse range;
+    and the servo pulse range; on the direct-drive disc, its step-by-step wizard (slots and
+    direction, zero, run turns, check every slot, trim) and its tuning;
   - declaring the tray position after a power cut, or reloading;
   - the 24 h count, for debugging.
 - **Bluetooth** (BLE builds): the connection, the client (only the last two bytes of

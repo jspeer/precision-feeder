@@ -17,7 +17,7 @@ position. [WEB_UI.md](WEB_UI.md) walks through every page.
 | To | Use |
 |---|---|
 | Feed now | **Feed One Portion**, or **Manual Portions** + **Feed Selected Portions**, or a short press of the button |
-| Refill | **Tray Reload**, then fill the tray. Scheduled feeding pauses for the **Reload Pause** (default 10 minutes) while you load. On the direct-drive disc (branch `variant/n20-direct-drive`) Tray Reload moves nothing: fill every slot except the one over the chute (food there falls straight out), then press it. |
+| Refill | **Tray Reload**, then fill the tray. Scheduled feeding pauses for the **Reload Pause** (default 10 minutes) while you load. On the direct-drive disc Tray Reload moves nothing: fill every slot except the one over the chute (food there falls straight out), then press it. |
 | Pause the schedule | **Hold Duration** (hours; 0 = until cancelled) + **Hold Scheduled Feeding**; **Cancel Hold** ends it. Manual feeds still work. |
 | Switch plans | **Active Profile** |
 | Feed once at a set time | **One-shot Portions** + **Add One-shot Feed** (`2026-10-20 18:00`) |
@@ -62,7 +62,10 @@ Saved on the feeder, changed in the web app or Home Assistant, kept across updat
 | Time zone | the build's (UTC in the prebuilt firmware) | Configuration, setup wizard |
 | NTP servers (up to three) | the build's (public pool) | Configuration, setup wizard (2.0.2) |
 | Servo pulse range, calibration offsets | 544 to 2400 µs, 0° | Maintenance (protected) |
-| Board and pins | the build's | Configuration (protected; after a restart) |
+| Drive (servo or direct-drive disc), with the disc's package | the build's (the servo in the prebuilt firmware) | Configuration (protected; after a restart, then reload) |
+| Board and pins, the disc's motor pins | the build's | Configuration (protected; after a restart) |
+| Disc slots and tuning (direct-drive disc) | 15 slots; the bench's tuning | Maintenance (protected; slots, ticks per turn, trim and directions only in calibration mode) |
+| MQTT: on, broker, port, username, password, topic prefix | off | Configuration, MQTT (protected; the prefix after a restart) |
 | Name, Wi-Fi network, access point password | the build's | Configuration, Network (protected; name and password after a restart) |
 | Home Assistant and Bluetooth keys; what Bluetooth may change | none; both allowed | Configuration, Keys (protected) |
 | Settings password | none | Configuration ([SECURITY.md](SECURITY.md)) |

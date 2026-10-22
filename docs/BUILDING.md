@@ -14,11 +14,12 @@ file lists the packages it wants, so a feature is switched on or off by one line
 
 | Package | What it gives you | Include it? |
 |---|---|---|
-| `core` | the feeder itself: servo, Wi-Fi with a fallback access point, Home Assistant API, OTA, NTP time | **always** |
+| `core` | the feeder itself: the servo tray, Calibration Mode and position recovery, Wi-Fi with a fallback access point, Home Assistant API, OTA, NTP time | **always** |
 | `status` | sensors: tray position, portions left, next feed, runway, Needs Food, faults, time source, firmware version and variant | **always** |
 | `controls` | buttons and settings: feed, tray reload, hold, active profile, guard limits, location, time zone, NTP servers | **always** |
 | `schedule_editor` | editing profiles and events, one-shot feeds | **always** (unless something else, like a PLC over BLE, owns the schedule) |
-| `calibration` | calibration mode, servo pulse range, per-slot offsets, recovery after a power cut | **always** |
+| `calibration` | the servo's calibration: pulse range and per-slot offsets | **always** (the disc's calibration is in its own package) |
+| `mechanism_n20` | the direct-drive disc as a second drive, with its tuning, calibration wizard, motor pins and **Drive** (servo or disc, chosen on the device) | only for a disc feeder ([`disc.yaml`](../examples/disc.yaml)) |
 | `web_server` | the built-in web app at `http://<name>.local`, and the settings password | recommended (both examples); leave it out to save memory |
 | `hardware` | Board and Servo Pin chosen on the device, Pins In Use, Restart Needed, Restart | recommended (both examples); harmless if you never use it |
 | `status_led` | colour-coded state on the board's RGB LED; LED Pin on the device | if your board has the LED (both examples) |
@@ -28,14 +29,17 @@ file lists the packages it wants, so a feature is switched on or off by one line
 | `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | both examples; leave it out if you never set Wi-Fi over USB |
 | `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 330 KB of flash and 30 KB of RAM |
 | `api_key_on_device` | no API key in your YAML: Home Assistant sets one when it adopts the feeder, or you make one in the web app (as the prebuilt firmware does) | optional; add it after `core`. Plaintext OTA is then refused, and OTA needs the key once one is set |
+| `mqtt` | MQTT with Home Assistant discovery for every entity, beside the API; broker, login and topic prefix set in the web app (Configuration, MQTT), off until then | if you use MQTT. Costs about 132 KB of flash |
 | `diagnostics` | free memory and loop time | for troubleshooting (on in `ble.yaml`) |
 
-**Two ready-made configurations** are in [`examples/`](../examples/):
+**Three ready-made configurations** are in [`examples/`](../examples/):
 
 - [`basic.yaml`](../examples/basic.yaml): Home Assistant (including its time) and the web app, no BLE. The right start
   for most people.
 - [`ble.yaml`](../examples/ble.yaml): the same plus the BLE interface and diagnostics, for a feeder driven by a PLC or
   another BLE controller.
+- [`disc.yaml`](../examples/disc.yaml): `basic.yaml` for the direct-drive disc (a GA12-N20 gear motor behind a DRV8833),
+  with the button on GPIO3. The firmware carries the servo too; it starts with the disc.
 
 ## Setting it up
 
@@ -96,12 +100,12 @@ reminds you to update with ESPHome rather than offering the prebuilt images.
 Set these in your copy's `substitutions:` (defaults in [`packages/core.yaml`](../packages/core.yaml), the servo's in
 [`packages/mechanism_servo.yaml`](../packages/mechanism_servo.yaml), which core.yaml includes, and
 [`packages/ble_gatt.yaml`](../packages/ble_gatt.yaml)). A feeder with another motor uses another mechanism package;
-see [MECHANISMS.md](MECHANISMS.md). On the branch `variant/n20-direct-drive`, core.yaml includes the direct-drive
-disc's [`packages/mechanism_n20.yaml`](../packages/mechanism_n20.yaml) instead, with its own substitutions (`disc_slots`,
-`tray_capacity`, `motor_in1_pin`, `motor_in2_pin`, `motor_standby_pin`, `encoder_a_pin`, `encoder_b_pin`,
-`motor_pwm_frequency`; starting values: pins chosen on the feeder win), and `button_pin` defaults to GPIO3; leave
-the servo's `calibration` and `hardware` packages out and include `packages/restart.yaml` (Restart, Restart Needed,
-Pins In Use). Many are only **starting values**: the same setting changed
+see [MECHANISMS.md](MECHANISMS.md). The direct-drive disc's
+[`packages/mechanism_n20.yaml`](../packages/mechanism_n20.yaml), added beside the servo, has its own: `disc_slots`,
+`disc_build_default` (`"true"`: the disc until Drive is changed on the feeder; `"false"`: the servo),
+`motor_in1_pin`, `motor_in2_pin`, `motor_standby_pin`, `encoder_a_pin`, `encoder_b_pin` and
+`motor_pwm_frequency` (pins chosen on the feeder win); set `tray_capacity: "59"` and `button_pin: GPIO3` with it, as
+`disc.yaml` does. Many are only **starting values**: the same setting changed
 on the feeder (web app or Home Assistant) is saved there and wins, as the table says.
 
 | Substitution | Default | What it is |
@@ -121,7 +125,7 @@ on the feeder (web app or Home Assistant) is saved there and wins, as the table 
 | `step_time` | `1s` | the time given to each of the three moves of a feed |
 | `wiggle` | `"true"` | forward, back, forward on each feed to shake food loose |
 | `detach_delay` | `1s` | the servo is released this long after the last move (no buzzing, no heat) |
-| `tray_capacity` | `"6"` | portions per load, set by the mechanism package (6 for the servo tray); the portion input boxes go up to it. Leave it. |
+| `tray_capacity` | `"6"` | portions per load, set by the mechanism package (6 for the servo tray; `"59"` with the disc, the most any disc holds); the portion input boxes go up to it. Leave it. |
 | `ble_name` | `Precision Feeder` | the name shown to BLE scanners. At most 20 characters; at most 13 with `name_add_mac_suffix` (ESPHome adds the suffix there too). |
 | `ble_time_policy` | `fallback_only` | a clock pushed over BLE: accepted only when network time is stale (recommended), `always`, or `off` |
 | `ble_network_time_stale_after` | `24h` | how long after the last NTP or Home Assistant sync a BLE clock is still refused (`fallback_only`) |

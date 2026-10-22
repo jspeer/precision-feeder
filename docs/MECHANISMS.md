@@ -75,9 +75,11 @@ position is known again. A missed meal beats an overfeed.
 
 A mechanism for your own build lives on a branch, `variant/<name>`: not tagged, no prebuilt binaries, its own
 `fw_variant` (so the web app's update check never offers it main's firmware) and a version suffix
-(`2.1.0-<name>.1`). Rebase it onto main after each release; the mechanism interface keeps that small. The first one is
-a direct-drive DC motor with an encoder turning a 15-slot disc: `variant/n20-direct-drive`
-([docs/plans/drive-decoupling.md](plans/drive-decoupling.md), stage 2).
+(`2.1.0-<name>.1`). Rebase it onto main after each release; the mechanism interface keeps that small. With the owner's
+decision it moves to main, where it becomes a second drive beside the servo, chosen on the device (DESIGN.md section
+3.4). The first one did: a direct-drive DC motor with an encoder turning a slotted disc, built on
+`variant/n20-direct-drive` and on main since 2.1.0 (`packages/mechanism_n20.yaml`;
+[docs/plans/drive-decoupling.md](plans/drive-decoupling.md), stage 2).
 
 ## Checklist
 
@@ -85,8 +87,9 @@ a direct-drive DC motor with an encoder turning a 15-slot disc: `variant/n20-dir
 - [ ] faults: stall, wrong direction, timeout from the distance, travel limit, loop watchdog (if it can keep turning)
 - [ ] tuning table with limits and a `tuning_layout()`; YAML min/max match it (`tests/test_consistency.py`)
 - [ ] `packages/mechanism_<name>.yaml`: `tray_capacity`, pins as documented substitutions, `reserve_pin()`
-- [ ] `core.yaml` includes it instead of the servo's (on its branch)
+- [ ] added beside the servo in a build's YAML (an example), offered as a drive with `offer_drive()`; the servo stays the
+      prebuilt firmware's default
 - [ ] `web/src/mechanisms.js` description, entities in `web/src/entities.js`, `web/dist/` rebuilt
 - [ ] host tests with a simulated motor; `tools/check.sh` passes, servo golden trace included
 - [ ] DESIGN.md, CALIBRATION.md, CHANGELOG.md, BENCH.md
-- [ ] `fw_variant` and version suffix set; README banner on the branch
+- [ ] on its branch: `fw_variant` and version suffix set, README banner; on main: CI and the examples
