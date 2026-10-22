@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **firmware 2.1.2 (release 2.1.1), tested on bench builds** (section 15). This is the current design;
+Status: **release 2.2.0, tested on bench builds and its release images** (section 15). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
@@ -1512,7 +1512,11 @@ precision-feeder/
     a Codex review of 2.1.1). **Decided 2026-10-22 (D25, firmware 2.2.0):** web app only, behind the settings password;
     no longer in Home Assistant.
 
-## 15. Implementation status (v2.1.2)
+## 15. Implementation status (v2.2.0)
+
+2.2.0 (who can change what, section 10.2; MQTT's own topics, section 9.6) carries 2.1.2, below. Its release images ran
+on both rigs: the servo's upgrade from 2.1.1 kept every value, and Home Assistant removed the hidden entities by
+itself (docs/BENCH.md).
 
 2.1.2 fixes the findings of two Codex reviews of 2.1.1 (decisions log; CHANGELOG.md), each with a host test that
 reproduces it, and builds with ESPHome 2026.10.0 (ESP-IDF 5.5.6). Not yet on hardware: the new positioning intents

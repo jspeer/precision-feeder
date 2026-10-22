@@ -6,7 +6,10 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.2.0: who can change what (not released yet)
+## 2.2.0: who can change what (2026-10-22)
+
+The first release since 2.1.1. It also carries 2.1.2's safety fixes and the move to ESPHome 2026.10.0 and the MIT
+licence, listed under 2.1.2 below (2.1.2 was never released on its own).
 
 **Upgrade note: Home Assistant sees far fewer entities.** It keeps the everyday controls and status: Feed One Portion,
 Feed Selected Portions with Manual Portions, Tray Reload, Stop, Hold Scheduled Feeding with Hold Duration, Cancel
@@ -28,7 +31,7 @@ when the feeder reconnects after the update. Automations that used them need the
 - Adding a one-shot feed identical to a pending one adds nothing (a command sent twice, or kept by a broker).
 - New result: `not allowed` (18), a value this channel may not change.
 
-## 2.1.2: safety fixes from two code reviews, and ESPHome 2026.10.0 (not released yet)
+## 2.1.2: safety fixes from two code reviews, and ESPHome 2026.10.0 (not released; see 2.2.0)
 
 Two reviews of 2.1.1 (OpenAI Codex) found paths where a power cut, a lost encoder or a failed flash write could feed
 twice or leave a position trusted that is not. Each was reproduced in a host test, then fixed. Nothing changes in
