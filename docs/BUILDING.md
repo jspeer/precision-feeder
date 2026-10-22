@@ -29,7 +29,7 @@ file lists the packages it wants, so a feature is switched on or off by one line
 | `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | both examples; leave it out if you never set Wi-Fi over USB |
 | `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 330 KB of flash and 30 KB of RAM |
 | `api_key_on_device` | no API key in your YAML: Home Assistant sets one when it adopts the feeder, or you make one in the web app (as the prebuilt firmware does) | optional; add it after `core`. Plaintext OTA is then refused, and OTA needs the key once one is set |
-| `mqtt` | MQTT with Home Assistant discovery for every entity, beside the API; broker, login and topic prefix set in the web app (Configuration, MQTT), off until then | if you use MQTT. Costs about 132 KB of flash |
+| `mqtt` | MQTT with Home Assistant discovery for the everyday entities, beside the API, and the schedule on its own topics ([MQTT.md](MQTT.md)); broker, login and topic prefix set in the web app (Configuration, MQTT), off until then | if you use MQTT. Costs about 140 KB of flash |
 | `diagnostics` | free memory and loop time | for troubleshooting (on in `ble.yaml`) |
 
 **Three ready-made configurations** are in [`examples/`](../examples/):
@@ -132,6 +132,16 @@ on the feeder (web app or Home Assistant) is saved there and wins, as the table 
 
 `fw_version` and `fw_variant` are the firmware's own; leave them. Everything else (the schedule, guard limits,
 calibration, location, hold) is set on the feeder and saved there: see [USING.md](USING.md#settings).
+
+## What Home Assistant sees, and a headless build
+
+Since 2.2.0 Home Assistant (and MQTT) sees only the everyday controls and status; every other entity is `internal` and
+reached through the web app (`web_server` package, which sets `include_internal`). `tools/check_scopes.py` checks a
+build's resolved configuration for that (`esphome config my.yaml > resolved.yaml`, then run it on the file).
+
+A build without the web app (leave `web_server` out) cannot change those settings at run time: set the pins and
+everything else in your YAML, and run it over Bluetooth (`ble_gatt`), which reaches feeding, the schedule, the clock,
+and the guard limits and calibration behind their switches. That is a fully headless feeder.
 
 ## Wi-Fi, the name and keys in a YAML build
 

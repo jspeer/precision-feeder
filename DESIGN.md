@@ -1000,6 +1000,21 @@ section 10).
   13, appliance). An unknown scheme saved by a newer firmware refuses everything
   until BOOT clears it.
 
+### 10.2 Who can change what (firmware 2.2.0, D21 to D27)
+
+Everything the feeder offers is one of three kinds, and each channel reaches what matches how well it knows who is
+talking ([docs/plans/2.2.0-scopes.md](docs/plans/2.2.0-scopes.md)):
+
+| | Operate: feeding, the schedule, status | Safety policy: guard limits, the 24 h count | Components: calibration, tuning, drive, pins, keys, network, firmware |
+|---|---|---|---|
+| Web app | yes | yes, settings password | yes, settings password |
+| BLE (a key, every write signed) | yes | guard limits behind BLE Can Change Guard Limits (never the 24 h count) | calibration only, behind BLE Can Change Calibration |
+| Home Assistant (the API key) | the slim set (section 7); no schedule editing | no | no |
+| MQTT (the broker's login) | the slim set, and the schedule and one-shots on its own topics (section 9.6) | guard limits only behind MQTT Can Change Guard Limits (off by default) | never |
+
+The 24 h count's hand edit is the web app's only (D25). A build without the web app sets its components in the YAML and
+runs headless over BLE (D27).
+
 ## 11. Out of scope hardware
 
 No external RTC, no feed or hopper sensors, no home or position sensor, no
@@ -1013,6 +1028,7 @@ the only add-on, because the original firmware supports it.
 precision-feeder/
   README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
   docs/PROTOCOL.md     BLE protocol (authoritative)
+  docs/MQTT.md         the MQTT topics (2.2.0)
   docs/SCHEDULING.md   building schedule profiles
   docs/CALIBRATION.md  setup and calibration walkthrough
   docs/BENCH.md        hardware test results
@@ -1036,6 +1052,7 @@ precision-feeder/
                                     (ESPHome adapter: clock, servo, flash, log, publish helpers)
   components/precision_feeder_n20/  the direct-drive disc on the device: DRV8833 through LEDC, the encoder through
                                     PCNT, the 1 ms control timer
+  components/precision_feeder_mqtt/ MQTT's own topics on the device (their logic: feeder_mqtt.*, host-tested)
   components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
                                     BleEngine (engine.*: every handler), all host-tested;
                                     precision_feeder_ble.* is the thin ESPHome adapter
@@ -1285,8 +1302,15 @@ precision-feeder/
     firmware). Each channel's reach follows how well it knows who is talking (the plan's channel table).
   - D22: Home Assistant and MQTT's discovery see only the slim set (section 7); every other entity is internal, web
     app only. Checked in every build by tools/check_scopes.py. No build option for the full set.
+  - D23: schedule editing is not for Home Assistant (owner: "If you want that functionality, re-adopt under
+    MQTT"); MQTT edits it through its own plain topics.
+  - D24: MQTT may change the guard limits only with MQTT Can Change Guard Limits on (a Device flag, off by default;
+    web app only, protected), through its own plain topics, one value each.
   - D25: the 24 h count's hand edit is web app only (behind the settings password); it left Home Assistant. Closes
     open item 25.
+  - D26: components are never on MQTT. Closes open item 24.
+  - D27: BLE keeps calibration behind its switch (headless recalibration); pins, drive, keys and network are web app
+    or YAML only. A headless build leaves the web app out and runs over BLE.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.

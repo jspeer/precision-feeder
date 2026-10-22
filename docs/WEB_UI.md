@@ -70,8 +70,9 @@ else the feeder lists under Faults.
     your own, or clear the Home Assistant key, where the build allows it; and the two
     switches for what Bluetooth may change. The feeder never sends a key back;
   - MQTT (with the `mqtt` package, 2.1.0): on or off, the broker, port, username,
-    password and topic prefix, whether it is connected and the prefix in use. Saved at
-    once; the prefix is used after a restart. The password is never shown or sent back.
+    password and topic prefix, whether it is connected and the prefix in use; and (2.2.0) whether MQTT may
+    change the safety limits. Saved at once; once MQTT has connected, changes are used after a restart.
+    The password is never shown or sent back.
 - **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
   Configuration (Device). Steps: welcome, network, time zone (by place) and location,
   board and pins, keys, settings password, calibration. Each saves as it goes and can be

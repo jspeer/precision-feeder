@@ -24,9 +24,10 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 |---|---|---|
 | Web app, no settings password | nothing (being on the network) | everything |
 | Web app, settings password set | the password, for protected changes | everything else without it |
-| Home Assistant (ESPHome API) | the API encryption key (Noise) | every entity, including protected ones |
+| Home Assistant (ESPHome API) | the API encryption key (Noise) | since 2.2.0, the everyday controls and status only: feeding, reload, stop, hold, the scheduler and active profile, and the status (DESIGN.md section 7); nothing protected |
+| MQTT (with the `mqtt` package, 2.2.0) | the broker's login only | the same as Home Assistant; editing the schedule and one-shot feeds; the guard limits only while MQTT Can Change Guard Limits is on (off by default). Never calibration, pins, keys or network ([MQTT.md](MQTT.md)) |
 | ESPHome OTA | the API key (encrypted); plaintext refused | firmware |
-| Bluetooth (`full` only) | the BLE key; every write signed | feeding, schedule, clock; guard limits and calibration only while their two switches are on |
+| Bluetooth (`full` only) | the BLE key; every write signed | feeding, schedule, clock; guard limits and calibration only while their two switches are on. Never pins, keys or network |
 | USB cable | physical access | Wi-Fi over Improv, a full reflash |
 | BOOT button, held 10 s | physical access | clears the settings password, nothing else |
 
@@ -72,10 +73,11 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 - **One challenge at a time** for the whole feeder: two pages making protected changes in the same second can
   spoil each other's challenge; the app's next try works.
 - **MQTT is as safe as your broker.** With the `mqtt` package set up, anyone your broker lets publish to the
-  feeder's command topics can do what Home Assistant can: feed (through the feed guard), and change the safety
-  limits, the calibration and the pins. The settings password does not apply over MQTT. Give the broker accounts and
-  access rules, and do not use an open broker. The MQTT settings themselves (broker, login) can only be changed from
-  the web app, and the password is never sent back (DESIGN.md section 14, item 24).
+  feeder's topics can feed (through the feed guard) and edit the schedule, and, with MQTT Can Change Guard Limits on,
+  change the safety limits. Nothing else: calibration, pins, keys and the network are never on MQTT (2.2.0). The
+  settings password does not apply over MQTT. Give the broker accounts and access rules, and do not use an open
+  broker. The MQTT settings themselves (broker, login) can only be changed from the web app, and the password is never
+  sent back.
 - **ESPHome's own web upload (`/update`) is off.** Firmware goes only through the signed upload, ESPHome's encrypted
   OTA, or USB.
 

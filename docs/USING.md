@@ -65,7 +65,8 @@ Saved on the feeder, changed in the web app or Home Assistant, kept across updat
 | Drive (servo or direct-drive disc), with the disc's package | the build's (the servo in the prebuilt firmware) | Configuration (protected; after a restart, then reload) |
 | Board and pins, the disc's motor pins | the build's | Configuration (protected; after a restart) |
 | Disc slots and tuning (direct-drive disc) | 15 slots; the bench's tuning | Maintenance (protected; slots, ticks per turn, trim and directions only in calibration mode) |
-| MQTT: on, broker, port, username, password, topic prefix | off | Configuration, MQTT (protected; the prefix after a restart) |
+| MQTT: on, broker, port, username, password, topic prefix | off | Configuration, MQTT (protected; once connected, changes after a restart) |
+| MQTT Can Change Guard Limits | off | Configuration, MQTT (protected; 2.2.0) |
 | Name, Wi-Fi network, access point password | the build's | Configuration, Network (protected; name and password after a restart) |
 | Home Assistant and Bluetooth keys; what Bluetooth may change | none; both allowed | Configuration, Keys (protected) |
 | Settings password | none | Configuration ([SECURITY.md](SECURITY.md)) |

@@ -80,8 +80,11 @@ say where the tray is (or reload it). It never guesses.
   or pushed over BLE when there is no network. Shows where the clock came from and how old it is.
 - **An appliance** (2.0): install from a web page, a setup wizard, Wi-Fi, name, time zone, pins and keys set in the
   web app, and firmware updates from the web app, checked before they are applied.
-- **Optional:** push button (as in the original), status LED, MQTT with Home Assistant discovery (broker and login set
-  in the web app), BLE interface (every write authenticated with a key;
+- **Who can change what** (2.2.0): Home Assistant gets the everyday controls and status; the settings, calibration
+  and pins stay in the web app, behind the settings password; MQTT can also edit the schedule; BLE is the headless
+  channel ([docs/SECURITY.md](docs/SECURITY.md)).
+- **Optional:** push button (as in the original), status LED, MQTT with Home Assistant discovery and the schedule on its
+  own topics (broker and login set in the web app; [docs/MQTT.md](docs/MQTT.md)), BLE interface (every write authenticated with a key;
   documented byte for byte in [docs/PROTOCOL.md](docs/PROTOCOL.md), with a Python reference client).
 
 ## What you need
@@ -153,6 +156,7 @@ Then, either way:
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | lining up the tray |
 | [docs/SECURITY.md](docs/SECURITY.md) | the security model: who can change what, and the limits |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the BLE protocol, for controller and app developers |
+| [docs/MQTT.md](docs/MQTT.md) | the MQTT topics: what MQTT reaches, and the schedule's own topics |
 | [docs/MECHANISMS.md](docs/MECHANISMS.md) | adapting the firmware to another motor or tray (a mechanism) |
 | [DESIGN.md](DESIGN.md) | the design and the decisions behind it |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in each firmware version |

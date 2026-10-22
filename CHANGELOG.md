@@ -6,6 +6,28 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.2.0: who can change what (not released yet)
+
+**Upgrade note: Home Assistant sees far fewer entities.** It keeps the everyday controls and status: Feed One Portion,
+Feed Selected Portions with Manual Portions, Tray Reload, Stop, Hold Scheduled Feeding with Hold Duration, Cancel
+Hold, Scheduler, Active Profile, Portions Remaining, Tray State, Next Feed, Last Feed, Last Result, Recent Feeds,
+Today's Feeds, Faults, Needs Food and Firmware Version. Everything else (the guard limits, calibration, pins, the
+schedule editor, diagnostics) is in the web app only. Home Assistant may keep the removed entities as unavailable:
+remove them, or delete the device and adopt it again. Automations that used them need the web app or MQTT instead.
+
+- **Scopes** ([docs/plans/2.2.0-scopes.md](docs/plans/2.2.0-scopes.md), DESIGN.md section 10.2): operate, safety
+  policy and components, and what each channel reaches. Every other entity is `internal`; the web app still has them
+  all. `tools/check_scopes.py` checks every build for exactly the slim set.
+- **MQTT's own topics** ([docs/MQTT.md](docs/MQTT.md)): the schedule (every event's fields, each profile's cadence
+  and fast days), one-shot feeds, and the guard limits behind a new switch, **MQTT Can Change Guard Limits**
+  (Configuration, MQTT; off by default). Plain topics, one value each, with retained state; a refused value is
+  answered with the one in force. Changes made in the web app or over BLE are published too. Never calibration, pins,
+  keys or network.
+- **The 24 h count** (Portions Counted (24 h)) can be edited only in the web app, behind the settings password.
+- The schedule editor checks event portions and every-N-days against their limits (it used the YAML's boxes only).
+- Adding a one-shot feed identical to a pending one adds nothing (a command sent twice, or kept by a broker).
+- New result: `not allowed` (18), a value this channel may not change.
+
 ## 2.1.2: safety fixes from two code reviews, and ESPHome 2026.10.0 (not released yet)
 
 Two reviews of 2.1.1 (OpenAI Codex) found paths where a power cut, a lost encoder or a failed flash write could feed

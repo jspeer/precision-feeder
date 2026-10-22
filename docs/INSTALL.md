@@ -71,9 +71,13 @@ Maintenance hold the same settings later, and Configuration (Device) starts the 
   it). Adopt it promptly: until a key is set, whoever reaches it first can set one. You can also make or enter a key
   in the web app (Configuration, Keys) and give that key to Home Assistant. Updates over ESPHome's own OTA then use
   this key; plaintext OTA is refused.
-- **MQTT** (2.1.0): instead of or beside the ESPHome integration, set your broker in the web app (Configuration,
-  MQTT); Home Assistant's MQTT integration then discovers every entity. Use a broker with accounts
-  ([SECURITY.md](SECURITY.md)).
+- **What Home Assistant sees** (2.2.0): the everyday controls and status (feed, reload, stop, hold, scheduler, active
+  profile, portions remaining, tray state, next and last feed, faults, needs food, firmware version). Settings,
+  calibration, pins and the schedule editor are in the web app. A feeder upgraded from 2.1 leaves the other entities
+  behind in Home Assistant as unavailable: remove them, or delete the device and adopt it again.
+- **MQTT** (2.1.0; 2.2.0 scopes): instead of or beside the ESPHome integration, set your broker in the web app
+  (Configuration, MQTT); Home Assistant's MQTT integration then discovers the same entities, and the schedule has its
+  own topics ([MQTT.md](MQTT.md)). Use a broker with accounts ([SECURITY.md](SECURITY.md)).
 - **Bluetooth** (`full`): the feeder refuses every BLE client until a key is made in the web app (Configuration,
   Keys; shown once). Give that key to your PLC bridge or the Python client. The BLE name is `Feeder-<6 hex digits>`.
 
