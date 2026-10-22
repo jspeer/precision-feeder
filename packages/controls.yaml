@@ -145,7 +145,7 @@ number:
       - lambda: id(feeder).set_daily_cap((int32_t) std::lround(x));
     update_interval: never
 
-  # Debugging and recovery (owner decision 2026-10-14): the number of portions the
+  # Debugging and recovery (owner decision 2026-10-14; web app only since 2.2.0, D25): the number of portions the
   # daily cap is counting right now (rolling 24 h). Setting it lower forgets the
   # oldest counted feeds; setting it higher adds an "adjustment" to the feed
   # history. It never feeds or moves the tray, and every change is logged.

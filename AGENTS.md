@@ -55,8 +55,10 @@ substitutions.
 - Every feed, from every source (schedule, HA, BLE, button), goes through the
   one feed guard. Never add a path that bypasses it. The one owner-approved
   exception (2026-10-14): the 24 h count the cap checks against can be edited
-  by hand in Home Assistant for debugging and recovery, logged as a warning.
-  Do not extend it (for example to BLE) without a new decision.
+  by hand for debugging and recovery, logged as a warning. Since 2.2.0 only in
+  the web app (Maintenance), behind the settings password (owner, 2026-10-22,
+  D25); before, in Home Assistant. Do not extend it (Home Assistant, BLE, MQTT)
+  without a new decision.
 - BLE commands are idempotent via sequence numbers. A retry must never feed
   twice.
 - Every BLE write is authenticated (protocol 2: AUTH, then a sequence number and

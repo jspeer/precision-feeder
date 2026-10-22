@@ -387,7 +387,7 @@ Every feed request, whatever its source, goes through one gate:
 | Rule | Default | Notes |
 |---|---|---|
 | Minimum gap between feeds | 60 s | the reference also paused 1 min after each feed |
-| Rolling 24 h cap | 4 portions | configurable 1 to the mechanism's capacity (6 for the servo). It counts the feed history, which keeps 64 feeds (`HISTORY_SIZE`, the largest capacity; 8 before 2.1.2, which let a disc's 9th feed in 24 h go uncounted: Codex review). The count it uses can be edited in Home Assistant for debugging and recovery (decision 2026-10-14, section 13; the web app shows it too, open item 25) |
+| Rolling 24 h cap | 4 portions | configurable 1 to the mechanism's capacity (6 for the servo). It counts the feed history, which keeps 64 feeds (`HISTORY_SIZE`, the largest capacity; 8 before 2.1.2, which let a disc's 9th feed in 24 h go uncounted: Codex review). The count it uses can be edited by hand for debugging and recovery: in the web app only (Maintenance), behind the settings password (decision 2026-10-14, moved from Home Assistant in 2.2.0, D25) |
 | Max portions per command | 1 | configurable 1 to the capacity ("drop all" is opt-in) |
 | Tray state | must be `LOADED` | empty or unknown rejects |
 | Calibration lockout | on | |
@@ -1084,7 +1084,8 @@ precision-feeder/
   debugging and recovery by the owner and future developers. Home Assistant
   only (diagnostic entity "Portions Counted (24 h)"), not BLE; every change is
   logged as a warning and raising it shows as an "adjustment" in the feed
-  history. AGENTS.md is updated to match.
+  history. AGENTS.md is updated to match. **Moved in 2.2.0 (D25):** the web app
+  only (Maintenance), behind the settings password; not Home Assistant, BLE or MQTT.
 - Each event feeds at most once per day, also when it is moved later after it
   fed (2026-10-14; the safe side).
 - Polar days (no sunrise or sunset): sun events fall back to 06:00 / 18:00 plus
@@ -1264,6 +1265,15 @@ precision-feeder/
     drives (ESPHome does not merge a package included twice).
   - A build's own button or LED pin that the drive in use drives is turned off rather than refused, so the servo's
     button default (GPIO2) cannot stop a disc feeder (section 2.1).
+
+- **Scopes (firmware 2.2.0; owner, 2026-10-22; [docs/plans/2.2.0-scopes.md](docs/plans/2.2.0-scopes.md)):**
+  - D21: what the feeder offers is of three kinds: operate (the feeder: feeding, the schedule, status), safety policy
+    (the feed guard's limits and the 24 h count) and components (calibration, tuning, drive, pins, keys, network,
+    firmware). Each channel's reach follows how well it knows who is talking (the plan's channel table).
+  - D22: Home Assistant and MQTT's discovery see only the slim set (section 7); every other entity is internal, web
+    app only. Checked in every build by tools/check_scopes.py. No build option for the full set.
+  - D25: the 24 h count's hand edit is web app only (behind the settings password); it left Home Assistant. Closes
+    open item 25.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1460,10 +1470,10 @@ precision-feeder/
     protected entities read-only over MQTT (no command topic), or keep MQTT equal to Home Assistant and rely on the
     broker's accounts. Not decided (2026-10-21).
 
-25. Editing the 24 h count (Portions Counted (24 h)). AGENTS.md allows it by hand in Home Assistant only (the owner's
-    exception, 2026-10-14), but the web app's Maintenance page also offers it, behind the settings password (found by a
-    Codex review of 2.1.1). To decide: allow it in the web app too (and say so in AGENTS.md), or take it out of the web
-    app. Unchanged until then (2026-10-22).
+25. Editing the 24 h count (Portions Counted (24 h)). AGENTS.md allowed it by hand in Home Assistant only (the owner's
+    exception, 2026-10-14), but the web app's Maintenance page also offered it, behind the settings password (found by
+    a Codex review of 2.1.1). **Decided 2026-10-22 (D25, firmware 2.2.0):** web app only, behind the settings password;
+    no longer in Home Assistant.
 
 ## 15. Implementation status (v2.1.2)
 

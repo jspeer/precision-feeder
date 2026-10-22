@@ -81,7 +81,8 @@ button or LED that is not fitted.
 These are deliberate, so a fault ends in a missed meal rather than an over-fed tank:
 
 - **Every feed passes the same guard**, whatever asked for it. The daily cap counts every portion in the last 24
-  hours. (For debugging and recovery, the count it uses can be edited: "Portions Counted (24 h)", logged.)
+  hours. (For debugging and recovery, the count it uses can be edited in the web app, Maintenance, behind the settings
+  password: "Portions Counted (24 h)", logged.)
 - **No catching up.** Events feed only in the minute they are due.
 - **Each event feeds at most once a day**, also across reboots and time zone changes.
 - **Power cut mid-feed → position unknown → feeding stops** until you confirm the tray position.
