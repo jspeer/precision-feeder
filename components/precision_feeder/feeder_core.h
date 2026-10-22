@@ -796,6 +796,10 @@ class FeederCore : private ServoOutput {
   /// Save a key on the device. INVALID_ARG for the all-zero key (anyone could compute with it); UNSUPPORTED in a
   /// build without BLE. Saved at once; a connected client must authenticate again.
   Result set_ble_key(const uint8_t key[DEVICE_KEY_SIZE]);
+  /// Remove the key saved on the device (2.3.0, D29): the build's key (the YAML `key:`) is used again, or, with none,
+  /// every AUTH is refused until a key is set (never an all-zero key). Saved at once; a connected client's session
+  /// ends. UNSUPPORTED in a build without BLE; OK (nothing to do) when no key is saved on the device.
+  Result clear_ble_key();
   /// Changes whenever the key in use changes, so the BLE engine can end a session made with the old one.
   uint32_t ble_key_serial() const { return this->ble_key_serial_; }
   /// Whether BLE may change the guard limits (Config keys 1, 2, 5, 6) and the calibration (offsets, pulse range,

@@ -895,8 +895,8 @@ class SettingsGuard : public AsyncWebHandler {
   }
 
   /// POST /feeder/keys/api?key=<hex> or /feeder/keys/ble?key=<hex>: save a 32-byte key, masked like a new
-  /// password key (password_unmask: plain when no settings password is set); /feeder/keys/api with no key clears
-  /// the API key. Signed over the path and the hex. The key is never sent back.
+  /// password key (password_unmask: plain when no settings password is set); with no key, clear the one saved on the
+  /// device (the BLE key since 2.3.0, D29). Signed over the path and the hex. The key is never sent back.
   void set_key_(AsyncWebServerRequest *request, const std::string &url) {
     const bool api = url == "/feeder/keys/api";
     const std::string key_hex = request->arg("key");
@@ -913,11 +913,10 @@ class SettingsGuard : public AsyncWebHandler {
     }
     PrecisionFeeder *feeder = this->feeder_;
     if (key_hex.empty()) {
-      if (!api) {
-        request->send(400, "application/json", "{\"error\":\"format\"}");
-        return;
-      }
-      feeder->run_on_main_loop([feeder]() { feeder->set_api_key(nullptr); });
+      if (api)
+        feeder->run_on_main_loop([feeder]() { feeder->set_api_key(nullptr); });
+      else
+        feeder->run_on_main_loop([feeder]() { feeder->clear_ble_key(); });
       request->send(200, "application/json", "{}");
       return;
     }

@@ -12,6 +12,9 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
   still published on their MQTT topics, but changing them there is refused ("not allowed", with the value in force).
   The **MQTT Can Change Guard Limits** switch from 2.2.0 is gone; if you turned it on, change the limits in the web
   app (Configuration) instead. The schedule and one-shot feeds can still be edited over MQTT.
+- **Clear the Bluetooth key** (web app, Configuration, Keys; behind the settings password), as the Home Assistant key
+  could be. Bluetooth clients are then refused until a new key is made (a YAML build goes back to its own `ble_key`),
+  and a connected client is disconnected.
 
 ## 2.2.0: who can change what (2026-10-22)
 

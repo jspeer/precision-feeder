@@ -67,7 +67,8 @@ else the feeder lists under Faults.
     pins, the keys and the network are refused with a message saying so;
   - keys: where the Home Assistant and Bluetooth keys come from (none, your YAML, or
     saved on the feeder); generate one (made in the browser and shown once), enter
-    your own, or clear the Home Assistant key, where the build allows it; and the two
+    your own, or clear a key saved on the feeder (the Home Assistant key, and since 2.3.0 the Bluetooth key),
+    where the build allows it; and the two
     switches for what Bluetooth may change. The feeder never sends a key back;
   - MQTT (with the `mqtt` package, 2.1.0): on or off, the broker, port, username,
     password and topic prefix, whether it is connected and the prefix in use; and (2.2.0) whether MQTT may

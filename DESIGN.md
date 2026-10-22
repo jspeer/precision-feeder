@@ -1201,7 +1201,8 @@ precision-feeder/
     not by the owner; to confirm (section 14, item 14).
 - **2.0.0 N4 (2026-10-15):**
   - BLE key: one saved on the device wins over the YAML's, which becomes optional. No key at
-    all refuses every AUTH (detail 6). No Clear for the BLE key (as planned); a new one replaces it.
+    all refuses every AUTH (detail 6). No Clear for the BLE key (as planned); a new one replaces it. (Clear added in
+    2.3.0, D29.)
   - The two BLE permissions are switches in ble_gatt.yaml, protected by the settings password;
     refusals are NOT_AUTHORIZED detail 7. Still protocol 2; the Python client names 6 and 7 and
     shows any other value by number.
@@ -1315,6 +1316,9 @@ precision-feeder/
 - **Loose ends (firmware 2.3.0; owner, 2026-10-22; [docs/plans/2.3.0-loose-ends.md](docs/plans/2.3.0-loose-ends.md)):**
   - D28: every protected setting is read-only over MQTT, the guard's limits included ("MQTT is somewhere in between
     basic and very advanced"). **Reverses D24**: MQTT Can Change Guard Limits is gone; the limits stay published.
+  - D29: the BLE key saved on the device can be cleared in the web app (Configuration, Keys; `/feeder/keys/ble` with no
+    key, signed), as the Home Assistant key can. The build's key is used again, or with none every AUTH is refused
+    (detail 6; never an all-zero key); a connected session ends (`clear_ble_key()`, the key serial changes).
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.

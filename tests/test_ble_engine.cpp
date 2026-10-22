@@ -489,10 +489,24 @@ static void test_keys() {
   resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
   CHECK(resp[2] == proto::RES_OK, "the new key is accepted");
 
+  // Clearing it (2.3.0, D29): no key at all here, so the session ends and every AUTH is refused again.
+  const uint32_t serial = r.feeder->ble_key_serial();
+  CHECK(r.feeder->clear_ble_key() == Result::OK && r.feeder->ble_key_source() == KeySource::NONE, "cleared: no key");
+  CHECK(r.feeder->ble_key_serial() != serial && r.flash.device.ble_key[0] == 0, "saved, and the key in use changed");
+  r.advance(10);
+  CHECK(!r.engine->authorized(), "the session ended");
+  r.advance(1100);
+  resp = r.client->write(proto::CHANNEL_COMMAND, r.client->auth_bytes());
+  CHECK(resp[2] == proto::RES_NOT_AUTHORIZED && resp[3] == proto::AUTH_DETAIL_NO_KEY, "AUTH refused: no key, never zero");
+  CHECK(r.feeder->clear_ble_key() == Result::OK && r.feeder->ble_key_serial() == serial + 1, "clearing again: nothing");
+
   // A key saved on the device wins over the build's, and survives a restart.
   Rig b;  // build key i * 7 + 3
   CHECK(b.feeder->ble_key_source() == KeySource::BUILD, "build key");
   CHECK(b.feeder->set_ble_key(key) == Result::OK && b.feeder->ble_key_source() == KeySource::DEVICE, "device wins");
+  CHECK(b.feeder->clear_ble_key() == Result::OK && b.feeder->ble_key_source() == KeySource::BUILD,
+        "cleared: the build's key again");
+  CHECK(b.feeder->set_ble_key(key) == Result::OK, "and saved again");
   auto again = boot(b.flash, T0 + 60, true);
   uint8_t build[DEVICE_KEY_SIZE];
   for (size_t i = 0; i < sizeof(build); i++)
@@ -504,6 +518,7 @@ static void test_keys() {
   Flash flash;
   auto no_ble = boot(flash, T0);  // set_build_ble_key() never called: a build without BLE
   CHECK(no_ble->set_ble_key(key) == Result::UNSUPPORTED, "no BLE in the build");
+  CHECK(no_ble->clear_ble_key() == Result::UNSUPPORTED, "nothing to clear without BLE");
 }
 
 static void test_permissions() {

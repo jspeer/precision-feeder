@@ -822,7 +822,7 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                         return self._send(*refused)
                     if feeder.keys[kind] in ("off", "build" if kind == "api" else "-"):
                         return self._send(409, b'{"error":"build"}', "application/json")
-                    if (key is None and kind == "ble") or (key is not None and (len(key) != 32 or not any(key))):
+                    if key is not None and (len(key) != 32 or not any(key)):  # clearing: both keys (2.3.0)
                         return self._send(400, b'{"error":"format"}', "application/json")
                     feeder.keys[kind] = "device" if key else "none"
                     feeder.log("W", "precision_feeder", f"{kind.upper()} key {'set' if key else 'cleared'} from the web app")

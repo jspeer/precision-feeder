@@ -53,7 +53,9 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
   well-known all-zero Noise key (and, deprecated, plaintext), so Home Assistant can give it one on adoption. **Trust
   on first use:** whoever reaches it first can set the key, so adopt a new feeder promptly. You can also make one in
   the web app. Once set, plaintext and other keys are refused.
-- **BLE key:** none in the binaries; with no key every BLE client is refused (detail 6). Never an all-zero key. Two
+- **BLE key:** none in the binaries; with no key every BLE client is refused (detail 6). Never an all-zero key. A key
+  saved on the feeder can be cleared in the web app (2.3.0): clients are then refused again (a YAML build goes back to
+  its own key), and a connected one is cut off. Two
   protected switches decide whether BLE may change the guard limits and the calibration (both on by default).
 - **Keys are made in your browser** (or by Home Assistant) and shown once; the feeder never sends a key back.
 

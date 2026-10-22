@@ -170,6 +170,19 @@ Result FeederCore::set_ble_key(const uint8_t key[DEVICE_KEY_SIZE]) {
   return Result::OK;
 }
 
+Result FeederCore::clear_ble_key() {
+  if (!this->ble_built_)
+    return Result::UNSUPPORTED;
+  if (all_zero(this->dev_.ble_key))
+    return Result::OK;
+  std::memset(this->dev_.ble_key, 0, DEVICE_KEY_SIZE);
+  this->ble_key_serial_++;
+  this->hal_save_device(this->dev_);
+  this->log_(LogLevel::kWarn, "BLE key cleared on the device: %s",
+             all_zero(this->build_ble_key_) ? "every client is refused until a key is set" : "the build's key is used");
+  return Result::OK;
+}
+
 void FeederCore::set_device_flag_(uint8_t flag, bool on, const char *what) {
   if (((this->dev_.flags & flag) != 0) == on)
     return;

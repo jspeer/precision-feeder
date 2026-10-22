@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '8e46085c1cc7';
+const BUILD_ID = 'd9874341419a';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -2679,8 +2679,16 @@ PAGES.configuration = {
       const words = { none: 'Not set: every Bluetooth client is refused until you make one.',
                       build: 'From your YAML (ble_key). A key made here replaces it.',
                       device: 'Saved on the feeder.' }[k.ble] || k.ble;
-      box.appendChild(part('Bluetooth key', words, [btn('Generate', () => this.newKey('ble', true)),
-                                                    btn('Enter a key', () => this.newKey('ble', false))]));
+      const actions = [btn('Generate', () => this.newKey('ble', true)), btn('Enter a key', () => this.newKey('ble', false))];
+      if (k.ble === 'device') {
+        actions.push(btn('Clear', async () => {
+          if (!await confirmDialog({ title: 'Clear the Bluetooth key?', danger: true, ok: 'Clear',
+                                     body: 'Bluetooth clients disconnect and are refused until you make a new key. A ' +
+                                           'feeder built from YAML with its own ble_key goes back to that one.' })) return;
+          auth.setKey('ble', null).then(() => toast('Bluetooth key cleared', 'ok'), toastError);
+        }, 'btn btn-small btn-danger'));
+      }
+      box.appendChild(part('Bluetooth key', words, actions));
     }
     for (const r of this.keyRows) box.appendChild(r);
     box.appendChild(h('p', { class: 'hint' }, 'A key is shown once, when it is made: copy it then. ' +
