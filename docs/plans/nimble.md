@@ -70,8 +70,24 @@ touches the stack:
 - NimBLE costs about 196 KB of flash where Bluedroid costs about 350 KB. Once our adapter and BleEngine are back in,
   the net saving should be about 140 KB. That is an estimate: BleEngine and the protocol were about 5 to 10 KB on
   Bluedroid, and the NimBLE adapter will be about the size of today's.
-- Static RAM drops by only about 6 KB. Most of Bluedroid's RAM is heap it takes at start, and that is the number
-  that matters for TLS ([https-tls.md](https-tls.md), "Heap"). It can only be measured on the board.
+- Static RAM drops by only about 6 KB net. By section (`xtensa-esp32s3-elf-size -A` on both images):
+
+  | Section | Bluedroid | NimBLE | Change |
+  |---|---|---|---|
+  | `.dram0.bss` | 67,608 | 56,328 | -11,280 |
+  | `.dram0.data` | 19,984 | 20,084 | +100 |
+  | `.iram0.text` | 92,051 | 96,955 | +4,904 |
+
+  NimBLE puts more of its code in IRAM. On the S3, IRAM and DRAM are carved from the same 512 KB of SRAM, so the
+  extra IRAM takes back most of the DRAM saving.
+- **Heap at run time is the number that matters for TLS** ([https-tls.md](https-tls.md), "Heap"), and it is not
+  measured. Figures quoted on Espressif's forums (owner, 2026-10-23; **unverified**, the configuration and chip
+  behind them not known) put NimBLE at about 13 to 14 KB of static DRAM and 47 KB of static IRAM. They put its
+  total RAM at about 60 to 88 KB against 150 to 200 KB or more for Bluedroid, a saving of about 100 KB. Our static
+  figures agree in shape. So nearly all of that saving would have to be heap Bluedroid takes at start: its task
+  stacks, its GATT database and its buffers. Those comparisons are often for the classic ESP32, sometimes with
+  Bluetooth Classic on. ESPHome already trims Bluedroid to BLE and a GATT server only, so the saving here may be
+  smaller. M0 measures it on the board.
 - With NimBLE and the whole TLS set (TLS 1.2 only, ACME, upload checks), the image would be about 1.53 MB (83%)
   instead of about 1.68 MB (92%).
 
@@ -130,13 +146,31 @@ NimBLE calls us from its host task; BleEngine and FeederCore are main-loop only.
 | B5 | **The advertising is identical to today's**, measured in M0, so scanners and `tools/precision_feeder_client` find the feeder as before |
 | B6 | **The protocol stays at version 2.** Nothing a client sees changes apart from the stack. The firmware gets a minor version, and the CHANGELOG says that existing bonds must be made again |
 | B7 | **NimBLE's memory stays in internal RAM.** PSRAM (`CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL`) is a lever, used only if the board's heap needs it and only once it is shown to work there (as E10 in [https-tls.md](https-tls.md)) |
-| B8 | **Independent of the TLS plan.** Either can come first. If the TLS plan's M0 shows the heap is too tight with Bluedroid, this plan goes first |
+| B8 | **Order with the TLS plan: after MQTT over TLS, before HTTPS** (see "Order" below). The HTTPS server is what needs the heap, and this plan is the largest way to free it short of PSRAM |
+
+## Order (with the TLS plan)
+
+1. **One bench run for both plans' M0** (the owner's OK to flash). Free heap on today's Bluedroid build, then on
+   the scratch NimBLE build, then 1, 3 and 4 HTTPS sessions on each. Both scratch builds and the heap probe
+   already exist.
+2. **MQTT over TLS** (TLS plan M1). It is the audit finding, it costs about 1 KB of flash and one TLS session, and
+   it fits with either BLE stack, so it does not wait for this port.
+3. **This plan, M1 to M5**, if M0 shows NimBLE frees enough heap to matter for HTTPS.
+4. **HTTPS** (TLS plan M2 to M6), tuned once, on the BLE stack that ships.
+
+What M0 can change:
+- NimBLE frees little and Bluedroid has room for HTTPS: HTTPS follows MQTT directly, and this plan is done later,
+  for flash only, or not at all.
+- Neither stack leaves room for HTTPS: PSRAM for the TLS buffers (E10 in the TLS plan, B7 here) becomes the
+  question, whichever BLE stack ships.
+- NimBLE frees about as much as the forum figures say: TLS 1.3 (E1 in the TLS plan) may be affordable again,
+  provided the TLS 1.2 stall seen in the experiment is fixed.
 
 ## Steps (once the decisions are made)
 
 Each step is one commit, with `tools/check.sh` green and DESIGN.md and the guides updated in the same change.
 
-- **M0 Facts on the board (bench, the owner's OK to flash).** No repo code. First the current Bluedroid build:
+- **M0 Facts on the board (bench, the owner's OK to flash; one run with the TLS plan's M0).** No repo code. First the current Bluedroid build:
   - free heap with Wi-Fi, the web page open, MQTT, and a BLE client connected and authenticated;
   - the advertising packets and scan response (nRF Connect or a bleak scan);
   - the GATT table as a client sees it (handles, properties, descriptors);
@@ -183,7 +217,7 @@ Each step is one commit, with `tools/check.sh` green and DESIGN.md and the guide
 
 | Risk | Mitigation |
 |---|---|
-| The heap gain is smaller than hoped (only static RAM is measured, -6 KB) | M0 measures heap on the board before any code is written; if the gain is small, the port is still worth about 140 KB of flash, and the owner decides whether that is enough |
+| The heap gain is smaller than hoped (only static RAM is measured, -6 KB net; the forum's ~100 KB is unverified) | M0 measures heap on the board before any code is written; if the gain is small, the port is still worth about 140 KB of flash, and the owner decides whether that is enough |
 | A thread bug: an engine call from NimBLE's task, or a read that sees half a value | Every NimBLE callback only copies into a queue or reads a locked buffer; BleEngine is called only from `loop()`; host tests for the queue; the M4 soak and retry storm |
 | A write is lost when the queue is full | The client gets an ATT error, not silence, and retries; the retry cache makes an exact retry safe; the queue is sized from the protocol (one client, one write at a time) |
 | Bonded clients cached the old GATT handles, and a write lands on the wrong characteristic after the update | Every write's tag is bound to its characteristic (DESIGN.md section 10), so a write on the wrong one is refused and cannot act; Service Changed tells bonded clients to discover again (checked in M0) |

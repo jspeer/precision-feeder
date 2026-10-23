@@ -193,14 +193,26 @@ can allow `*.local`. For development, a local step-ca can run on the Mac and be 
 | E6 | HTTPS identity: self-signed by default, uploaded, or ACME (http-01 only; no dns-01, which would store DNS credentials on the feeder) |
 | E7 | **ACME reverses part of a logged decision.** The 2.0.0 appliance decision (DESIGN.md section 13) says the feeder "makes no update requests and has no HTTPS client". ACME needs an HTTPS client, talking only to the ACME server the owner configures. The no-update-requests part stays |
 | E8 | At most 3 or 4 TLS sessions, a short idle timeout. Measured on the board before it is fixed |
-| E9 | NimBLE: port the BLE adapter to NimBLE in its own plan, [nimble.md](nimble.md) (BleEngine and the protocol stay; only the radio side changes). Not needed for TLS on flash, but it gives back about 140 KB and some RAM |
+| E9 | NimBLE: port the BLE adapter to NimBLE in its own plan, [nimble.md](nimble.md) (BleEngine and the protocol stay; only the radio side changes). Not needed for TLS on flash, but it gives back about 140 KB of flash, and forum figures (unverified) claim about 100 KB of RAM, nearly all heap. It comes after M1 and before M2 if M0 confirms the heap gain (see "Order") |
 | E10 | PSRAM for TLS buffers only if the board's heap needs it, and only after it is shown to work on the board |
+
+## Order (with the NimBLE plan)
+
+1. **M0 of both plans in one bench run** (the owner's OK to flash): heap on Bluedroid and on the scratch NimBLE
+   build, each with 1, 3 and 4 HTTPS sessions.
+2. **M1, MQTT over TLS.** The audit finding; about 1 KB of flash and one session, so it fits with either BLE stack.
+3. **The NimBLE port** ([nimble.md](nimble.md), M1 to M5), if M0 shows it frees enough heap to matter for HTTPS.
+4. **M2 to M6, HTTPS**, tuned once on the BLE stack that ships.
+
+If NimBLE frees little and Bluedroid has room, M2 follows M1 directly. If neither leaves room, PSRAM (E10) is the
+question. If NimBLE frees about what the forum figures say, TLS 1.3 (E1) may be affordable, once its TLS 1.2 stall
+is fixed.
 
 ## Steps (once the decisions are made)
 
 Each step one commit, `tools/check.sh` green, DESIGN.md and the guides updated in the same change.
 
-- **M0 Facts on the board (bench, the owner's OK to flash).** The lab builds of this experiment on the bench board:
+- **M0 Facts on the board (bench, the owner's OK to flash; run with [nimble.md](nimble.md)'s M0).** The lab builds of this experiment on the bench board:
   free heap with Wi-Fi, BLE, MQTT and the page open, then with 1, 3 and 4 HTTPS sessions; parallel requests on plain
   HTTP; PSRAM for the TLS buffers. How MQTT's "insecure" can be done (E5). No repo code.
 - **M1 Trust store and MQTT over TLS.** The CA slot (upload, clear, signed), MQTT TLS on, port, pinning. A test
