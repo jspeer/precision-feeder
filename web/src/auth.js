@@ -257,7 +257,8 @@ const auth = {
       signed = '';
       query = '';
     } else {
-      const ssid = toHex(utf8(values.ssid)), password = secret(values.password);
+      // A scanned network comes as the hex the feeder sent (2.3.0), a typed one as text.
+      const ssid = values.ssidHex || toHex(utf8(values.ssid)), password = secret(values.password);
       signed = ssid + password;
       query = `ssid=${ssid}&password=${password}`;
     }

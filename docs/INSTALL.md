@@ -54,7 +54,7 @@ shows) opens a setup wizard on a new feeder. Each step saves as it goes and can 
 Maintenance hold the same settings later, and Configuration (Device) starts the wizard again.
 
 1. **Network:** the name (`precision-feeder-a1b2c3` until you change it; used after a restart), another Wi-Fi network
-   if needed, and the **access point password. Set one.** Until you do, anyone in range can join the access point
+   if needed (from the list of those it sees, or typed), and the **access point password. Set one.** Until you do, anyone in range can join the access point
    whenever it is up (no Wi-Fi yet, or Wi-Fi lost) and change the feeder's settings.
 2. **Time zone and location:** choose your place; the location is needed for sunrise and sunset events. Optionally,
    a time (NTP) server on your network (2.0.2); otherwise the public pool servers are used.

@@ -4,6 +4,26 @@
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/** GET /feeder/wifi/networks (2.3.0) -> {scan, scanning, networks: [{hex, name, rssi, secured, signal}]}. Names come
+ *  as hex (any bytes), shown as UTF-8 or with "?" for other bytes; joining sends the hex back unchanged. */
+function parseWifiNetworks(json) {
+  const out = { scan: !!(json && json.scan), scanning: !!(json && json.scanning), networks: [] };
+  for (const n of (json && Array.isArray(json.networks)) ? json.networks : []) {
+    const hex = String(n && n.ssid || '');
+    if (!/^([0-9a-f]{2}){1,32}$/i.test(hex)) continue;
+    let name;
+    try {
+      name = decodeURIComponent(hex.replace(/../g, '%$&'));
+    } catch (e) {
+      name = hex.replace(/../g, b => { const c = parseInt(b, 16); return c >= 0x20 && c < 0x7f ? String.fromCharCode(c) : '?'; });
+    }
+    const rssi = Number(n.rssi);
+    out.networks.push({ hex: hex.toLowerCase(), name, rssi, secured: n.secured !== false,
+                        signal: rssi >= -60 ? 'good' : rssi >= -70 ? 'fair' : 'weak' });
+  }
+  return out;
+}
+
 /** "a=1;b=x" -> {a: '1', b: 'x'} (BLE Info, BLE Session). */
 function parseKV(text) {
   const out = {};

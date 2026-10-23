@@ -763,6 +763,18 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   `88491487`: ESPHome's fixed hash for that case, checked against its source by tests/test_consistency.py) and
   restarts once the tray is still, into the setup access point. Only while a network is saved (`has_sta()`). A YAML
   build's network is in its YAML and cannot be forgotten. Everything else stays.
+- **Scan** (2.3.0, D31; with the web server): code generation asks ESPHome to keep its scan results after
+  connecting, guard them with a lock (they are read on the web server's task, under `ScanResultsLock`) and report
+  each scan's results (a listener). `POST /feeder/wifi/scan` starts one only while connected and ESPHome is not
+  scanning for a roam: ESP-IDF's `esp_wifi_scan_start()`, active, background-coexistent (back to the home channel
+  between channels, so the link holds), as ESPHome's own roaming check does; not ESPHome's `start_scanning()`, a
+  step of its connection state machine that would reconnect. Otherwise 409 `offline`, and the list is what ESPHome
+  found last (on the setup access point, the captive portal's scan). `GET /feeder/wifi/networks`: up to 20, strongest
+  first, each name once, hidden ones left out, the name as hex (any bytes); whether a scan can start, and whether one
+  of ours is running (until its results arrive, at most 10 s). Neither is protected: the captive portal shows the
+  same to anyone on the access point. If the link drops while our scan runs, ESPHome's reconnect scan may be refused
+  or use our results; its own scan timeout and retries cover that. The web app's Join dialog (Configuration and the
+  setup wizard) offers the list with "Other network..." for a typed name, and the typed name alone without the route.
 - **Improv serial** (`packages/improv_serial.yaml`, on in both examples): ESP Web Tools sets Wi-Fi over the USB
   cable after flashing. Physical access is trusted (section 10.1).
 - **Endpoints** (signed like any protected change; section 10.1): `GET /feeder/network` reports the name in use,
@@ -1326,6 +1338,9 @@ precision-feeder/
   - D30: the Wi-Fi network can be forgotten in the web app (Configuration, Network), only in a build with no network
     in its YAML (the prebuilt binaries): "a YAML build can't forget its network, that's fine". It restarts into the
     setup access point (section 9.3).
+  - D31: the Join dialog lists the networks the feeder sees, from a scan while connected (ESP-IDF's background scan,
+    which keeps the link, as ESPHome's roaming does) or the access point's own scan; a typed name stays possible
+    (section 9.3).
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.

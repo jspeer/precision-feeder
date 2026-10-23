@@ -14,7 +14,7 @@ const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8'
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
   formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots, addressKind, compareVersions,
-  updateState, identifyImage };`, ctx);
+  updateState, identifyImage, parseWifiNetworks };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -317,4 +317,18 @@ test('mechanism: cards show only what the build has', () => {
   assert.equal(rows.length, 2, 'the setting and the reading keep themselves current');
   M = mechanismContext({}, cards);
   assert.equal(M.mechanismCards([]).length, 0, 'nothing at all in a build without them');
+});
+
+test('Wi-Fi scan results (2.3.0): names as hex, decoded where they are UTF-8', () => {
+  const r = plain(P.parseWifiNetworks({ scan: true, scanning: false, networks: [
+    { ssid: '486f6d65', rssi: -52, secured: true },          // "Home"
+    { ssid: '436166c3a9', rssi: -65, secured: false },        // "Café"
+    { ssid: '41ff42', rssi: -80, secured: true },             // not UTF-8
+    { ssid: 'zz', rssi: -40, secured: true },                 // not hex: dropped
+    { ssid: '', rssi: -40, secured: true } ] }));
+  assert.equal(r.scan, true);
+  assert.deepEqual(r.networks.map(n => [n.name, n.hex, n.signal, n.secured]),
+                   [['Home', '486f6d65', 'good', true], ['Caf\u00e9', '436166c3a9', 'fair', false],
+                    ['A?B', '41ff42', 'weak', true]]);
+  assert.deepEqual(plain(P.parseWifiNetworks(null)), { scan: false, scanning: false, networks: [] });
 });

@@ -40,6 +40,10 @@ static const char *const TAG = "precision_feeder";
 static constexpr float SERVO_PERIOD_US = 20000.0f;  // 50 Hz
 
 void PrecisionFeeder::setup() {
+#ifdef USE_WIFI_SCAN_RESULTS_LISTENERS
+  if (this->wifi_scan_built_ && wifi::global_wifi_component != nullptr)
+    wifi::global_wifi_component->add_scan_results_listener(&this->scan_done_);
+#endif
   if (this->is_servo() && this->output_ == nullptr) {
     // Neither the servo's output nor another mechanism: nothing could move the tray, so nothing may feed.
     ESP_LOGE(TAG, "No mechanism: give precision_feeder an output (the servo) or include a mechanism package");
@@ -167,6 +171,52 @@ bool PrecisionFeeder::forget_wifi() {
   this->restart_reason_ = "without a Wi-Fi network (setup access point)";
   this->restart_at_.store((millis() + 1000) | 1);  // once the tray is still (restart_if_due_), after the answer is out
   return true;
+}
+
+// A scan of ours ends when ESPHome has its results, or after this long (a failed or empty scan has no results to
+// report). ESPHome scans each channel for 100 to 300 ms, returning to the home channel between them.
+static const uint32_t WIFI_SCAN_MAX_MS = 10000;
+
+bool PrecisionFeeder::wifi_scan_possible() const {
+#ifdef USE_WIFI
+  return this->wifi_scan_built_ && wifi::global_wifi_component != nullptr &&
+         wifi::global_wifi_component->is_connected() && !wifi::global_wifi_component->is_roaming_scan_active();
+#else
+  return false;
+#endif
+}
+
+bool PrecisionFeeder::wifi_scanning() const {
+  const uint32_t at = this->wifi_scan_at_.load();
+  return at != 0 && millis() - at < WIFI_SCAN_MAX_MS;
+}
+
+bool PrecisionFeeder::start_wifi_scan() {
+#ifdef USE_WIFI
+  // Not ESPHome's start_scanning(): that is a step of its connection state machine, which then connects again. While
+  // connected, the state machine leaves a scan's results alone, and its roaming check backs off from one already
+  // running (docs/plans/2.3.0-loose-ends.md, M0).
+  if (!this->wifi_scan_possible() || this->wifi_scanning())
+    return false;
+  wifi_scan_config_t config{};
+  config.show_hidden = false;
+  config.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+  config.scan_time.active.min = 100;
+  config.scan_time.active.max = 300;
+#ifdef CONFIG_SOC_WIFI_SUPPORTED
+  config.coex_background_scan = true;
+#endif
+  const esp_err_t err = esp_wifi_scan_start(&config, false);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Wi-Fi scan refused (%s)", esp_err_to_name(err));
+    return false;
+  }
+  ESP_LOGI(TAG, "Wi-Fi scan from the web app");
+  this->wifi_scan_at_.store(millis() | 1);
+  return true;
+#else
+  return false;
+#endif
 }
 
 bool PrecisionFeeder::api_key_settable() {
@@ -645,13 +695,16 @@ class SettingsGuard : public AsyncWebHandler {
     char buf[AsyncWebServerRequest::URL_BUF_SIZE];
     const std::string url = request->url_to(buf).str();
     if (request->method() == HTTP_GET)
-      return url == "/feeder/auth" || url == "/feeder/network";
+      return url == "/feeder/auth" || url == "/feeder/network" ||
+             (url == "/feeder/wifi/networks" && this->feeder_->wifi_scan_built());
     if (request->method() != HTTP_POST)
       return false;
     if (url == "/feeder/auth/password" || url == "/feeder/auth/check" || url == "/feeder/keys/api" ||
         url == "/feeder/keys/ble" || url == "/feeder/network/name" || url == "/feeder/network/ap" ||
         url == "/feeder/network/wifi" || url == "/feeder/network/forget" || url == "/feeder/setup")
       return true;
+    if (url == "/feeder/wifi/scan")
+      return this->feeder_->wifi_scan_built();
 #ifdef USE_OTA
     if (url == "/feeder/firmware")
       return true;
@@ -680,6 +733,8 @@ class SettingsGuard : public AsyncWebHandler {
     if (request->method() == HTTP_GET) {
       if (url == "/feeder/network")
         this->send_network_(request);
+      else if (url == "/feeder/wifi/networks")
+        this->send_wifi_networks_(request);
       else
         this->send_challenge_(request);
       return true;
@@ -694,6 +749,10 @@ class SettingsGuard : public AsyncWebHandler {
       return true;
     }
 #endif
+    if (url == "/feeder/wifi/scan") {
+      this->start_wifi_scan_(request);
+      return true;
+    }
     if (url.rfind("/feeder/network/", 0) == 0) {
       this->set_network_(request, url);
       return true;
@@ -988,6 +1047,68 @@ class SettingsGuard : public AsyncWebHandler {
       key->fill(0);
       delete key;
     });
+    request->send(200, "application/json", "{}");
+  }
+
+  /// GET /feeder/wifi/networks (2.3.0, D31): the networks ESPHome's last scan found, strongest first, each name once,
+  /// hidden ones left out: {"scan":<a scan can start>,"scanning":<one of ours runs>,"networks":[{"ssid":"<hex>",
+  /// "rssi":<dBm>,"secured":<bool>}]}. The name as hex, as /feeder/network/wifi takes it: any bytes, no escaping. Not
+  /// protected: the captive portal shows the same to anyone on the access point.
+  void send_wifi_networks_(AsyncWebServerRequest *request) {
+    struct Found {
+      std::string ssid;
+      int8_t rssi;
+      bool secured;
+    };
+    static const size_t WIFI_NETWORKS_MAX = 20;
+    std::vector<Found> found;
+#ifdef USE_WIFI
+    if (wifi::global_wifi_component != nullptr) {
+      wifi::ScanResultsLock lock(wifi::global_wifi_component);  // ESPHome fills them on the main loop
+      for (const auto &res : wifi::global_wifi_component->get_scan_result()) {
+        const StringRef ssid = res.get_ssid();
+        if (res.get_is_hidden() || ssid.empty())
+          continue;
+        auto same = std::find_if(found.begin(), found.end(), [&](const Found &f) {
+          return f.ssid.size() == ssid.size() && memcmp(f.ssid.data(), ssid.c_str(), ssid.size()) == 0;
+        });
+        if (same == found.end())
+          found.push_back({std::string(ssid.c_str(), ssid.size()), res.get_rssi(), res.get_with_auth()});
+        else if (res.get_rssi() > same->rssi)
+          *same = {same->ssid, res.get_rssi(), res.get_with_auth()};
+      }
+    }
+#endif
+    std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return a.rssi > b.rssi; });
+    if (found.size() > WIFI_NETWORKS_MAX)
+      found.resize(WIFI_NETWORKS_MAX);
+    std::string body = std::string("{\"scan\":") + (this->feeder_->wifi_scan_possible() ? "true" : "false") +
+                       ",\"scanning\":" + (this->feeder_->wifi_scanning() ? "true" : "false") + ",\"networks\":[";
+    char hex[2 * 32 + 1];
+    char tail[48];
+    for (size_t i = 0; i < found.size(); i++) {
+      const size_t n = std::min<size_t>(found[i].ssid.size(), 32);
+      to_hex(reinterpret_cast<const uint8_t *>(found[i].ssid.data()), n, hex);
+      snprintf(tail, sizeof(tail), "\",\"rssi\":%d,\"secured\":%s}", found[i].rssi,
+               found[i].secured ? "true" : "false");
+      body += (i ? ",{\"ssid\":\"" : "{\"ssid\":\"");
+      body += hex;
+      body += tail;
+    }
+    body += "]}";
+    request->send(200, "application/json", body.c_str());
+  }
+
+  /// POST /feeder/wifi/scan (2.3.0, D31): start a scan while connected; the web app then reads /feeder/wifi/networks
+  /// until "scanning" ends. 409 {"error":"offline"} when none can start (on the access point: use what is there).
+  /// Not protected: a scan changes nothing, and one runs at a time.
+  void start_wifi_scan_(AsyncWebServerRequest *request) {
+    if (!this->feeder_->wifi_scan_possible()) {
+      request->send(409, "application/json", "{\"error\":\"offline\"}");
+      return;
+    }
+    PrecisionFeeder *feeder = this->feeder_;
+    feeder->run_on_main_loop([feeder]() { feeder->start_wifi_scan(); });
     request->send(200, "application/json", "{}");
   }
 

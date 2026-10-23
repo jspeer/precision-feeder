@@ -148,6 +148,10 @@ class Feeder:
                         "ap": "build", "wifi": True, "setup": not getattr(args, "set_up", False),
                         "forget": True}  # a blank build whose network was set on the device (D30)
         self.network_boot = ("", "build")  # what the feeder started with: a change waits for a restart
+        # What a Wi-Fi scan finds (2.3.0, D31): name, signal, secured. The scan "runs" for 3 s after it starts.
+        self.wifi_found = [("example-network", -58, True), ("Café upstairs", -66, True), ("guest", -71, False),
+                           ("neighbour-5G", -84, True)]
+        self.wifi_scan_at = 0.0
         self.entities: dict[str, Entity] = {}
         self._build(args)
 
@@ -791,6 +795,12 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 with feeder.lock:
                     body = dict(feeder.network, restart=feeder.network_restart())
                 return self._send(200, json.dumps(body).encode(), "application/json")
+            if path == "/feeder/wifi/networks":
+                with feeder.lock:
+                    scanning = time.monotonic() - feeder.wifi_scan_at < 3
+                    body = {"scan": feeder.network["wifi"], "scanning": scanning,
+                            "networks": [{"ssid": n.encode().hex(), "rssi": r, "secured": s} for n, r, s in feeder.wifi_found]}
+                return self._send(200, json.dumps(body).encode(), "application/json")
             if path == "/feeder/ble" and hasattr(feeder, "ble_activity"):
                 with feeder.lock:
                     body = json.dumps({"entries": feeder.ble_activity}).encode()
@@ -827,6 +837,13 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                         return self._send(400, b'{"error":"format"}', "application/json")
                     feeder.keys[kind] = "device" if key else "none"
                     feeder.log("W", "precision_feeder", f"{kind.upper()} key {'set' if key else 'cleared'} from the web app")
+                    return self._send(200, b"{}", "application/json")
+                if path == "/feeder/wifi/scan":
+                    if not feeder.network["wifi"]:
+                        return self._send(409, b'{"error":"offline"}', "application/json")
+                    if time.monotonic() - feeder.wifi_scan_at >= 3:
+                        feeder.wifi_scan_at = time.monotonic()
+                        feeder.log("I", "precision_feeder", "Wi-Fi scan from the web app")
                     return self._send(200, b"{}", "application/json")
                 if path == "/feeder/setup":
                     done = params.get("done", "")

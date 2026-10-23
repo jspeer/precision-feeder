@@ -18,6 +18,9 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 - **Forget the Wi-Fi network** (web app, Configuration, Network; behind the settings password), in the prebuilt
   firmware and any build with no network in its YAML. The feeder restarts, once the tray is still, into its setup
   access point (`<name>-setup`) to pick a network; everything else is kept.
+- **Pick the Wi-Fi network from a list** when joining one (Configuration, Network, and the setup wizard): the
+  networks the feeder can see, strongest first, with Scan again. "Other network..." still takes a typed name, for a
+  hidden network. The feeder stays connected while it scans.
 
 ## 2.2.0: who can change what (2026-10-22)
 

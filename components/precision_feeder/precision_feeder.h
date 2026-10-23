@@ -140,6 +140,18 @@ class PrecisionFeeder : public Component, public FeederCore {
   /// Erase the saved network and restart once the tray is still: the feeder comes back on its setup access point (and
   /// Improv), as after a fresh flash. Everything else is kept. Main loop only. False if not forgettable.
   bool forget_wifi();
+  /// Wi-Fi scan (2.3.0, D31): set by code generation with the web server, which then has ESPHome keep its scan
+  /// results and guard them with a lock (GET /feeder/wifi/networks reads them from the web server's task).
+  void set_wifi_scan_built(bool built) { this->wifi_scan_built_ = built; }
+  bool wifi_scan_built() const { return this->wifi_scan_built_; }
+  /// A scan can start now: connected, and ESPHome is not scanning for a roam. On the setup access point ESPHome's own
+  /// scan (the captive portal's) is all there is.
+  bool wifi_scan_possible() const;
+  /// Start one scan, as ESPHome's roaming check does (ESP-IDF's, background-coexistent: the link holds). Main loop
+  /// only. False if not possible, one of ours is running, or it was refused.
+  bool start_wifi_scan();
+  /// One of ours is running: until results arrive, at most WIFI_SCAN_MAX_MS.
+  bool wifi_scanning() const;
 
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   /// A build whose API key is provisioned at run time (packages/api_key_on_device.yaml): ESPHome's OTA can then only
@@ -225,6 +237,18 @@ class PrecisionFeeder : public Component, public FeederCore {
   std::atomic<uint32_t> restart_at_{0};               // millis() of a restart after a firmware upload; 0: none
   const char *restart_reason_{""};                    // for the log line
   bool wifi_forget_built_{false};
+  bool wifi_scan_built_{false};
+  std::atomic<uint32_t> wifi_scan_at_{0};  // millis() a scan of ours started, | 1; 0: none running
+#ifdef USE_WIFI_SCAN_RESULTS_LISTENERS
+  /// Ends our scan when ESPHome has stored its results (called on the main loop).
+  struct ScanDone : wifi::WiFiScanResultsListener {
+    explicit ScanDone(PrecisionFeeder *feeder) : feeder(feeder) {}
+    void on_wifi_scan_results(const wifi::wifi_scan_vector_t<wifi::WiFiScanResult> &) override {
+      this->feeder->wifi_scan_at_.store(0);
+    }
+    PrecisionFeeder *feeder;
+  } scan_done_{this};
+#endif
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   ESPHomeOTAComponent *ota_{nullptr};
 #endif

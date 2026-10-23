@@ -8,7 +8,7 @@ reviewed by a human, but it may still contain mistakes.
 import re
 
 import esphome.codegen as cg
-from esphome.components import output, time as time_
+from esphome.components import output, time as time_, wifi
 from esphome.components.esphome.ota import ESPHomeOTAComponent
 from esphome.components.esp32.gpio import ESP32InternalGPIOPin
 import esphome.config_validation as cv
@@ -196,5 +196,12 @@ async def to_code(config):
         cg.add(var.set_web_server(await cg.get_variable(config[CONF_WEB_SERVER_ID])))
         for entity in config[CONF_PROTECTED]:
             cg.add(var.add_protected(entity))
+        # Wi-Fi scan (2.3.0, D31): ESPHome keeps its scan results after connecting, guards them with a lock for the web
+        # server's task, and tells us when a scan's results are in.
+        if "wifi" in CORE.config:
+            wifi.request_wifi_scan_results()
+            wifi.request_wifi_scan_results_lock()
+            wifi.request_wifi_scan_results_listener()
+            cg.add(var.set_wifi_scan_built(True))
         # Emitted before App.setup(), so the guard is registered ahead of the web server's own handler.
         cg.add(var.register_settings_guard())

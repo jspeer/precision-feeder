@@ -368,20 +368,77 @@ PAGES.configuration = {
   },
 
   async wifiDialog() {
+    // The networks the feeder sees (2.3.0, D31; a scan starts if it is connected), or "Other network..." typed.
+    const getList = () => fetch(`${location.origin}/feeder/wifi/networks`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null)).then(j => (j ? parseWifiNetworks(j) : null), () => null);
+    let list = await getList();
+    const pick = h('select', { class: 'input', 'aria-label': 'Network' });
     const ssid = h('input', { class: 'input', type: 'text', autocomplete: 'off', spellcheck: 'false' });
     const pw = h('input', { class: 'input', type: 'password', autocomplete: 'off' });
-    const ok = await formDialog({ title: 'Join a Wi-Fi network', ok: 'Join',
-      body: [field('Network (SSID)', ssid), field('Password', pw, 'Empty for an open network. This page loses the ' +
-                   'feeder when it switches: find it again on the new network.')],
+    const status = h('span', { class: 'hint' });
+    const rescan = h('button', { type: 'button', class: 'btn btn-small' }, 'Scan again');
+    const typed = field('Network (SSID)', ssid);
+    const pwField = field('Password', pw, 'Empty for an open network. This page loses the feeder when it switches: ' +
+                          'find it again on the new network.');
+    const chosen = () => (list ? list.networks.find(n => n.hex === pick.value) : null);
+    const sync = () => {
+      const n = chosen();
+      typed.hidden = !!n;
+      pwField.hidden = !!n && !n.secured;
+    };
+    const fill = () => {
+      const keep = pick.value;
+      pick.replaceChildren(...list.networks.map(n => h('option', { value: n.hex },
+                             `${n.name} (${n.signal}, ${n.secured ? 'secured' : 'open'})`)),
+                           h('option', { value: '' }, 'Other network...'));
+      pick.value = list.networks.some(n => n.hex === keep) ? keep : list.networks.length ? list.networks[0].hex : '';
+      setText(status, list.scanning ? 'Scanning...' : list.networks.length ? '' : 'None found: type the name.');
+      rescan.hidden = !list.scan;
+      rescan.disabled = list.scanning;
+      sync();
+    };
+    let open = true;
+    const scan = async () => {
+      if (!list || !list.scan) return;
+      const r = await fetch(`${location.origin}/feeder/wifi/scan`, { method: 'POST' }).catch(() => null);
+      if (!r || !r.ok) return;
+      list.scanning = true;
+      fill();
+      for (let i = 0; i < 8 && open; i++) {  // the feeder ends a scan within 10 s
+        await new Promise(res => setTimeout(res, 1500));
+        const next = await getList();
+        if (!open || !next) return;
+        list = next;
+        if (!list.scanning) break;
+      }
+      if (open) fill();
+    };
+    rescan.onclick = scan;
+    pick.onchange = sync;
+    let body;
+    if (list) {
+      fill();
+      body = [field('Network', pick), h('div', { class: 'actions' }, rescan, status), typed, pwField];
+      scan();
+    } else {
+      body = [typed, pwField];
+    }
+    const ok = await formDialog({ title: 'Join a Wi-Fi network', ok: 'Join', body,
       validate: () => {
-        const n = new TextEncoder().encode(ssid.value).length;
-        if (!n || n > 32) return 'The network name is 1 to 32 bytes';
+        if (!chosen()) {
+          const n = new TextEncoder().encode(ssid.value).length;
+          if (!n || n > 32) return 'The network name is 1 to 32 bytes';
+        }
         const p = pw.value;
-        if (p && !(/^[\x20-\x7e]{8,63}$/.test(p) || /^[0-9a-fA-F]{64}$/.test(p)))
+        if (!pwField.hidden && p && !(/^[\x20-\x7e]{8,63}$/.test(p) || /^[0-9a-fA-F]{64}$/.test(p)))
           return 'A Wi-Fi password is 8 to 63 characters';
         return '';
       } });
-    if (ok) auth.setNetwork('wifi', { ssid: ssid.value, password: pw.value })
+    open = false;
+    if (!ok) return;
+    const n = chosen();
+    auth.setNetwork('wifi', n ? { ssidHex: n.hex, password: n.secured ? pw.value : '' }
+                              : { ssid: ssid.value, password: pw.value })
       .then(() => toast('Joining the network: the feeder may drop off this page', 'ok'), toastError);
   },
 
