@@ -193,7 +193,7 @@ can allow `*.local`. For development, a local step-ca can run on the Mac and be 
 | E6 | HTTPS identity: self-signed by default, uploaded, or ACME (http-01 only; no dns-01, which would store DNS credentials on the feeder) |
 | E7 | **ACME reverses part of a logged decision.** The 2.0.0 appliance decision (DESIGN.md section 13) says the feeder "makes no update requests and has no HTTPS client". ACME needs an HTTPS client, talking only to the ACME server the owner configures. The no-update-requests part stays |
 | E8 | At most 3 or 4 TLS sessions, a short idle timeout. Measured on the board before it is fixed |
-| E9 | NimBLE: port the BLE adapter to NimBLE in its own plan (BleEngine and the protocol stay; only the radio side changes). Not needed for TLS on flash, but it gives back about 140 KB and some RAM |
+| E9 | NimBLE: port the BLE adapter to NimBLE in its own plan, [nimble.md](nimble.md) (BleEngine and the protocol stay; only the radio side changes). Not needed for TLS on flash, but it gives back about 140 KB and some RAM |
 | E10 | PSRAM for TLS buffers only if the board's heap needs it, and only after it is shown to work on the board |
 
 ## Steps (once the decisions are made)
@@ -216,7 +216,7 @@ Each step one commit, `tools/check.sh` green, DESIGN.md and the guides updated i
 
 ## Not in this plan
 
-- The NimBLE port (E9): its own plan if the owner wants it.
+- The NimBLE port (E9): its own plan, [nimble.md](nimble.md).
 - dns-01 and any other ACME challenge.
 - Client certificates for MQTT (mutual TLS): the backend supports them; add only if a broker needs it.
 - A different MCU: not needed on flash; revisit only if M0 shows the heap cannot hold it.
