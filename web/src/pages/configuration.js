@@ -404,7 +404,7 @@ PAGES.configuration = {
       if (!r || !r.ok) return;
       list.scanning = true;
       fill();
-      for (let i = 0; i < 8 && open; i++) {  // the feeder ends a scan within 10 s
+      for (let i = 0; i < 12 && open; i++) {  // the feeder ends a scan within 15 s
         await new Promise(res => setTimeout(res, 1500));
         const next = await getList();
         if (!open || !next) return;

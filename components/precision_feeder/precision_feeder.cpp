@@ -175,7 +175,7 @@ bool PrecisionFeeder::forget_wifi() {
 
 // A scan of ours ends when ESPHome has its results, or after this long (a failed or empty scan has no results to
 // report). ESPHome scans each channel for 100 to 300 ms, returning to the home channel between them.
-static const uint32_t WIFI_SCAN_MAX_MS = 10000;
+static const uint32_t WIFI_SCAN_MAX_MS = 15000;  // about 9 s on the bench (2.3.0, M6)
 
 bool PrecisionFeeder::wifi_scan_possible() const {
 #ifdef USE_WIFI

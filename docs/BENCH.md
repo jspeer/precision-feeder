@@ -754,3 +754,26 @@ at the end of a comment in tests/test_mqtt.cpp, which the Mac's clang does not f
 - **Disc rig, `full`** (its final state): the drive, the tray, MQTT connected again, the BLE key kept; BLE selftest
   13/13.
 
+
+## Firmware 2.3.0 on the disc rig (2026-10-22, bench build)
+
+The `full` image built from `release/2.3.0-loose-ends` (M6 of docs/plans/2.3.0-loose-ends.md), flashed over USB from
+2.2.0 `full`. The servo rig is shelved (D32).
+
+- **Upgrade:** all 136 entities read before and after: every value the same (drive, calibration, tuning, limits, pins,
+  tray position, the 24 h count, keys), except the expected ones: MQTT Can Change Guard Limits is gone (D28), and the
+  encoder count and heap figures restarted with the boot. `/feeder/network` reports `"forget":true` (the name and
+  Wi-Fi were set on the device).
+- **Wi-Fi scan while connected (D31), five runs:** no request failed (polled every 0.3 s), no disconnect in the log,
+  and the results were fresh (the signals changed). A scan took about 9 to 10.6 s, longer than the 10 s the first
+  build allowed before it stopped reporting "scanning": raised to 15 s (the web app waits as long). While it runs, a
+  request to the feeder can stall for up to about 3 s (the radio is off the home channel), then completes. 20
+  networks listed (the cap), strongest first.
+- **Feed times (open item 23):** the first feed after a restart took 2,291 ms (the move 613 ms); later feeds 2,266 ms
+  (move 631 ms). The first run's 3.9 s is not seen (as with 2.2.0).
+- **Not run this time:**
+  - Forget Wi-Fi on the rig: putting the network back needs its Wi-Fi password over Improv, which needs the owner.
+  - Clearing the BLE key: the rig's key is not the one in `examples/secrets.yaml`, so it could not be put back.
+  - MQTT `policy/*/set` refused: MQTT is off on the rig; the host tests (tests/test_mqtt.cpp) cover it.
+  - A power cut mid-move and a held disc.
+- Left on this 2.3.0 bench build, with its settings, BLE key and Wi-Fi as before.

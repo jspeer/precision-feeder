@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '7b1726cd0a4e';
+const BUILD_ID = '3c2696fcd7f5';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -2835,7 +2835,7 @@ PAGES.configuration = {
       if (!r || !r.ok) return;
       list.scanning = true;
       fill();
-      for (let i = 0; i < 8 && open; i++) {  // the feeder ends a scan within 10 s
+      for (let i = 0; i < 12 && open; i++) {  // the feeder ends a scan within 15 s
         await new Promise(res => setTimeout(res, 1500));
         const next = await getList();
         if (!open || !next) return;

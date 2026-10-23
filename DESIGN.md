@@ -771,7 +771,7 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   step of its connection state machine that would reconnect. Otherwise 409 `offline`, and the list is what ESPHome
   found last (on the setup access point, the captive portal's scan). `GET /feeder/wifi/networks`: up to 20, strongest
   first, each name once, hidden ones left out, the name as hex (any bytes); whether a scan can start, and whether one
-  of ours is running (until its results arrive, at most 10 s). Neither is protected: the captive portal shows the
+  of ours is running (until its results arrive, at most 15 s; about 9 s on the bench). Neither is protected: the captive portal shows the
   same to anyone on the access point. If the link drops while our scan runs, ESPHome's reconnect scan may be refused
   or use our results; its own scan timeout and retries cover that. The web app's Join dialog (Configuration and the
   setup wizard) offers the list with "Other network..." for a typed name, and the typed name alone without the route.
@@ -1534,7 +1534,7 @@ precision-feeder/
     calibration end to end with a slot lined up by eye; 300 feed cycles; the wiggle with real food; a power cut
     mid-move; a held disc and an unplugged encoder; the STBY level at power-up (and whether a pull-down is needed);
     which way the disc turns, by eye. And the feed time: about 3.9 s on the first run against the sketch's 2.5 s,
-    2.3 s on a later feed; not explained. **Decided 2026-10-22 (D32):** the guided calibration, checked by eye, is the
+    2.3 s on a later feed; not explained (not seen since: 2.2.0, and 2.3.0's first feed after a restart took 2.29 s). **Decided 2026-10-22 (D32):** the guided calibration, checked by eye, is the
     method (also for a printed disc), not a stand-in for a mark.
 
 24. MQTT and the protected settings (section 9.6). Over MQTT, whoever the broker let publish could change the guard
@@ -1552,7 +1552,7 @@ precision-feeder/
     against ESPHome 2026.10.0's source**): a build with no network in its YAML keeps the one set on the device in NVS
     namespace `esphome`, key `"88491487"` (a fixed hash), and only erasing that key forgets it (an empty record is
     loaded as a network with no name); with none, the setup access point, captive portal and Improv come up as after
-    a fresh flash. ESPHome's own `start_scanning()` drops a live connection; an ESP-IDF scan with
+    a fresh flash (forgetting on the rig not yet checked: docs/BENCH.md). ESPHome's own `start_scanning()` drops a live connection; an ESP-IDF scan with
     `coex_background_scan`, as ESPHome's post-connect roaming uses, keeps it, and ESPHome collects its results
     (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
     ESPHome upgrade.
