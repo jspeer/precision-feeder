@@ -100,6 +100,27 @@ std::string FeederCore::password_unmask_text(const uint8_t nonce[AUTH_NONCE_SIZE
   return out;
 }
 
+std::string FeederCore::password_unmask_blob(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t *masked,
+                                             size_t n) const {
+  static const char LABEL[] = "new secret blob";
+  n = std::min<size_t>(n, SECRET_BLOB_MAX);
+  std::string out(n, '\0');
+  uint8_t mask[PASSWORD_HASH_SIZE]{};
+  for (size_t at = 0; at < n; at += PASSWORD_HASH_SIZE) {
+    if (this->password_set()) {
+      const uint32_t block = static_cast<uint32_t>(at / PASSWORD_HASH_SIZE);
+      const uint8_t counter[4] = {static_cast<uint8_t>(block >> 24), static_cast<uint8_t>(block >> 16),
+                                  static_cast<uint8_t>(block >> 8), static_cast<uint8_t>(block)};
+      crypto::hmac_sha256(this->dev_.password_hash, PASSWORD_HASH_SIZE, nonce, AUTH_NONCE_SIZE,
+                          reinterpret_cast<const uint8_t *>(LABEL), sizeof(LABEL) - 1, counter, sizeof(counter), mask);
+    }
+    for (size_t i = 0; i < PASSWORD_HASH_SIZE && at + i < n; i++)
+      out[at + i] = static_cast<char>(masked[at + i] ^ mask[i]);
+  }
+  std::memset(mask, 0, sizeof(mask));
+  return out;
+}
+
 void FeederCore::set_password(const uint8_t salt[PASSWORD_SALT_SIZE], const uint8_t key[PASSWORD_HASH_SIZE]) {
   const bool had = this->password_set();
   this->dev_.password_scheme = PASSWORD_SCHEME_PBKDF2;

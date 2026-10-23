@@ -1340,6 +1340,22 @@ static void test_settings_password() {
     const auto text_masked = unhex(PW_TEXT_MASKED);
     CHECK(f->password_unmask_text(n16, text_masked.data(), text_masked.size()) == PW_TEXT,
           "a secret text longer than one block is unmasked too");
+
+    // A longer secret (a private key for HTTPS, 2.4.1): HMAC blocks with a 4-byte counter, worked out here.
+    std::string blob(100, '\0');
+    for (size_t i = 0; i < blob.size(); i++)
+      blob[i] = static_cast<char>('A' + i % 26);
+    std::vector<uint8_t> blob_masked(blob.size());
+    for (size_t at = 0; at < blob.size(); at += PASSWORD_HASH_SIZE) {
+      const uint8_t counter[4] = {0, 0, 0, static_cast<uint8_t>(at / PASSWORD_HASH_SIZE)};
+      uint8_t block[PASSWORD_HASH_SIZE];
+      crypto::hmac_sha256(key.data(), key.size(), n16, AUTH_NONCE_SIZE,
+                          reinterpret_cast<const uint8_t *>("new secret blob"), 15, counter, 4, block);
+      for (size_t i = 0; i < PASSWORD_HASH_SIZE && at + i < blob.size(); i++)
+        blob_masked[at + i] = static_cast<uint8_t>(blob[at + i]) ^ block[i];
+    }
+    CHECK(f->password_unmask_blob(n16, blob_masked.data(), blob_masked.size()) == blob,
+          "a long secret (four blocks) is unmasked");
   }
   {
     auto f = boot(flash, T0);
@@ -1362,6 +1378,8 @@ static void test_settings_password() {
     const std::string plain = "hello";
     CHECK(f->password_unmask_text(nonce, reinterpret_cast<const uint8_t *>(plain.data()), plain.size()) == plain,
           "no password: a secret text is not masked");
+    CHECK(f->password_unmask_blob(nonce, reinterpret_cast<const uint8_t *>(plain.data()), plain.size()) == plain,
+          "no password: a long secret is not masked");
   }
   {
     flash.device.password_scheme = 7;  // from a newer firmware

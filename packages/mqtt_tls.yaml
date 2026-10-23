@@ -1,0 +1,86 @@
+# Precision Feeder: MQTT over TLS (optional; firmware 2.4.1, DESIGN.md section 9.7, D36).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# Encrypts MQTT and checks the broker. Needs mqtt.yaml and tls.yaml. Off by default; set up in the web app
+# (Configuration, MQTT), with the broker's TLS port (usually 8883).
+#
+# - MQTT TLS Check says how the broker is checked:
+#   - "CA certificate": against the CA certificate in the trust store (upload it in the web app), with the broker's
+#     name checked against its certificate. The safe choice for a broker with a certificate from your own CA.
+#   - "Pin on first contact": the first time the feeder reaches the broker it keeps the certificate the broker shows
+#     (the top of its chain: a self-signed certificate or its CA) and from then on checks against that one, without
+#     the name check. Like SSH's first connection: safe as long as nobody is impersonating the broker on that first
+#     contact. A broker that sends only its own certificate, signed by a CA it does not send, cannot be pinned:
+#     upload its CA instead. "Forget" in the web app pins again at the next start.
+# - With TLS on, MQTT never falls back to plain text: without a CA certificate (or before the pin), it does not start.
+# - Applied at boot: changing these sets Restart Needed.
+
+precision_feeder:
+  protected_entities:
+    - switch/MQTT TLS
+    - select/MQTT TLS Check
+
+esphome:
+  on_boot:
+    # After mqtt.yaml's settings (600), before the MQTT client starts (AFTER_WIFI).
+    - priority: 590
+      then:
+        - lambda: |-
+            const std::string broker = id(pf_mqtt_broker).state;
+            const bool enabled = id(pf_mqtt_enabled).state && !broker.empty();
+            id(feeder_tls).configure_mqtt(id(pf_mqtt), id(pf_mqtt_tls).state,
+                                          id(pf_mqtt_tls_check).active_index().value_or(0) == 1, enabled, broker,
+                                          (uint16_t) id(pf_mqtt_port).state);
+            id(pf_mqtt_tls_ready) = true;
+
+globals:
+  # False until the settings are applied at boot: restoring the values must not ask for a restart.
+  - id: pf_mqtt_tls_ready
+    type: bool
+    initial_value: "false"
+
+switch:
+  - platform: template
+    id: pf_mqtt_tls
+    name: "MQTT TLS"
+    internal: true
+    icon: mdi:lock-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on: &pf_mqtt_tls_changed
+      - if:
+          condition:
+            lambda: return id(pf_mqtt_tls_ready);
+          then:
+            - lambda: id(feeder).note_restart_needed("MQTT TLS");
+    on_turn_off: *pf_mqtt_tls_changed
+
+select:
+  - platform: template
+    id: pf_mqtt_tls_check
+    name: "MQTT TLS Check"
+    internal: true
+    icon: mdi:certificate-outline
+    entity_category: config
+    options:
+      - "CA certificate"
+      - "Pin on first contact"
+    initial_option: "CA certificate"
+    optimistic: true
+    restore_value: true
+    on_value: *pf_mqtt_tls_changed
+
+text_sensor:
+  # How MQTT checks its broker now: "off", "checked against the CA certificate", "pinning on first contact" and so on.
+  - platform: template
+    id: pf_mqtt_tls_status
+    name: "MQTT TLS"
+    internal: true
+    icon: mdi:shield-lock-outline
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: return id(feeder_tls).mqtt_text();

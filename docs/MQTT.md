@@ -80,6 +80,14 @@ mosquitto_sub -h broker.lan -u feeder -P '...' -t 'precision-feeder-a1b2c3/feede
   is harmless (the same feed is not added twice), but a retained `restart_cycle` would restart the cycle each time.
 - **One value at a time.** ESPHome's MQTT client queues incoming messages and drops some when its queue is full: send
   a burst with small pauses and check the state topics.
+- **TLS** (2.4.1, the `mqtt_tls` package, in the prebuilt firmware): turn on MQTT TLS in the web app and use the
+  broker's TLS port (usually 8883). MQTT TLS Check picks how the broker is checked: against a CA certificate you
+  upload to the feeder's trust store (the broker's name is checked too), or "Pin on first contact": the feeder keeps
+  the certificate the broker shows the first time (a self-signed one, or the CA at the top of its chain) and checks
+  against it from then on. A broker that sends only its own certificate, signed by a CA it does not send, cannot be
+  pinned: upload the CA instead. With TLS on, MQTT never connects in plain text: without a CA (or before the pin) it
+  does not start. These settings apply after a restart. Until the web app's page for certificates (2.4.3), the
+  trust store is set through `POST /feeder/tls/ca` (DESIGN.md section 9.7).
 - **Settings of the MQTT connection itself** (broker, port, login, prefix) are web app only. Once MQTT has connected
   after a restart, a change to them is used after the next restart (Restart Needed), because ESPHome builds its MQTT
   client once per boot. Turning MQTT off takes effect at once.

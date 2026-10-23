@@ -901,6 +901,61 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   broker accounts and ACLs (docs/SECURITY.md). Components are never on MQTT (D26; closes open item 24).
 - Cost: about 132 KB of flash (mostly per-entity discovery code, generated for every entity even when internal).
 
+### 9.7 HTTPS, the trust store and MQTT over TLS (firmware 2.4.1, D36 to D39)
+
+`components/precision_feeder_tls`, with `packages/tls.yaml` (HTTPS) and `packages/mqtt_tls.yaml` (MQTT over TLS,
+needs `mqtt.yaml`); both in the prebuilt binaries, HTTPS in the examples. The decisions are plain C++ in
+`tls_policy.h` (`tests/test_tls.cpp`); `precision_feeder_tls.cpp` is the device's side. Measurements and the options
+weighed: docs/plans/https-tls.md.
+
+- **HTTPS is a relay (D37).** A task listens on port 443; each connection gets its own task (6 KB stack, about 15 KB
+  of heap while open), does the TLS handshake with esp-tls (TLS 1.2, session tickets, ECDHE with P-256) and copies
+  plain bytes to and from ESPHome's web server on 127.0.0.1:80. Every handler (the app, `/events`, the settings guard,
+  the signed firmware upload) works unchanged over both. At most `max_sessions` (4, 1 to 6) at once; a connection
+  beyond waits in the backlog. A session idle both ways for `idle_timeout` (20 s, 12 s to 5 min) is closed (an open
+  page's event stream sends something every 10 s). mbedTLS buffers: 16 KB in, 4 KB out, allocated while needed.
+- **The identity.** At its first start (in the first loop pass, so the name saved on the device is in force) the
+  feeder makes a self-signed certificate: P-256, `CN=<name>.local, O=Precision Feeder`, SAN `<name>.local`, valid
+  2025 to 2049 (the feeder has no clock at its first boot), a random positive serial. It is kept in NVS (namespace
+  `pf_tls`, new in 2.4.1: `ss_cert`, `ss_key`, `ss_name`) and made again when the name changes. An uploaded
+  certificate chain and key (`up_cert`, `up_key`) win while they still check (every certificate parses, the key
+  matches the first one, the chain verifies against the trust store's CA when one is set; dates only once the clock
+  is valid); one that no longer checks at a start falls back to the self-signed one, and the HTTPS status says why.
+  A new identity is used after a restart (Restart Needed). The keys are in flash in the clear (no flash encryption,
+  as the other keys: docs/SECURITY.md).
+- **Port 80 (D38).** Home Assistant's ESPHome integration builds the device's link itself, always
+  `http://<address>:<web server port>` (Home Assistant core, `manager.py`), and ESPHome's MQTT discovery sends none,
+  so the feeder cannot make Home Assistant show an https link. Instead, with HTTPS Redirect on (the default), a GET of
+  `/` or `/index.html` on port 80 is answered `302` to `https://<the certificate's first DNS name, else
+  <name>.local>/` (port added when not 443; an IPv6 literal in brackets), so the link lands on HTTPS. With HTTPS Only
+  on (off by default), everything else on port 80 is refused with 403 `{"error":"https"}`. Never filtered: the relay's
+  own requests (from 127.0.0.1 or ::1), anything while the access point is up (captive portal, setup wizard), ACME's
+  `/.well-known/acme-challenge/`, and everything until HTTPS is listening, so a failed HTTPS never locks the owner
+  out. The filter is `PrecisionFeeder::RequestFilter`, a handler registered before the settings guard. Both switches
+  are internal and protected.
+- **The trust store.** One PEM bundle (`ca`: one or more CA certificates) the owner uploads; MQTT checks its broker
+  against it, and an uploaded identity is checked against it.
+- **Endpoints.** `GET /feeder/tls` (JSON: HTTPS state, sessions, the certificate's source, name, subject, expiry and
+  SHA-256 fingerprint, the trust store's subject, MQTT's TLS status and pin). `POST /feeder/tls/ca` (body: the PEM,
+  empty clears it), `/feeder/tls/identity` (body: the private key's hex, masked, on the first line, then the chain's
+  PEM; empty goes back to the self-signed one), `/feeder/tls/self-signed` (make a new one at the next start),
+  `/feeder/tls/mqtt-pin/forget`. Bodies are raw (`application/octet-stream`; ESPHome's form parser takes at most
+  1 KB), at most 10 KB. Each is signed with the settings password as the firmware upload is (section 9.5): the
+  `?sha256=` parameter must be the body's hash, and the tag covers `<path>\n<sha256>`. The private key is masked with
+  `FeederCore::password_unmask_blob` (HMAC-SHA-256 blocks keyed with the password's derived key over the signature's
+  nonce, "new secret blob" and a counter; no mask with no password, as for the other keys). The web app's page for
+  them comes in 2.4.3.
+- **MQTT over TLS (D36, D39).** MQTT TLS (off by default) and MQTT TLS Check ("CA certificate" or "Pin on first
+  contact") are internal, protected and applied at boot (on_boot priority 590, after `mqtt.yaml`'s 600 and before
+  the client starts); changing them sets Restart Needed. "CA certificate": the client checks the broker against the
+  trust store, with the name check. "Pin on first contact": the first time, a task connects to the broker with
+  verification optional, takes the chain it shows and pins its top certificate if it can anchor a check (a
+  self-signed certificate or a CA; a lone leaf signed by a CA it does not send cannot be pinned: upload the CA), saves
+  it (`mq_pin`) and starts the client against it without the name check; it tries again every minute until it can.
+  **With TLS on, MQTT never connects in plain text (D39):** without a CA, or before the pin, the client gets a
+  placeholder certificate that can never verify and is not started; turning MQTT on later waits for a restart
+  (`mqtt_can_start()`). Forgetting the pin pins again at the next start.
+
 ## 10. BLE security
 
 Decided 2026-10-14 (owner: "use best practices"), built in protocol 2
@@ -1375,7 +1430,8 @@ precision-feeder/
 - **NimBLE, TLS and certificates (firmware 2.4.0 onwards; owner, 2026-10-23; [docs/plans/nimble.md](docs/plans/nimble.md),
   [docs/plans/https-tls.md](docs/plans/https-tls.md)):** the order is NimBLE (2.4.0), then all of TLS at once
   (HTTPS, MQTT over TLS, the trust store), then ACME, then the web app's configuration page, then the docs, each its
-  own version; then testing and validation, and a comparison against the earlier audit reports before any GitHub
+  own revision of 2.4 (2.4.1 TLS, 2.4.2 ACME, 2.4.3 the configuration page, 2.4.4 the docs; owner: 2.4.x, not 2.5,
+  2.6...); then testing and validation, and a comparison against the earlier audit reports before any GitHub
   release. The intermediate versions are not tagged.
   - D33: BLE runs on ESP-IDF's NimBLE instead of Bluedroid, trimmed to one link (section 8). `packages/ble_gatt.yaml`
     keeps its name, substitutions and entities, so a YAML build that includes it changes nothing ("non-breaking");
@@ -1388,7 +1444,14 @@ precision-feeder/
     BLE's clients are a PLC bridge and scripts, not phones: bench tests use the Python client; phone pairing is not
     tested (owner). A "Forget BLE bonds" button waits for the configuration page.
   - D36: MQTT's "insecure" mode pins the broker's certificate on first contact instead of skipping verification
-    (owner; E5 of the TLS plan). Built in the TLS release.
+    (owner; E5 of the TLS plan). Built in 2.4.1 (section 9.7).
+  - D37: HTTPS is a relay from port 443 to ESPHome's web server on 127.0.0.1:80, not a second web server, so every
+    handler and the settings guard work unchanged; TLS 1.2 only (E1 of the plan).
+  - D38: Home Assistant's link to the device is always `http://<address>:80` (Home Assistant builds it), so the
+    feeder cannot report an https URL; port 80 redirects the app's page to `https://<name>.local/` instead (HTTPS
+    Redirect, on by default). HTTPS Only (off by default) refuses the rest of port 80, but never the relay, the access
+    point's captive portal, ACME's challenge, or anything while HTTPS is not running.
+  - D39: with MQTT TLS on, MQTT never falls back to plain text: no CA (or no pin yet) means the client does not start.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1603,7 +1666,21 @@ precision-feeder/
     (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
     ESPHome upgrade.
 
-## 15. Implementation status (v2.4.0)
+27. HTTPS and MQTT over TLS on hardware (section 9.7, firmware 2.4.1). Built and compiled only. To check on the bench:
+    free heap with 4 HTTPS sessions open (and with BLE connected), the self-signed certificate's first making time,
+    the event stream through the relay, the signed firmware upload over HTTPS, the redirect from Home Assistant's
+    "Visit" link, HTTPS Only with the captive portal, an uploaded chain from a private CA, MQTT checked against a CA
+    (port 8883) and pinned on first contact (a self-signed broker; a leaf-only broker refused), and that MQTT never
+    connects in plain text with TLS on.
+
+## 15. Implementation status (v2.4.1)
+
+2.4.1 (HTTPS, the trust store and MQTT over TLS, D36 to D39; section 9.7) is built and compiled in every example and
+both prebuilt configs, with host tests for its decisions (`tests/test_tls.cpp`) and for the masked key upload. The full image is
+1,493,615 bytes (81.4% of the app slot; 2.4.0: 1,452,343), static RAM 148,779 bytes (2.4.0: 146,931). Not
+tagged, and not yet on hardware: the handshake and heap with 4 sessions (and with BLE), the redirect from Home
+Assistant's link, browsers with the self-signed certificate, an uploaded chain, and MQTT against a broker with a CA
+and by pinning are to do, with the testing at the end of the 2.4 work (open item 27).
 
 2.4.0 (BLE on NimBLE, D33 to D35; section 8) is built and compiled, with host tests for the hand-off between
 NimBLE's task and the main loop and for the GATT table; not tagged, and not yet on hardware: the Python client's

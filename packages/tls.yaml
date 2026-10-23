@@ -1,0 +1,70 @@
+# Precision Feeder: HTTPS for the web app, at https://<name>.local (optional; firmware 2.4.1, DESIGN.md section 9.7).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# The web app over TLS on port 443. HTTPS is a relay to the web server on port 80 inside the feeder, so everything
+# the app does works the same over both. Needs web_server.yaml.
+#
+# - The certificate: at its first start the feeder makes a self-signed one for <name>.local (P-256, about a second;
+#   made again when the name changes). Browsers warn about it until you trust it once. A certificate and key of your
+#   own (for example from your own CA) can be uploaded instead; it is checked against the trust store's CA when one
+#   is set. Both are kept in the feeder's flash, the key in the clear: anyone who can read the flash can read it.
+# - Port 80 (HTTPS Redirect, on by default): opening the app on port 80 sends the browser to
+#   https://<certificate's name>/. Home Assistant's "Visit" link is always http://<address>:80 (Home Assistant builds
+#   it), so this is what brings it to HTTPS. Everything else on port 80 keeps working.
+# - HTTPS Only (off by default): port 80 answers only the redirect, the captive portal while the access point runs,
+#   and ACME's challenge. Turn it on once HTTPS works in every browser you use; without HTTPS running (the first
+#   seconds after a start, or a failure) port 80 refuses nothing, so the feeder is never locked out.
+# - Both switches are web app only and need the settings password when one is set.
+# - The trust store (one CA certificate, for MQTT over TLS and to check an uploaded certificate) and the uploads are
+#   at /feeder/tls (DESIGN.md section 9.7).
+# - Each HTTPS session takes about 15 KB of heap while open; at most `max_sessions` at once.
+
+precision_feeder_tls:
+  id: feeder_tls
+  # max_sessions: 4      # HTTPS sessions at once (1 to 6); a connection beyond waits for a free one
+  # idle_timeout: 20s    # an idle session gives its slot back (12 s to 5 min)
+
+precision_feeder:
+  protected_entities:
+    - switch/HTTPS Redirect
+    - switch/HTTPS Only
+
+switch:
+  - platform: template
+    id: pf_https_redirect
+    name: "HTTPS Redirect"
+    internal: true
+    icon: mdi:lock-check
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: id(feeder_tls).set_redirect(true);
+    on_turn_off:
+      - lambda: id(feeder_tls).set_redirect(false);
+  - platform: template
+    id: pf_https_only
+    name: "HTTPS Only"
+    internal: true
+    icon: mdi:lock
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: id(feeder_tls).set_https_only(true);
+    on_turn_off:
+      - lambda: id(feeder_tls).set_https_only(false);
+
+text_sensor:
+  # The certificate HTTPS serves: "self-signed <name> until <date>" or "uploaded <name> until <date>".
+  - platform: template
+    id: pf_https_status
+    name: "HTTPS"
+    internal: true
+    icon: mdi:certificate
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: return id(feeder_tls).https_text();

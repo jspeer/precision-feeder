@@ -81,6 +81,13 @@ script:
           }
           if (!id(pf_mqtt_started)) {
             if (on) {
+          #ifdef USE_PRECISION_FEEDER_TLS
+              // MQTT over TLS waiting for a pin or a CA (mqtt_tls.yaml): never start it now, in plain text or not.
+              if (!id(feeder_tls).mqtt_can_start()) {
+                id(feeder).note_restart_needed("MQTT settings");
+                return;
+              }
+          #endif
               m->enable();
               id(pf_mqtt_started) = true;
             }

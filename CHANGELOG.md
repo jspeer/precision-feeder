@@ -6,6 +6,29 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.1: HTTPS and MQTT over TLS (2026-10-23, not tagged)
+
+**Upgrade note:** nothing to do. The web app is now also at `https://<name>.local`, and opening it on plain HTTP sends
+the browser there; your browser warns once about the feeder's own certificate. Everything else on port 80 keeps
+working until you turn on HTTPS Only.
+
+- **HTTPS for the web app** (`packages/tls.yaml`, in the prebuilt firmware and the examples). The feeder makes its
+  own certificate for `<name>.local` at its first start (made again if the name changes), or uses a certificate and
+  key you upload (from your own CA, for example). TLS 1.2, at most 4 sessions at once, about 15 KB of memory each
+  while open. Everything the app does works the same over HTTPS: the live page, settings, the signed firmware upload.
+- **Home Assistant's link lands on HTTPS.** Home Assistant builds the "Visit" link itself, always
+  `http://<address>`, so the feeder cannot change it; instead, port 80 answers the app's page with a redirect to
+  `https://<name>.local/` (HTTPS Redirect, on by default).
+- **HTTPS Only** (off by default) refuses the rest of port 80. It never applies while the setup access point is up,
+  and nothing is refused until HTTPS is running, so the feeder cannot lock you out.
+- **MQTT over TLS** (`packages/mqtt_tls.yaml`, in the prebuilt firmware): the broker is checked against a CA
+  certificate you upload, or pinned on first contact (the feeder keeps the certificate the broker showed the first
+  time) instead of a check that trusts anything. With TLS on, MQTT never falls back to plain text.
+- **A trust store** for that CA, and endpoints to upload certificates (`/feeder/tls`), signed with the settings
+  password; the private key is masked with it on the way. The web app's page for them comes in 2.4.3.
+- All new settings are web app only and protected by the settings password; none is in Home Assistant or MQTT.
+- Size: the full prebuilt image is 41 KB larger (1,493,615 bytes, 81% of the app slot), with 2 KB more static RAM.
+
 ## 2.4.0: Bluetooth on NimBLE (2026-10-23, not tagged)
 
 **Upgrade note:** a Bluetooth client that had *paired* with the feeder pairs again (the bonds are not carried over).

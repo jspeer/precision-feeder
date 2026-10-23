@@ -823,48 +823,14 @@ class SettingsGuard : public AsyncWebHandler {
     request->send(200, "application/json", body.c_str());
   }
 
-  /// Check the auth header against `message`. Answers nothing.
   AuthResult check_auth_(AsyncWebServerRequest *request, const std::string &message, uint32_t &wait) {
-    uint8_t nonce[AUTH_NONCE_SIZE]{}, tag[AUTH_TAG_SIZE]{};
-    const auto header = request->get_header(AUTH_HEADER);
-    const bool parsed = header.has_value() && header->size() == 2 * (AUTH_NONCE_SIZE + AUTH_TAG_SIZE) &&
-                        from_hex(*header, 0, nonce, AUTH_NONCE_SIZE) &&
-                        from_hex(*header, 2 * AUTH_NONCE_SIZE, tag, AUTH_TAG_SIZE);
-    wait = 0;
-    AuthResult result;
-    {
-      LockGuard guard(this->feeder_->password_lock());
-      if (!this->feeder_->password_set())
-        return AuthResult::OK;
-      result = parsed ? this->feeder_->password_check(nonce, tag, message, wait) : AuthResult::NO_CHALLENGE;
-    }
-    if (result == AuthResult::REFUSED)
-      ESP_LOGW(TAG, "Settings password refused for %s", message.substr(0, message.find('\n')).c_str());
-    return result;
+    return this->feeder_->web_auth_check(request, message, wait);
   }
-
-  /// Answer a request the settings password refused: 403, or 429 inside the wait after a failure.
   static void send_refusal_(AsyncWebServerRequest *request, AuthResult result, uint32_t wait) {
-    static const char *const ERRORS[] = {"", "refused", "wait", "challenge"};
-    char body[64];
-    std::snprintf(body, sizeof(body), "{\"error\":\"%s\",\"wait\":%u}", ERRORS[static_cast<uint8_t>(result)],
-                  static_cast<unsigned>(wait));
-    // ESPHome's ESP-IDF request (2026.9.1 and 2026.10.0) knows only 200, 204, 400, 401, 404, 409 and 422 and sends
-    // anything else as 500 (found on the bench), so these two go straight to ESP-IDF, which takes any status line.
-    httpd_req_t *raw = *request;
-    httpd_resp_set_status(raw, result == AuthResult::WAIT ? "429 Too Many Requests" : "403 Forbidden");
-    httpd_resp_set_type(raw, "application/json");
-    httpd_resp_send(raw, body, HTTPD_RESP_USE_STRLEN);
+    PrecisionFeeder::web_send_refusal(request, result, wait);
   }
-
-  /// Check the auth header against `message`; on failure answer the request and return false.
   bool authorised_(AsyncWebServerRequest *request, const std::string &message) {
-    uint32_t wait;
-    const AuthResult result = this->check_auth_(request, message, wait);
-    if (result == AuthResult::OK)
-      return true;
-    send_refusal_(request, result, wait);
-    return false;
+    return this->feeder_->web_authorised(request, message);
   }
 
 #ifdef USE_OTA
@@ -1258,9 +1224,59 @@ class SettingsGuard : public AsyncWebHandler {
   PrecisionFeeder *feeder_;
 };
 
+/// Ahead of everything: a component's request filter (HTTPS's redirect and "HTTPS Only", 2.4.1), when one is set.
+class FilterHandler : public AsyncWebHandler {
+ public:
+  explicit FilterHandler(PrecisionFeeder *feeder) : feeder_(feeder) {}
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    auto *filter = this->feeder_->request_filter();
+    return filter != nullptr && filter->wants(request);
+  }
+  void handleRequest(AsyncWebServerRequest *request) override { this->feeder_->request_filter()->answer(request); }
+
+ protected:
+  PrecisionFeeder *feeder_;
+};
+
 void PrecisionFeeder::register_settings_guard() {
-  if (this->web_server_ != nullptr && web_server_base::global_web_server_base != nullptr)
-    web_server_base::global_web_server_base->add_handler(new SettingsGuard(this));  // lives as long as the device
+  if (this->web_server_ != nullptr && web_server_base::global_web_server_base != nullptr) {
+    // Both live as long as the device. The filter comes first, so "HTTPS Only" covers the guard's routes too.
+    web_server_base::global_web_server_base->add_handler(new FilterHandler(this));
+    web_server_base::global_web_server_base->add_handler(new SettingsGuard(this));
+  }
+}
+
+AuthResult PrecisionFeeder::web_auth_check(AsyncWebServerRequest *request, const std::string &message,
+                                           uint32_t &wait) {
+  uint8_t nonce[AUTH_NONCE_SIZE]{}, tag[AUTH_TAG_SIZE]{};
+  const auto header = request->get_header(AUTH_HEADER);
+  const bool parsed = header.has_value() && header->size() == 2 * (AUTH_NONCE_SIZE + AUTH_TAG_SIZE) &&
+                      from_hex(*header, 0, nonce, AUTH_NONCE_SIZE) &&
+                      from_hex(*header, 2 * AUTH_NONCE_SIZE, tag, AUTH_TAG_SIZE);
+  wait = 0;
+  AuthResult result;
+  {
+    LockGuard guard(this->password_lock());
+    if (!this->password_set())
+      return AuthResult::OK;
+    result = parsed ? this->password_check(nonce, tag, message, wait) : AuthResult::NO_CHALLENGE;
+  }
+  if (result == AuthResult::REFUSED)
+    ESP_LOGW(TAG, "Settings password refused for %s", message.substr(0, message.find('\n')).c_str());
+  return result;
+}
+
+void PrecisionFeeder::web_send_refusal(AsyncWebServerRequest *request, AuthResult result, uint32_t wait) {
+  static const char *const ERRORS[] = {"", "refused", "wait", "challenge"};
+  char body[64];
+  std::snprintf(body, sizeof(body), "{\"error\":\"%s\",\"wait\":%u}", ERRORS[static_cast<uint8_t>(result)],
+                static_cast<unsigned>(wait));
+  // ESPHome's ESP-IDF request (2026.9.1 and 2026.10.0) knows only 200, 204, 400, 401, 404, 409 and 422 and sends
+  // anything else as 500 (found on the bench), so these two go straight to ESP-IDF, which takes any status line.
+  httpd_req_t *raw = *request;
+  httpd_resp_set_status(raw, result == AuthResult::WAIT ? "429 Too Many Requests" : "403 Forbidden");
+  httpd_resp_set_type(raw, "application/json");
+  httpd_resp_send(raw, body, HTTPD_RESP_USE_STRLEN);
 }
 
 bool PrecisionFeeder::is_protected(const std::string &entity) const {

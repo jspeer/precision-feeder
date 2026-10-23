@@ -1,4 +1,4 @@
-# Precision Feeder: the prebuilt "full" binary (with BLE) (firmware 2.4.0), as GitHub Actions builds it for the install page.
+# Precision Feeder: the prebuilt "full" binary (with BLE) (firmware 2.4.1), as GitHub Actions builds it for the install page.
 #
 # Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 # Designed and written with the assistance of an AI (Anthropic's Claude);
@@ -49,11 +49,13 @@ packages:
   network_info: !include precision-feeder/packages/network_info.yaml
   improv_serial: !include precision-feeder/packages/improv_serial.yaml
   web_ui: !include precision-feeder/packages/web_server.yaml
+  tls: !include precision-feeder/packages/tls.yaml
   status_led: !include precision-feeder/packages/status_led.yaml
   time_ha: !include precision-feeder/packages/time_homeassistant.yaml
   button: !include precision-feeder/packages/button.yaml
   api_key: !include precision-feeder/packages/api_key_on_device.yaml
   mqtt: !include precision-feeder/packages/mqtt.yaml
+  mqtt_tls: !include precision-feeder/packages/mqtt_tls.yaml
 
 # No network and no access-point password in the image (owner, 2026-10-16: the access point is open on a clean flash).
 wifi:

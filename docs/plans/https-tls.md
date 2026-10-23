@@ -1,8 +1,9 @@
 # Plan: HTTPS, MQTT over TLS and certificates (experiment)
 
-Status: **experiment, nothing built.** Branch `experiment/https-tls`, from main at 2.3.1. This document records what a
-measurement experiment of 2026-10-23 found and proposes a design. The decisions below (E1 to E10) are proposals
-awaiting the owner; none is logged in [DESIGN.md](../../DESIGN.md) yet, and no firmware version is assigned.
+Status: **HTTPS, the trust store and MQTT over TLS built in firmware 2.4.1** (DESIGN.md section 9.7, D36 to D39;
+compiled, not yet on hardware); ACME is 2.4.2, the web app's page 2.4.3. Branch `experiment/https-tls`, from main at
+2.3.1. This document records what a measurement experiment of 2026-10-23 found and the design proposed from it; what
+was built and decided is in [DESIGN.md](../../DESIGN.md).
 
 Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 Designed and written with the assistance of an AI (Anthropic's Claude); reviewed by a human, but it may still

@@ -9,7 +9,7 @@ from the internet.
 
 ## Opening it
 
-- Browse to `http://<name>.local` (the prebuilt firmware: `precision-feeder-` and the end of
+- Browse to `https://<name>.local` or `http://<name>.local` (the prebuilt firmware: `precision-feeder-` and the end of
   the board's MAC address, for example `precision-feeder-a1b2c3.local`; a YAML build: its
   `name`), or to the feeder's IP address. IPv4 and IPv6 both work; Diagnostics lists the
   addresses. A new feeder opens the setup wizard.
@@ -18,6 +18,10 @@ from the internet.
 - **Passwords:** none by default. A **settings password** (Configuration) protects the
   safety limits, calibration, pins, keys, network and firmware ([SECURITY.md](SECURITY.md)).
   A YAML build can also put the whole app behind a login ([BUILDING.md](BUILDING.md)).
+- **HTTPS** (2.4.1, the `tls` package, in the prebuilt firmware): the app is also at `https://<name>.local`, and
+  opening it on plain HTTP (Home Assistant's "Visit" link too) sends you there. The feeder's certificate is
+  self-signed: your browser warns the first time; accept it once for that feeder. The certificates and the trust
+  store get their own page in 2.4.3; until then they are set through `/feeder/tls` (DESIGN.md section 9.7).
 - **Phones:** the tabs move to a bar at the bottom. Add the page to your home screen
   for an app-like shortcut.
 

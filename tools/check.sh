@@ -39,6 +39,9 @@ echo "== C++ host tests"
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder -Itests tests/test_mqtt.cpp \
   components/precision_feeder/feeder_*.cpp components/precision_feeder/mechanism_*.cpp -o "$OUT/test_mqtt"
 "$OUT/test_mqtt"
+# HTTPS and MQTT over TLS: what port 80 does, how MQTT connects, what to pin (tls_policy.h, 2.4.1).
+"$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder_tls tests/test_tls.cpp -o "$OUT/test_tls"
+"$OUT/test_tls"
 
 echo "== Python tests (client, and limits consistency)"
 (cd tools && python3 -m unittest -q test_precision_feeder_ble test_make_release test_check_scopes)
@@ -84,19 +87,23 @@ awk '{ print } /^  ble_gatt: !include/ { print "  api_key: !include precision-fe
   examples/ble.yaml > "$CONFIG/ble_key_on_device.yaml"
 grep -q "api_key_on_device" "$CONFIG/ble_key_on_device.yaml"
 # A headless build (BUILDING.md): the disc example without the web app, run over BLE.
-awk '/^  web_ui: !include/ { next } { print } /^  disc: !include/ { print "  ble_gatt: !include precision-feeder/packages/ble_gatt.yaml" }' \
+awk '/^  (web_ui|tls): !include/ { next } { print } /^  disc: !include/ { print "  ble_gatt: !include precision-feeder/packages/ble_gatt.yaml" }' \
   examples/disc.yaml > "$CONFIG/headless.yaml"
 grep -q "ble_gatt" "$CONFIG/headless.yaml"
+if grep -q "^  tls: !include" "$CONFIG/headless.yaml"; then echo "headless.yaml still has tls"; exit 1; fi
+# MQTT over TLS (mqtt.yaml and mqtt_tls.yaml, as the prebuilt binaries have them): the basic example with both.
+sed -E 's/^  # (mqtt|mqtt_tls): !include/  \1: !include/' examples/basic.yaml > "$CONFIG/mqtt_tls.yaml"
+grep -q "^  mqtt_tls: !include" "$CONFIG/mqtt_tls.yaml"
 # Python with PyYAML for tools/check_scopes.py: ESPHome's own, else the system's.
 PY="$(dirname "$ESPHOME")/python"
 [ -x "$PY" ] || PY=python3
-for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml; do
+for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml mqtt_tls.yaml; do
   echo "== esphome config examples/$f (as a copy in a config folder), and who sees what"
   "$ESPHOME" config "$CONFIG/$f" > "$OUT/resolved.yaml"
   "$PY" tools/check_scopes.py "$OUT/resolved.yaml"
 done
 if [ "${1:-}" = "--compile" ]; then
-  for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml; do
+  for f in basic.yaml ble.yaml disc.yaml ble_key_on_device.yaml headless.yaml mqtt_tls.yaml; do
     echo "== esphome compile examples/$f"
     # ESPHome's own exit status decides (the filter below only prints the sizes); a failed build fails the check.
     if ! "$ESPHOME" compile "$CONFIG/$f" > "$OUT/compile.log" 2>&1; then

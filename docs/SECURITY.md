@@ -67,14 +67,23 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 - **The list of nearby Wi-Fi networks is not protected** (2.3.0): anyone who can reach the web app can see the names
   the feeder found and ask it to scan again, as ESPHome's captive portal shows them on the access point. Forgetting
   the network is protected.
-- **Plain HTTP.** The feeder serves no HTTPS. Someone recording your network can see feeding commands and settings
-  being read, and can try to guess the settings password offline from a challenge and its answer; PBKDF2 slows that
-  down, but a short password falls. Use a long one.
+- **HTTPS, but self-signed by default** (2.4.1). With the `tls` package (in the prebuilt firmware) the web app is
+  at `https://<name>.local`, and port 80 sends the app's page there (HTTPS Redirect). The feeder's certificate is
+  one it made itself, so your browser warns until you accept it; upload a certificate from your own CA to avoid
+  that. Until you turn on **HTTPS Only**, the rest of port 80 still answers in plain HTTP (an app opened there, older
+  bookmarks, scripts): someone recording your network can see what crosses it, and can try to guess the settings
+  password offline from a challenge and its answer; PBKDF2 slows that down, but a short password falls. Use a long
+  one. HTTPS Only never applies while the access point is up, so the setup wizard and captive portal stay plain HTTP.
+- **Home Assistant's "Visit" link is http.** Home Assistant builds it as `http://<address>:80` itself; the redirect
+  takes the browser on to HTTPS.
+- **MQTT over TLS checks the broker** (2.4.1, `mqtt_tls`): against a CA certificate you upload, or against the
+  certificate the broker showed the first time ("Pin on first contact"; like SSH, safe if nobody impersonates the
+  broker on that first contact). With TLS on, MQTT never falls back to plain text.
 - **Unprotected controls can be pressed from other websites.** ESPHome's web server allows cross-site requests, so a
   page you visit could, for example, press Feed One Portion on the feeder. The feed guard still applies; protected
   settings still need the password (DESIGN.md section 14, item 12).
-- **No flash encryption.** Keys and the settings password's derived key are in flash in the clear; anyone holding
-  the board can read them.
+- **No flash encryption.** Keys, HTTPS's private key and the settings password's derived key are in flash in the
+  clear; anyone holding the board can read them.
 - **One challenge at a time** for the whole feeder: two pages making protected changes in the same second can
   spoil each other's challenge; the app's next try works.
 - **MQTT is as safe as your broker.** With the `mqtt` package set up, anyone your broker lets publish to the

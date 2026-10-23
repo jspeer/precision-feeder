@@ -202,6 +202,7 @@ bool parse_board(const std::string &text, Board &board);
 constexpr unsigned WIFI_SSID_MAX = 32;      // bytes, as 802.11 and ESPHome's saved network allow
 constexpr unsigned WIFI_PASSWORD_MAX = 64;  // 8 to 63 characters, or 64 hex digits (a raw WPA2 key)
 constexpr unsigned SECRET_TEXT_MAX = 64;    // the longest text sent masked (password_unmask_text)
+constexpr unsigned SECRET_BLOB_MAX = 2048;  // the longest blob sent masked (password_unmask_blob): a PEM private key
 /// A name for the network: 1 to 31 lowercase letters, digits and hyphens, not starting or ending with a hyphen (a DNS
 /// label, as mDNS and DHCP need). Empty is not a name; `problem` (optional) says why one is refused.
 bool check_hostname(const std::string &name, std::string *problem = nullptr);
@@ -777,6 +778,10 @@ class FeederCore : private ServoOutput {
   /// HMAC-SHA256(current key, nonce || "new secret 1") || HMAC-SHA256(current key, nonce || "new secret 2"), cut to
   /// its length; zero without a password. Call after password_check() passed for that nonce.
   std::string password_unmask_text(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t *masked, size_t n) const;
+  /// A longer secret (a private key uploaded for HTTPS, up to SECRET_BLOB_MAX bytes; firmware 2.4.1) travels masked by
+  /// the blocks HMAC-SHA256(current key, nonce || "new secret blob" || i), i = 0, 1, 2, ... as 4 bytes big-endian,
+  /// cut to its length; zero without a password. Call after password_check() passed for that nonce.
+  std::string password_unmask_blob(const uint8_t nonce[AUTH_NONCE_SIZE], const uint8_t *masked, size_t n) const;
   /// Store a new password: its salt and the key the browser derived from it. Saved at once.
   void set_password(const uint8_t salt[PASSWORD_SALT_SIZE], const uint8_t key[PASSWORD_HASH_SIZE]);
   /// Remove the settings password. Saved at once.

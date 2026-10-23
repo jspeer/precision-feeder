@@ -184,6 +184,33 @@ class PrecisionFeeder : public Component, public FeederCore {
   bool is_protected(const std::string &entity) const;
   const std::vector<std::string> &protected_entities() const { return this->protected_; }
   web_server::WebServer *web_server() const { return this->web_server_; }
+
+  /// Another component's say over every request, ahead of the settings guard (firmware 2.4.1: HTTPS's redirect and
+  /// "HTTPS Only"). Both run on the web server's task; wants() must be quick and only decide, answer() answers.
+  class RequestFilter {
+   public:
+    virtual ~RequestFilter() = default;
+    virtual bool wants(AsyncWebServerRequest *request) const = 0;
+    virtual void answer(AsyncWebServerRequest *request) = 0;
+  };
+  /// Set before the first request (in a component's setup()). One filter per build.
+  void set_request_filter(RequestFilter *filter) { this->request_filter_ = filter; }
+  RequestFilter *request_filter() const { return this->request_filter_; }
+
+  /// Check a request's settings-password header (X-Feeder-Auth) against `message`, "<path>\n<what it covers>".
+  /// Answers nothing. Safe on the web server's task.
+  AuthResult web_auth_check(AsyncWebServerRequest *request, const std::string &message, uint32_t &wait);
+  /// Answer a request the settings password refused: 403, or 429 inside the wait after a failure.
+  static void web_send_refusal(AsyncWebServerRequest *request, AuthResult result, uint32_t wait);
+  /// web_auth_check(), answering the request when refused. True if authorised.
+  bool web_authorised(AsyncWebServerRequest *request, const std::string &message) {
+    uint32_t wait;
+    const AuthResult result = this->web_auth_check(request, message, wait);
+    if (result == AuthResult::OK)
+      return true;
+    web_send_refusal(request, result, wait);
+    return false;
+  }
 #endif
   /// The settings-password calls of FeederCore run on the web server's task too: they go through this lock.
   Mutex &password_lock() { return this->password_lock_; }
@@ -273,6 +300,7 @@ class PrecisionFeeder : public Component, public FeederCore {
   Mutex password_lock_;
 #ifdef USE_WEBSERVER
   web_server::WebServer *web_server_{nullptr};
+  RequestFilter *request_filter_{nullptr};
   std::vector<std::string> protected_;
 #endif
 #ifdef USE_TIME_TIMEZONE
