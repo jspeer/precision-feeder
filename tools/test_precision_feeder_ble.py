@@ -182,15 +182,24 @@ class GoldenVectors(unittest.TestCase):
         self.assertEqual(pf.days_mask("mon", "wed", "fri"), 0b0101010)
 
 
-class YamlAgreesWithClient(unittest.TestCase):
-    """The UUIDs in the YAML GATT table must match the client's."""
+class GattTableAgreesWithClient(unittest.TestCase):
+    """The firmware's GATT table (gatt_table.h, since 2.4.0) must have the client's UUIDs."""
 
-    def test_uuids_match_ble_gatt_yaml(self):
+    def test_uuids_match_gatt_table(self):
         import pathlib
         import re
 
-        text = (pathlib.Path(__file__).resolve().parent.parent / "packages" / "ble_gatt.yaml").read_text()
-        found = set(re.findall(r"uuid: (02dd1dd9-ba75-4bbc-bdea-306d2101[0-9a-f]{4})", text))
+        text = (
+            pathlib.Path(__file__).resolve().parent.parent / "components" / "precision_feeder_ble" / "gatt_table.h"
+        ).read_text()
+        prefix = re.search(r'UUID_PREFIX = "([0-9a-f-]+)"', text).group(1)
+        protocol = (
+            pathlib.Path(__file__).resolve().parent.parent / "components" / "precision_feeder_ble" / "protocol.h"
+        ).read_text()
+        channels = dict(re.findall(r"constexpr uint8_t (CHANNEL_\w+) = (0x[0-9A-Fa-f]+);", protocol))
+        rows = re.findall(r"\{proto::(CHANNEL_\w+), ", text)
+        found = {f"{prefix}{int(channels[name], 16):04x}" for name in rows}
+        found.add(f"{prefix}{int(re.search(r'SERVICE = (0x[0-9a-f]+)', text).group(1), 16):04x}")
         wanted = {
             pf.SERVICE_UUID,
             pf.INFO_UUID,
@@ -203,6 +212,7 @@ class YamlAgreesWithClient(unittest.TestCase):
             pf.EVENT_LOG_UUID,
             pf.AUTH_UUID,
         }
+        self.assertEqual(len(rows), 9)
         self.assertEqual(found, wanted)
 
 

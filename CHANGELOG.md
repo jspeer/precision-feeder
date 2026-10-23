@@ -6,6 +6,23 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.0: Bluetooth on NimBLE (2026-10-23, not tagged)
+
+**Upgrade note:** a Bluetooth client that had *paired* with the feeder pairs again (the bonds are not carried over).
+A client that does not pair, such as a PLC bridge or `tools/precision_feeder_ble.py`, needs nothing: the protocol,
+the key, the UUIDs and the advertising are unchanged.
+
+- **Bluetooth runs on ESP-IDF's NimBLE instead of Bluedroid,** trimmed to one client. The firmware is about 180 KB
+  smaller (79% of the app slot instead of 89%) and needs about 17 KB less static RAM; on the bench, the same trim
+  left about 33 KB more heap free than 2.3.x. That room is for HTTPS, next.
+- Nothing a client sees changes: protocol 2, the same service and characteristics, the Device Information Service,
+  the name (with the end of the MAC in the prebuilt firmware) and the service UUID in the advertising.
+- Pairing is still optional (LE Secure Connections, "Just Works"); at most 3 bonds are kept, and the oldest makes
+  room.
+- YAML builds: `packages/ble_gatt.yaml` keeps its name and substitutions; it no longer uses `esp32_ble` or
+  `esp32_ble_server`, and a build that adds either (or `bluetooth_proxy`, `esp32_ble_tracker`, Improv over BLE) is
+  refused, since the two Bluetooth stacks cannot be linked together.
+
 ## 2.3.1: fixes from a code review of 2.3.0 (2026-10-23)
 
 Fixes for the three findings of a Codex review of 2.3.0, each reproduced in a host test first. No settings change.

@@ -183,10 +183,13 @@ not change.
   settings, calibrate, set the clock, or read the feeder's state. Recorded
   traffic cannot be replayed (sequence numbers, and a new nonce every
   connection), and writes cannot be altered or moved to another characteristic.
-- **Pairing:** the feeder offers LE Secure Connections with bonding
-  (`auth_req_mode: sc_bond`). A client that pairs gets an encrypted link, which
+- **Pairing:** the feeder offers LE Secure Connections with bonding (at most 3
+  bonds; the oldest makes room). A client that pairs gets an encrypted link, which
   also hides what is read. With no screen or keypad, pairing is "Just Works", so
-  it is not access control by itself; the key is.
+  it is not access control by itself; the key is. Pairing is optional: a client
+  that does not pair works the same. Since firmware 2.4.0 the feeder's Bluetooth
+  stack is NimBLE instead of Bluedroid; the protocol did not change, but a client
+  that had paired with 2.3.x pairs again.
 - **Does not protect:** the feeder does not prove its own identity to the
   client, and answers and notifications are not signed. Someone with radio
   equipment who can impersonate the feeder could feed a client false status.

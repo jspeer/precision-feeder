@@ -647,12 +647,20 @@ never repeats scheduler or guard logic. Each fits Home Assistant's 255-character
 authoritative.** This section records the design intent and how the built
 protocol differs from the first draft.
 
-Implemented with ESPHome's `esp32_ble_server` on ESP-IDF (Bluedroid). The GATT
-table (UUIDs, properties) is YAML in `packages/ble_gatt.yaml`; the meaning of the
-characteristics is C++ in `components/precision_feeder_ble/`: byte layouts and
+Implemented on ESP-IDF's NimBLE host since 2.4.0 (D33; before, ESPHome's `esp32_ble_server` on Bluedroid). The
+GATT table (UUIDs, properties) is C++ in `gatt_table.h` (D34; before, YAML in `packages/ble_gatt.yaml`), and the
+meaning of the characteristics is C++ in `components/precision_feeder_ble/`: byte layouts and
 validation in `protocol.h`, the cryptography in `crypto.h`, and every handler in
 `BleEngine` (`engine.*`), all plain C++ tested on a host against the simulated
-feeder; `precision_feeder_ble.*` only connects the engine to ESPHome. BLE is a build option: HA-only builds leave the package out and pay nothing.
+feeder; `precision_feeder_ble.*` only connects the engine to the radio. NimBLE calls the adapter from its own
+task, so each callback only copies into a fixed queue or reads a locked value store (`gatt_link.h`, host-tested);
+the engine runs on the main loop, as it did on Bluedroid. A write that finds the queue full is answered with an ATT
+error (insufficient resources), never dropped silently; the client retries, and the retry cache makes that safe.
+The advertising is the Bluedroid build's: the flags and the 128-bit service UUID, the name (with the MAC suffix
+rules of `esp32_ble`) and the transmit power in the scan response; one client at a time. NimBLE is trimmed to one
+link (small buffer pools, no BLE 5 extras, no scanning, two controller activities): its defaults cost as much heap
+as Bluedroid (docs/BENCH.md). The package cannot share a build with `esp32_ble` or anything built on it; the build
+refuses the combination. BLE is a build option: HA-only builds leave the package out and pay nothing.
 `bluetooth_proxy` must not be enabled on this device. All records fit the default
 20-byte payload, so no MTU negotiation is needed. UUID base:
 `02dd1dd9-ba75-4bbc-bdea-306d2101xxxx` (generated 2026-10-13; this project's own).
@@ -898,12 +906,14 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
 Decided 2026-10-14 (owner: "use best practices"), built in protocol 2
 (firmware 0.4.0). Details in docs/PROTOCOL.md, "Authentication".
 
-What ESPHome 2026.9.1 offers, checked in its source: `esp32_ble` can set the
+What ESPHome 2026.9.1 offered, checked in its source: `esp32_ble` can set the
 Security Manager parameters (`io_capability`, `auth_req_mode` including
 `sc_bond`, key sizes), but `esp32_ble_server` hard-codes every characteristic's
 permissions as plain read/write (no "encryption required"), and there is no
 static passkey. So link-layer pairing cannot keep a stranger out: they can skip
 pairing and write anyway, and with no screen or keypad pairing is "Just Works".
+NimBLE (2.4.0) could require encryption per characteristic, but with "Just Works" that would not keep a stranger out
+either, and it would break clients that do not pair (PLC bridges), so the permissions stay plain (D35).
 
 Hence application-layer authentication, plus link encryption where offered:
 - A shared 32-byte key. Since 2.0.0 (N4) a key saved on the device (Device record,
@@ -931,8 +941,10 @@ Hence application-layer authentication, plus link encryption where offered:
 - After a failed AUTH: a new nonce and a one-second wait. A failed AUTH that leaves the connection unauthenticated
   also clears what the session published (Status, Profile, Config, Calibration, Response read as zeros again), as a
   disconnect does (2.1.2; Codex review: before, they stayed readable).
-- `auth_req_mode: sc_bond` so a client that pairs gets an encrypted link (also
-  hiding what it reads).
+- LE Secure Connections with bonding, so a client that pairs gets an encrypted link (also
+  hiding what it reads). Since 2.4.0 (NimBLE) at most 3 bonds are kept in NVS and the oldest makes room; a bonded peer
+  that pairs again replaces its old bond. Bonds made with 2.3.x (Bluedroid) are not carried over: a client that had
+  paired pairs again (D35).
 - Not covered: the feeder does not prove its identity to the client, and
   answers are not signed (no room in the 20-byte Status). The feeder only acts on
   authenticated writes, so the animals are protected; a client that must trust
@@ -1074,8 +1086,10 @@ precision-feeder/
                                     PCNT, the 1 ms control timer
   components/precision_feeder_mqtt/ MQTT's own topics on the device (their logic: feeder_mqtt.*, host-tested)
   components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
-                                    BleEngine (engine.*: every handler), all host-tested;
-                                    precision_feeder_ble.* is the thin ESPHome adapter
+                                    BleEngine (engine.*: every handler), the GATT table
+                                    (gatt_table.h) and the hand-off between tasks
+                                    (gatt_link.h), all host-tested; precision_feeder_ble.*
+                                    is the thin adapter on NimBLE (2.4.0)
   packages/            core (which includes mechanism_servo and tray_recovery), status, controls, schedule_editor,
                        calibration, mechanism_n20 (the disc, with drive_select), status_led, web_server, button,
                        hardware (with restart), time_homeassistant, diagnostics, network_info, ble_gatt,
@@ -1358,6 +1372,24 @@ precision-feeder/
     network listed when a refresh misses it (section 9.3). The web app's budget is 67 KB gzipped (2.3.0 left 127
     bytes).
 
+- **NimBLE, TLS and certificates (firmware 2.4.0 onwards; owner, 2026-10-23; [docs/plans/nimble.md](docs/plans/nimble.md),
+  [docs/plans/https-tls.md](docs/plans/https-tls.md)):** the order is NimBLE (2.4.0), then all of TLS at once
+  (HTTPS, MQTT over TLS, the trust store), then ACME, then the web app's configuration page, then the docs, each its
+  own version; then testing and validation, and a comparison against the earlier audit reports before any GitHub
+  release. The intermediate versions are not tagged.
+  - D33: BLE runs on ESP-IDF's NimBLE instead of Bluedroid, trimmed to one link (section 8). `packages/ble_gatt.yaml`
+    keeps its name, substitutions and entities, so a YAML build that includes it changes nothing ("non-breaking");
+    there is no overlap release with a Bluedroid package (the plan's B1 is replaced by this). The protocol stays at
+    version 2.
+  - D34: the GATT table is C++ (`gatt_table.h`), checked against the Python client's UUIDs and the protocol's
+    channels; it replaces the YAML table (section 8 said YAML).
+  - D35: characteristic permissions stay plain (no "encryption required"); pairing stays optional, LE Secure
+    Connections with bonding, at most 3 bonds in NVS, the oldest replaced. Old Bluedroid bonds are not carried over.
+    BLE's clients are a PLC bridge and scripts, not phones: bench tests use the Python client; phone pairing is not
+    tested (owner). A "Forget BLE bonds" button waits for the configuration page.
+  - D36: MQTT's "insecure" mode pins the broker's certificate on first contact instead of skipping verification
+    (owner; E5 of the TLS plan). Built in the TLS release.
+
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
   - The feed history holds 64 feeds (the largest cap), not 8: State version 3, migrated (section 4).
@@ -1571,7 +1603,12 @@ precision-feeder/
     (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
     ESPHome upgrade.
 
-## 15. Implementation status (v2.3.1)
+## 15. Implementation status (v2.4.0)
+
+2.4.0 (BLE on NimBLE, D33 to D35; section 8) is built and compiled, with host tests for the hand-off between
+NimBLE's task and the main loop and for the GATT table; not tagged, and not yet on hardware: the Python client's
+selftest on the bench, connect and disconnect cycles, a retry storm and the heap against docs/BENCH.md's M0 are to
+do, with the testing at the end of the TLS work.
 
 2.3.1 fixes a Codex review of 2.3.0 (decisions log): logic only, checked with host tests, the mock device and both
 release builds; not on hardware (nothing in it needs the bench).
