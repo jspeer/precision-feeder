@@ -1,6 +1,6 @@
 # The web app
 
-The feeder carries its own web app (firmware 1.1.0 and later; this guide describes 2.0). It runs the whole feeder
+The feeder carries its own web app (firmware 1.1.0 and later; this guide describes 2.4). It runs the whole feeder
 from any browser on your network, on a computer or a phone, with no Home Assistant, no
 internet and nothing to install. It is stored in the firmware, so nothing is loaded
 from the internet.
@@ -22,7 +22,7 @@ from the internet.
   opening it on plain HTTP (Home Assistant's "Visit" link too) sends you there. The feeder's certificate is
   self-signed: your browser warns the first time; accept it once for that feeder. Since 2.4.2 it can get a
   trusted certificate from your own ACME server (step-ca, say) instead, or use one you upload (Configuration, HTTPS
-  and certificates, since 2.4.3).
+  and certificates, since 2.4.3). How: [HTTPS.md](HTTPS.md).
 - **Phones:** the tabs move to a bar at the bottom. Add the page to your home screen
   for an app-like shortcut.
 
@@ -88,8 +88,8 @@ else the feeder lists under Faults.
     ACME; its name, expiry and fingerprint), upload a certificate and key of your own (pasted or from files; the key
     travels masked by the settings password), remove it or make a new self-signed one, Send port 80 to HTTPS and
     HTTPS only, the trust store (your CA's root certificate: upload, replace, clear), and ACME (the directory, the
-    name, its status and Renew now). An upload is checked by the feeder and used after a restart; ACME's
-    certificate is used at once.
+    name, its status and Renew now). An upload is checked by the feeder and used after a restart, as is a change
+    to the trust store; ACME's certificate is used at once ([HTTPS.md](HTTPS.md)).
 - **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
   Configuration (Device). Steps: welcome, network, time zone (by place) and location,
   board and pins, keys, settings password, calibration. Each saves as it goes and can be

@@ -8,7 +8,8 @@ for the prebuilt firmware and a YAML build.
 
 ## Everyday use
 
-**In the web app** (`http://<name>.local`, or the feeder's IP address): the Dashboard has Feed now, Tray reload and
+**In the web app** (`https://<name>.local`, or the feeder's IP address; [HTTPS.md](HTTPS.md) for the browser's first
+warning): the Dashboard has Feed now, Tray reload and
 Hold; the Schedule page edits profiles, events and one-shot feeds; Maintenance calibrates and recovers the tray
 position. [WEB_UI.md](WEB_UI.md) walks through every page.
 
@@ -66,8 +67,12 @@ Saved on the feeder, changed in the web app or Home Assistant, kept across updat
 | Board and pins, the disc's motor pins | the build's | Configuration (protected; after a restart) |
 | Disc slots and tuning (direct-drive disc) | 15 slots; the bench's tuning | Maintenance (protected; slots, ticks per turn, trim and directions only in calibration mode) |
 | MQTT: on, broker, port, username, password, topic prefix | off | Configuration, MQTT (protected; once connected, changes after a restart) |
+| MQTT TLS and how the broker is checked (CA certificate, or pinned on first contact) | off | Configuration, MQTT (protected; after a restart; [HTTPS.md](HTTPS.md)) |
+| HTTPS certificate (self-signed, uploaded, or from ACME), the trust store | self-signed, empty | Configuration, HTTPS and certificates (protected; an upload and the trust store after a restart, ACME's certificate at once) |
+| Send port 80 to HTTPS, HTTPS only | on, off | Configuration, HTTPS and certificates (protected) |
+| ACME directory and name | not set (ACME off) | Configuration, HTTPS and certificates (protected) |
 | Name, Wi-Fi network, access point password | the build's | Configuration, Network (protected; name and password after a restart; a network set on the device can be forgotten) |
-| Home Assistant and Bluetooth keys; what Bluetooth may change | none; both allowed | Configuration, Keys (protected) |
+| Home Assistant and Bluetooth keys; what Bluetooth may change; Bluetooth pairings | none; both allowed | Configuration, Keys (protected) |
 | Settings password | none | Configuration ([SECURITY.md](SECURITY.md)) |
 
 **Protected** settings need the settings password in the web app when one is set; Home Assistant and BLE use their
@@ -107,6 +112,8 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
 | The clock is not set | No NTP answer: check the network, or set **NTP Servers** to one your network can reach. **Time Source** and the clock's age (Diagnostics) show when it last synced. |
 | Wrong times (an hour off) | The time zone: the web app's (Configuration), otherwise the build's, or Home Assistant's with the `time_homeassistant` package unless the build pins one. |
 | Home Assistant does not find it | Another network segment: add the ESPHome integration by IP with the API key (port 6053). |
+| The browser warns that the connection is not private | The feeder's own certificate: accept it once, or give it one your devices trust ([HTTPS.md](HTTPS.md)). |
+| HTTPS, ACME or MQTT over TLS does not work | [HTTPS.md, Troubleshooting](HTTPS.md#troubleshooting). |
 | Lost the web app's address | Your router's client list (`precision-feeder-...`), or the install page's Connect over USB, which links to it. |
 | Forgot a password | [INSTALL.md, Recovery](INSTALL.md#recovery). |
 | Food sticks | Use pellets; flake food is not advised. |
@@ -125,7 +132,7 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
   one (`wifi: manual_ip:`); the prebuilt firmware cannot join such a network. Dual-stack and IPv4-only networks are
   fine.
 - **A few browsers at a time.** The feeder's web server has only a handful of connections; with more than about four
-  pages open they take turns and reconnect. A page left in the background gives its connection back after 30 seconds
+  pages open they take turns and reconnect. Over HTTPS at most four connections are open at once. A page left in the background gives its connection back after 30 seconds
   and takes it again when you return.
 - **BLE trusts anyone with the key, and does not prove itself to the client.** Writes need the key; answers are not
   signed, so a client should pair (an encrypted link) if it must trust what it reads. Details:

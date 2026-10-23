@@ -20,15 +20,15 @@ file lists the packages it wants, so a feature is switched on or off by one line
 | `schedule_editor` | editing profiles and events, one-shot feeds | **always** (unless something else, like a PLC over BLE, owns the schedule) |
 | `calibration` | the servo's calibration: pulse range and per-slot offsets | **always** (the disc's calibration is in its own package) |
 | `mechanism_n20` | the direct-drive disc as a second drive, with its tuning, calibration wizard, motor pins and **Drive** (servo or disc, chosen on the device) | only for a disc feeder ([`disc.yaml`](../examples/disc.yaml)) |
-| `web_server` | the built-in web app at `http://<name>.local`, and the settings password | recommended (both examples); leave it out to save memory |
+| `web_server` | the built-in web app at `http://<name>.local` (`https://` with `tls`), and the settings password | recommended (both examples); leave it out to save memory |
 | `hardware` | Board and Servo Pin chosen on the device, Pins In Use, Restart Needed, Restart | recommended (both examples); harmless if you never use it |
 | `status_led` | colour-coded state on the board's RGB LED; LED Pin on the device | if your board has the LED (both examples) |
 | `button` | a push button: short press feeds (or reloads when the tray is empty or its position unknown), a 3 s press toggles calibration; Button Pin on the device | only if you fitted one |
 | `time_homeassistant` | Home Assistant as a second clock source (keeps time when the internet is down but Home Assistant is up) | both examples; harmless without Home Assistant. It also uses Home Assistant's time zone unless you pin yours (see its comment) |
 | `network_info` | the Wi-Fi network, IP addresses and signal strength | both examples; leave it out to save a little flash |
 | `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | both examples; leave it out if you never set Wi-Fi over USB |
-| `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 180 KB of flash and, at run time, about 60 KB of RAM (NimBLE, since 2.4.0). It cannot be combined with ESPHome's own Bluetooth components (`esp32_ble`, `bluetooth_proxy` and so on) |
-| `tls` | the web app over HTTPS at `https://<name>.local` (a self-signed certificate made on the feeder, or one you upload), the redirect from port 80, and the trust store; needs `web_server` | recommended (all three examples). Costs about 40 KB of flash and about 15 KB of RAM per open HTTPS session (at most 4) |
+| `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 170 KB of flash and, at run time, about 60 KB of RAM (NimBLE, since 2.4.0). It cannot be combined with ESPHome's own Bluetooth components (`esp32_ble`, `bluetooth_proxy` and so on) |
+| `tls` | the web app over HTTPS at `https://<name>.local` (a self-signed certificate made on the feeder, or one you upload), the redirect from port 80, and the trust store; needs `web_server` | recommended (all three examples; [HTTPS.md](HTTPS.md)). Costs about 40 KB of flash and about 15 KB of RAM per open HTTPS session (at most 4) |
 | `mqtt_tls` | MQTT over TLS, checked against a CA certificate or pinned on first contact; needs `mqtt` and `tls` | if your broker offers TLS (usually port 8883) |
 | `acme` | the HTTPS certificate from your own ACME server (step-ca, say: http-01, renewed by itself), off until a directory is set; needs `tls` | if you run an ACME server on your LAN. Costs about 47 KB of flash |
 | `api_key_on_device` | no API key in your YAML: Home Assistant sets one when it adopts the feeder, or you make one in the web app (as the prebuilt firmware does) | optional; add it after `core`. Plaintext OTA is then refused, and OTA needs the key once one is set |
@@ -167,6 +167,7 @@ how they interact with your YAML:
 
 The web app has no login by default; the [settings password](SECURITY.md) protects what matters. To keep visitors
 out of the app altogether, uncomment the `auth` lines in [`packages/web_server.yaml`](../packages/web_server.yaml) and
-add `web_username` and `web_password` to your `secrets.yaml`. That is HTTP authentication over plain HTTP: the
-password crosses the network on every request, so it keeps casual visitors out and no more. If you never use the web
+add `web_username` and `web_password` to your `secrets.yaml`. That is HTTP basic authentication: the password
+crosses the network on every request, readable by anyone recording it on plain HTTP (with the `tls` package, use
+`https://` and turn on HTTPS Only), so it keeps casual visitors out and no more. If you never use the web
 app, leave the `web_server` package out instead.

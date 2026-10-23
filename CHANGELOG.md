@@ -24,6 +24,11 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
   entity, Forget BLE Bonds (internal).
 - The web app's size budget is 71 KB gzipped (was 67 KB; DESIGN.md D41). The full prebuilt image is 5.6 KB larger
   (1,546,295 bytes, 84.3% of the app slot). Checked against the mock device, not yet on a feeder.
+- **The guides for 2.4** (docs only; planned as 2.4.4, kept in 2.4.3): a new guide, [docs/HTTPS.md](docs/HTTPS.md),
+  for opening the app over HTTPS, uploading a certificate from your own CA, ACME with step-ca, HTTPS Only, the trust
+  store and MQTT over TLS, with troubleshooting. The README, INSTALL.md (the variants' sizes for 2.4.3, HTTPS,
+  recovery, re-pairing after NimBLE), USING.md (the new settings), SECURITY.md (what the feeder connects to),
+  WEB_UI.md, BUILDING.md and MQTT.md were brought up to date.
 
 ## 2.4.2: ACME (2026-10-23, not tagged)
 

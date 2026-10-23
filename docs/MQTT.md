@@ -87,7 +87,7 @@ mosquitto_sub -h broker.lan -u feeder -P '...' -t 'precision-feeder-a1b2c3/feede
   against it from then on. A broker that sends only its own certificate, signed by a CA it does not send, cannot be
   pinned: upload the CA instead. With TLS on, MQTT never connects in plain text: without a CA (or before the pin) it
   does not start. These settings apply after a restart. They, the trust store and the pin's Forget are in the web
-  app's Configuration (MQTT, and HTTPS and certificates; 2.4.3).
+  app's Configuration (MQTT, and HTTPS and certificates; 2.4.3); setting them up: [HTTPS.md](HTTPS.md#mqtt-over-tls).
 - **Settings of the MQTT connection itself** (broker, port, login, prefix) are web app only. Once MQTT has connected
   after a restart, a change to them is used after the next restart (Restart Needed), because ESPHome builds its MQTT
   client once per boot. Turning MQTT off takes effect at once.

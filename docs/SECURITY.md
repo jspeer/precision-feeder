@@ -1,8 +1,8 @@
 # Security model
 
-What protects the feeder, from whom, and where the limits are (firmware 2.0). The design and the reasons are in
-[DESIGN.md](../DESIGN.md) sections 9.5, 10 and 10.1; the BLE protocol's authentication is in
-[PROTOCOL.md](PROTOCOL.md).
+What protects the feeder, from whom, and where the limits are (firmware 2.0 to 2.4). The design and the reasons are in
+[DESIGN.md](../DESIGN.md) sections 9.5, 9.7, 10 and 10.1; the BLE protocol's authentication is in
+[PROTOCOL.md](PROTOCOL.md); setting up HTTPS and certificates is in [HTTPS.md](HTTPS.md).
 
 *Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
@@ -105,6 +105,7 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 
 ## What the feeder talks to
 
-Only NTP (time) and, if you use them, Home Assistant and your MQTT broker. The update check runs in your browser, which reads a manifest
+Only NTP (time) and, if you set them up, your MQTT broker and your ACME server; Home Assistant connects to the
+feeder. The update check runs in your browser, which reads a manifest
 from GitHub Pages; the feeder itself never contacts the internet for updates, so a feeder blocked from the internet
 loses nothing.

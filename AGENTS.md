@@ -215,7 +215,7 @@ driver and the tray or disc it moves. The servo fan tray (`mechanism_servo.*`,
 ```
 README.md  LICENSE  DESIGN.md  CHANGELOG.md  AGENTS.md
 docs/         user guides: INSTALL.md (prebuilt firmware), BUILDING.md (YAML builds), USING.md, WEB_UI.md,
-              SCHEDULING.md, CALIBRATION.md, SECURITY.md; PROTOCOL.md (BLE, authoritative); BENCH.md (hardware
+              SCHEDULING.md, CALIBRATION.md, SECURITY.md, HTTPS.md, MQTT.md; MECHANISMS.md (adding a mechanism); PROTOCOL.md (BLE, authoritative); BENCH.md (hardware
               results); plans/ (release plans)
 components/   precision_feeder/ (FeederCore: feeder_core.cpp tray, guard, clock; mechanism.h the mechanism
               interface, mechanism_servo.* the servo fan tray, mechanism_n20.* the direct-drive disc; feeder_schedule.cpp

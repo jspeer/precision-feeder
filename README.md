@@ -20,7 +20,7 @@ Another motor or tray can be added by following [docs/MECHANISMS.md](docs/MECHAN
 
 **Local first.** The feeder is a complete appliance on its own. The schedule lives on the device, and its built-in web
 app runs the whole feeder from any browser, on a computer or a phone: no Home Assistant, no internet, no app to
-install, no account. Open `http://precision-feeder-xxxxxx.local` (or its IP address) on your own network and you have
+install, no account. Open `precision-feeder-xxxxxx.local` (or its IP address) on your own network, over HTTPS, and you have
 the dashboard, the schedule, the settings, calibration and diagnostics. The app is stored in the firmware; nothing is
 loaded from the internet.
 
@@ -37,7 +37,7 @@ that protects the fish from being over-fed.
 > has been calibrated and fed on a bench rig (with BLE and MQTT), and the two-drive firmware switched drives on both
 > rigs. 2.2.0's release images were run on both rigs, including the servo's upgrade from 2.1.1; 2.3.0 was run on
 > the disc rig ([docs/BENCH.md](docs/BENCH.md)); 2.3.1's fixes are logic only, checked with host tests. 2.4.0 (Bluetooth on NimBLE), 2.4.1 (HTTPS and MQTT over
-> TLS), 2.4.2 (ACME) and 2.4.3 (their web app pages) are built but not tagged or tested on hardware yet. The disc has not yet fed animals, and neither has had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
+> TLS), 2.4.2 (ACME) and 2.4.3 (their web app pages and guides) are built but not tagged or tested on hardware yet. The disc has not yet fed animals, and neither has had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
 > fed.
 
 > **Written with AI.** This project was designed and written with the assistance of an AI (Anthropic's Claude). A
@@ -85,6 +85,9 @@ say where the tray is (or reload it). It never guesses.
 - **Who can change what** (2.2.0): Home Assistant gets the everyday controls and status; the settings, calibration
   and pins stay in the web app, behind the settings password; MQTT can also edit the schedule; BLE is the headless
   channel ([docs/SECURITY.md](docs/SECURITY.md)).
+- **HTTPS** (2.4): the web app over HTTPS with a certificate the feeder makes itself, one you upload, or one from your
+  own ACME server (step-ca, say), renewed by itself; MQTT over TLS, checked against your CA or pinned on first
+  contact ([docs/HTTPS.md](docs/HTTPS.md)).
 - **Optional:** push button (as in the original), status LED, MQTT with Home Assistant discovery and the schedule on its
   own topics (broker and login set in the web app; [docs/MQTT.md](docs/MQTT.md)), BLE interface (every write authenticated with a key;
   documented byte for byte in [docs/PROTOCOL.md](docs/PROTOCOL.md), with a Python reference client).
@@ -156,6 +159,7 @@ Then, either way:
 | [docs/WEB_UI.md](docs/WEB_UI.md) | the built-in web app, page by page |
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | building schedule profiles |
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | lining up the tray |
+| [docs/HTTPS.md](docs/HTTPS.md) | HTTPS, certificates (your own, or from your ACME server), the trust store, MQTT over TLS |
 | [docs/SECURITY.md](docs/SECURITY.md) | the security model: who can change what, and the limits |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the BLE protocol, for controller and app developers |
 | [docs/MQTT.md](docs/MQTT.md) | the MQTT topics: what MQTT reaches, and the schedule's own topics |
@@ -171,7 +175,9 @@ Then, either way:
 components/precision_feeder/      the logic (tray, guard, scheduler, sun maths, settings), plain C++ and tested
                                   on a PC, plus the ESPHome adapter
 components/precision_feeder_n20/  the direct-drive disc's motor driver (only compiled when its package is used)
-components/precision_feeder_ble/  the BLE protocol (only compiled when the BLE package is used)
+components/precision_feeder_ble/  the BLE protocol, on ESP-IDF's NimBLE (only compiled when the BLE package is used)
+components/precision_feeder_mqtt/ MQTT's own topics for the schedule (only compiled with the MQTT package)
+components/precision_feeder_tls/  HTTPS, the trust store, MQTT over TLS and ACME (only compiled with their packages)
 packages/                         the feature packages (docs/BUILDING.md)
 examples/                         basic.yaml, ble.yaml, disc.yaml, secrets.example.yaml
 firmware/                         the prebuilt binaries' configurations (full.yaml, no-ble.yaml)

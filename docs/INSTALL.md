@@ -21,12 +21,13 @@ add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 | Variant | What it has | App slot used (of 1.8 MB) | RAM used at boot |
 |---|---|---|---|
-| `full` | everything, including the BLE control plane for a PLC or a phone app | 88.5% (1,623,115 bytes) | 48.2% |
-| `no-ble` | Wi-Fi, the web app, Home Assistant and MQTT; no Bluetooth | 70.4% (1,291,243 bytes) | 39.0% |
+| `full` | everything, including the BLE control plane for a PLC or a script | 84.3% (1,546,295 bytes) | 43.9% |
+| `no-ble` | Wi-Fi, the web app, HTTPS, Home Assistant and MQTT; no Bluetooth | 75.1% (1,377,351 bytes) | 39.8% |
 
 Both carry both drives (the servo tray, which they start with, and the direct-drive disc: choose it in Configuration,
-Drive) and MQTT (off until you set a broker in Configuration, MQTT). Measured for 2.1.0 with ESPHome 2026.9.1 on the
-4 MB layout (static RAM; 2.0.2 used 79.1% and 61.1%). Both images run on larger flash too. Each comes as
+Drive), MQTT (off until you set a broker in Configuration, MQTT), and HTTPS with MQTT over TLS and ACME
+([HTTPS.md](HTTPS.md)). Measured for 2.4.3 with ESPHome 2026.10.0 on the 4 MB layout (static RAM; 2.1.0 used 88.5%
+and 70.4%: 2.4.0 moved Bluetooth to the smaller NimBLE, and 2.4.1 added HTTPS). Both images run on larger flash too. Each comes as
 `precision-feeder-<variant>-<version>.factory.bin` (the first flash, written from address 0: bootloader, partition
 table and app) and `.ota.bin` (updates through the web app). You can switch variants later by uploading the other
 one's `.ota.bin`; settings are kept.
@@ -51,7 +52,8 @@ your network there.
 
 The feeder's address (`http://precision-feeder-<6 hex digits>.local`, or the IP address the installer or your router
 shows) opens a setup wizard on a new feeder. Each step saves as it goes and can be skipped; Configuration and
-Maintenance hold the same settings later, and Configuration (Device) starts the wizard again.
+Maintenance hold the same settings later, and Configuration (Device) starts the wizard again. The wizard runs over
+plain HTTP; once the feeder is on your network, opening it sends you to `https://` (below).
 
 1. **Network:** the name (`precision-feeder-a1b2c3` until you change it; used after a restart), another Wi-Fi network
    if needed (from the list of those it sees, or typed), and the **access point password. Set one.** Until you do, anyone in range can join the access point
@@ -80,6 +82,15 @@ Maintenance hold the same settings later, and Configuration (Device) starts the 
   own topics ([MQTT.md](MQTT.md)). Use a broker with accounts ([SECURITY.md](SECURITY.md)).
 - **Bluetooth** (`full`): the feeder refuses every BLE client until a key is made in the web app (Configuration,
   Keys; shown once). Give that key to your PLC bridge or the Python client. The BLE name is `Feeder-<6 hex digits>`.
+  Since 2.4.0 the Bluetooth stack is NimBLE: a client that had paired with 2.3 or earlier pairs again (pairing only
+  encrypts the link; the key is unchanged).
+
+## HTTPS
+
+Once set up, the app opens at `https://precision-feeder-<6 hex digits>.local`; the `http://` address sends you there.
+The first time, your browser warns that the connection is not private, because the feeder made its own certificate:
+check the address, then accept it. To avoid the warning, upload a certificate from your own CA or let the feeder get
+one from your ACME server (Configuration, HTTPS and certificates): [HTTPS.md](HTTPS.md).
 
 ## Updates
 
@@ -114,6 +125,8 @@ The feeder's name changes to `precision-feeder-<6 hex digits>` unless you set on
 | An update will not start | The feeder falls back to the firmware it had (ESPHome's rollback). If it does not come back, flash the factory image from the install page; do not erase, to keep your settings. |
 | Move the feeder to another network, or take it off yours | Web app, Configuration, Network, **Forget network**: it restarts into its access point (`...-setup`), keeping everything else. |
 | Start over completely | Flash from the install page **with erase**. Everything is wiped: settings, calibration, Wi-Fi, keys, password. |
+| The browser refuses the feeder's HTTPS, or HTTPS Only shuts you out | Open `https://`, not `http://`. Port 80 opens again whenever HTTPS is not running, and always while the access point is up. See [HTTPS.md](HTTPS.md#troubleshooting). |
+| A Bluetooth client that should no longer connect | Configuration, Keys: **Forget pairings**, and make a new Bluetooth key if it knew the old one. |
 | Tray position unknown after a power cut mid-feed | Maintenance: declare the position, or Tray Reload. See [USING.md](USING.md#safety-behaviour). |
 
 There is no factory reset in the web app yet; erase-and-flash is the way to wipe a feeder.
@@ -124,4 +137,5 @@ There is no factory reset in the web app yet; erase-and-flash is the way to wipe
   and a static IPv4 address can only be set in a YAML build (`manual_ip`). Use a YAML build there.
 - The update check needs the browser, not the feeder, to reach the internet: a feeder kept off the internet loses
   nothing, and downloads come from github.com, which has no IPv6.
-- The feeder makes no outbound connections except NTP (and Home Assistant, if you use it).
+- The feeder connects out only to NTP, and to what you set up: your MQTT broker and your ACME server. Home Assistant
+  connects to the feeder.

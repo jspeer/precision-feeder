@@ -1158,6 +1158,8 @@ precision-feeder/
   docs/BUILDING.md     building from YAML: packages, substitutions, flashing
   docs/USING.md        everyday use, settings, safety behaviour, troubleshooting, limits
   docs/SECURITY.md     the security model, for users
+  docs/HTTPS.md        HTTPS, certificates, ACME, the trust store and MQTT over TLS, for users (2.4.3)
+  docs/MECHANISMS.md   the checklist for adding a mechanism
   docs/plans/          release plans: milestones and the decisions behind them
   components/precision_feeder/      FeederCore (plain C++, host-tested): feeder_core.h,
                                     feeder_core.cpp (tray, guard, clock), feeder_schedule.cpp
@@ -1465,8 +1467,8 @@ precision-feeder/
 - **NimBLE, TLS and certificates (firmware 2.4.0 onwards; owner, 2026-10-23; [docs/plans/nimble.md](docs/plans/nimble.md),
   [docs/plans/https-tls.md](docs/plans/https-tls.md)):** the order is NimBLE (2.4.0), then all of TLS at once
   (HTTPS, MQTT over TLS, the trust store), then ACME, then the web app's configuration page, then the docs, each its
-  own revision of 2.4 (2.4.1 TLS, 2.4.2 ACME, 2.4.3 the configuration page, 2.4.4 the docs; owner: 2.4.x, not 2.5,
-  2.6...); then testing and validation, and a comparison against the earlier audit reports before any GitHub
+  own revision of 2.4 (2.4.1 TLS, 2.4.2 ACME, 2.4.3 the configuration page; owner: 2.4.x, not 2.5, 2.6...). The docs
+  revision planned as 2.4.4 stays in 2.4.3 (owner, 2026-10-23: a docs-only change needs no firmware version); then testing and validation, and a comparison against the earlier audit reports before any GitHub
   release. The intermediate versions are not tagged.
   - D33: BLE runs on ESP-IDF's NimBLE instead of Bluedroid, trimmed to one link (section 8). `packages/ble_gatt.yaml`
     keeps its name, substitutions and entities, so a YAML build that includes it changes nothing ("non-breaking");
@@ -1731,7 +1733,11 @@ configs. The page was checked against tools/mock_device.py (which now serves `/f
 entities and Forget BLE Bonds): uploads with and without a settings password, the trust store, ACME's settings and
 Renew now, Forget pairings, a phone-width layout; the key's mask is tested against the device's vector
 (`tests/test_web.mjs`). The full image is 1,546,295 bytes (84.3% of the app slot; 2.4.2: 1,540,671), static RAM
-149,867 bytes; no-ble 1,377,351. Not tagged, and not on hardware (open item 27).
+149,867 bytes; no-ble 1,377,351. Not tagged, and not on hardware (open item 27). The guides were revised for the
+whole of 2.4 in the same version (the docs revision planned as 2.4.4): docs/HTTPS.md is new (opening the app over
+HTTPS, an uploaded certificate, ACME with step-ca, port 80, the trust store, MQTT over TLS), and the README,
+INSTALL.md (the variants' sizes, HTTPS, recovery), USING.md, SECURITY.md, WEB_UI.md, BUILDING.md and MQTT.md
+follow 2.4.
 
 2.4.2 (ACME, D40; section 9.7) is built and compiled in every example and both prebuilt configs, with host tests for
 the client against a fake ACME server (`tests/test_acme.cpp`: the exchange, badNonce, a failed challenge, a reused
