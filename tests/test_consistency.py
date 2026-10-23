@@ -138,6 +138,23 @@ class Consistency(unittest.TestCase):
         for domain, name in listed:
             self.assertIn(name, self.e, f"protected {domain}/{name} not defined")
 
+    def test_forget_wifi_key(self):
+        """Forget Wi-Fi (2.3.0, D30) erases ESPHome's saved network by its fixed NVS key, which is ESPHome's, not ours:
+        fail here, not on a feeder, if an ESPHome upgrade changes it. Skipped where ESPHome is not installed."""
+        ours = re.search(r'WIFI_SAVED_NVS_KEY = "(\d+)"', (ROOT / "components/precision_feeder/precision_feeder.cpp").read_text())
+        self.assertIsNotNone(ours, "WIFI_SAVED_NVS_KEY not found")
+        candidates = list((ROOT / ".venv").glob("lib/python3*/site-packages/esphome/components/wifi/wifi_component.cpp"))
+        spec = importlib.util.find_spec("esphome")
+        if spec is not None and spec.submodule_search_locations:
+            candidates += [pathlib.Path(p) / "components/wifi/wifi_component.cpp" for p in spec.submodule_search_locations]
+        sources = [c for c in candidates if c.exists()]
+        if not sources:
+            self.skipTest("ESPHome is not installed here")
+        text = sources[0].read_text()
+        m = re.search(r"has_sta\(\) \? App\.get_config_version_hash\(\) : (\d+)UL", text)
+        self.assertIsNotNone(m, f"{sources[0]}: the saved-network hash for a build with no YAML network has moved")
+        self.assertEqual(m.group(1), ours.group(1), "ESPHome's saved-network hash changed: update WIFI_SAVED_NVS_KEY")
+
     def test_location(self):
         self.check("Latitude", -90, 90)
         self.check("Longitude", -180, 180)

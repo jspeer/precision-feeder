@@ -145,7 +145,8 @@ class Feeder:
         self.keys = {"api": "none", "ble": "off" if args.no_ble else "build"}
         # The network settings (DESIGN.md section 9.3), as GET /feeder/network reports them. Never a password.
         self.network = {"name": "precision-feeder", "name_saved": "", "name_build": "precision-feeder",
-                        "ap": "build", "wifi": True, "setup": not getattr(args, "set_up", False)}
+                        "ap": "build", "wifi": True, "setup": not getattr(args, "set_up", False),
+                        "forget": True}  # a blank build whose network was set on the device (D30)
         self.network_boot = ("", "build")  # what the feeder started with: a change waits for a restart
         self.entities: dict[str, Entity] = {}
         self._build(args)
@@ -852,16 +853,22 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
             self._send(404)
 
         def _network(self, path: str, params: dict, header: str | None, refused: tuple) -> tuple:
-            """POST /feeder/network/name|ap|wifi, as the device's settings guard checks them."""
+            """POST /feeder/network/name|ap|wifi|forget, as the device's settings guard checks them."""
             bad = (400, b'{"error":"format"}', "application/json")
             kind = path.rsplit("/", 1)[1]
             name, ssid_hex, pw_hex = params.get("name", ""), params.get("ssid", ""), params.get("password", "")
             nonce = bytes.fromhex(header[:32]) if header else bytes(16)
-            signed = {"name": name, "ap": pw_hex, "wifi": ssid_hex + pw_hex}.get(kind)
+            signed = {"name": name, "ap": pw_hex, "wifi": ssid_hex + pw_hex, "forget": ""}.get(kind)
             if signed is None:
                 return 404, b"", "text/plain"
             if not password.check(header, f"{path}\n{signed}"):
                 return refused
+            if kind == "forget":
+                if not feeder.network["forget"]:
+                    return 409, b'{"error":"build"}', "application/json"
+                feeder.network["forget"] = False
+                feeder.log("W", "precision_feeder", "Saved Wi-Fi network forgotten: restarting into the setup access point")
+                return 200, b"{}", "application/json"
             try:
                 secret = password.unmask_text(nonce, pw_hex)
             except ValueError:

@@ -26,6 +26,7 @@
 #include <esp_random.h>
 #ifdef USE_WIFI
 #include <esp_wifi.h>
+#include <nvs.h>
 #endif
 #include <esp_sntp.h>
 #include <sdkconfig.h>
@@ -126,8 +127,46 @@ void PrecisionFeeder::restart_if_due_() {
   if (this->busy())  // a feed, a positioning move or a calibration move
     return;
   this->restart_at_.store(0);
-  ESP_LOGI(TAG, "Restarting into the uploaded firmware");
+  ESP_LOGI(TAG, "Restarting %s", this->restart_reason_);
   App.safe_reboot();
+}
+
+// ESPHome's Wi-Fi keeps the network set on the device (captive portal, Improv, the web app) in its own preference.
+// With no network in the YAML, WiFiComponent::start() opens it under this fixed hash, and on ESP32 a preference is the
+// NVS blob of that hash, as a decimal string, in namespace "esphome" (ESPHome 2026.10.0: wifi_component.cpp, start();
+// esp32/preferences.cpp; checked in docs/plans/2.3.0-loose-ends.md, M0). tests/test_consistency.py checks ESPHome still
+// uses it. Saving an empty record instead would not do: ESPHome loads it as a network with no name.
+static const char *const WIFI_SAVED_NVS_NAMESPACE = "esphome";
+static const char *const WIFI_SAVED_NVS_KEY = "88491487";
+
+bool PrecisionFeeder::wifi_forgettable() const {
+#ifdef USE_WIFI
+  return this->wifi_forget_built_ && wifi::global_wifi_component != nullptr &&
+         wifi::global_wifi_component->has_sta();
+#else
+  return false;
+#endif
+}
+
+bool PrecisionFeeder::forget_wifi() {
+  if (!this->wifi_forgettable())
+    return false;
+  nvs_handle_t h;
+  if (nvs_open(WIFI_SAVED_NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+    ESP_LOGE(TAG, "Forget Wi-Fi: the settings storage could not be opened");
+    return false;
+  }
+  const esp_err_t err = nvs_erase_key(h, WIFI_SAVED_NVS_KEY);
+  const esp_err_t committed = nvs_commit(h);
+  nvs_close(h);
+  if ((err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) || committed != ESP_OK) {
+    ESP_LOGE(TAG, "Forget Wi-Fi: the saved network could not be erased (%s)", esp_err_to_name(err));
+    return false;
+  }
+  ESP_LOGW(TAG, "Wi-Fi network forgotten from the web app: restarting into the setup access point");
+  this->restart_reason_ = "without a Wi-Fi network (setup access point)";
+  this->restart_at_.store((millis() + 1000) | 1);  // once the tray is still (restart_if_due_), after the answer is out
+  return true;
 }
 
 bool PrecisionFeeder::api_key_settable() {
@@ -611,7 +650,7 @@ class SettingsGuard : public AsyncWebHandler {
       return false;
     if (url == "/feeder/auth/password" || url == "/feeder/auth/check" || url == "/feeder/keys/api" ||
         url == "/feeder/keys/ble" || url == "/feeder/network/name" || url == "/feeder/network/ap" ||
-        url == "/feeder/network/wifi" || url == "/feeder/setup")
+        url == "/feeder/network/wifi" || url == "/feeder/network/forget" || url == "/feeder/setup")
       return true;
 #ifdef USE_OTA
     if (url == "/feeder/firmware")
@@ -974,7 +1013,8 @@ class SettingsGuard : public AsyncWebHandler {
                        (has_ap ? (ap == KeySource::DEVICE ? "device" : this->feeder_->ap_build_open() ? "open" : "build")
                                : "off") +
                        "\",\"ap_build_open\":" + (this->feeder_->ap_build_open() ? "true" : "false") + ",\"wifi\":" +
-                       (PrecisionFeeder::wifi_settable() ? "true" : "false") + ",\"restart\":" +
+                       (PrecisionFeeder::wifi_settable() ? "true" : "false") + ",\"forget\":" +
+                       (this->feeder_->wifi_forgettable() ? "true" : "false") + ",\"restart\":" +
                        (restart ? "true" : "false") + ",\"setup\":" + (setup ? "true" : "false") + "}";
     request->send(200, "application/json", body.c_str());
   }
@@ -1014,19 +1054,30 @@ class SettingsGuard : public AsyncWebHandler {
   }
 
   /// POST /feeder/network/name?name=<text> (empty: the build's), /feeder/network/ap?password=<hex> (masked; empty:
-  /// the build's) and /feeder/network/wifi?ssid=<hex>&password=<hex> (the password masked). Each is signed over the
-  /// path and its parameters, as they are sent. The name and the access point's password apply at the next restart;
-  /// a Wi-Fi network is joined at once.
+  /// the build's), /feeder/network/wifi?ssid=<hex>&password=<hex> (the password masked) and /feeder/network/forget
+  /// (2.3.0). Each is signed over the path and its parameters, as they are sent. The name and the access point's
+  /// password apply at the next restart; a Wi-Fi network is joined at once; forgetting restarts once the tray is still.
   void set_network_(AsyncWebServerRequest *request, const std::string &url) {
     const std::string name = request->arg("name"), ssid_hex = request->arg("ssid"),
                       password_hex = request->arg("password");
-    const std::string signed_part = url == "/feeder/network/name"  ? name
-                                    : url == "/feeder/network/ap" ? password_hex
-                                                                  : ssid_hex + password_hex;
+    const std::string signed_part = url == "/feeder/network/name"   ? name
+                                    : url == "/feeder/network/ap"   ? password_hex
+                                    : url == "/feeder/network/wifi" ? ssid_hex + password_hex
+                                                                    : std::string();
     if (!this->authorised_(request, url + "\n" + signed_part))
       return;
     PrecisionFeeder *feeder = this->feeder_;
     auto bad = [request]() { request->send(400, "application/json", "{\"error\":\"format\"}"); };
+    if (url == "/feeder/network/forget") {
+      // Only a build whose YAML has no network, with one saved on the device (D30).
+      if (!feeder->wifi_forgettable()) {
+        request->send(409, "application/json", "{\"error\":\"build\"}");
+        return;
+      }
+      feeder->run_on_main_loop([feeder]() { feeder->forget_wifi(); });
+      request->send(200, "application/json", "{}");
+      return;
+    }
     if (url == "/feeder/network/name") {
       if (!name.empty() && !check_hostname(name))
         return bad();

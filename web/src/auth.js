@@ -253,6 +253,9 @@ const auth = {
     } else if (kind === 'ap') {
       signed = secret(values.password);
       query = `password=${signed}`;
+    } else if (kind === 'forget') {  // 2.3.0: nothing to send but the signature
+      signed = '';
+      query = '';
     } else {
       const ssid = toHex(utf8(values.ssid)), password = secret(values.password);
       signed = ssid + password;

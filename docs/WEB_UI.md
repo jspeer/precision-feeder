@@ -54,8 +54,9 @@ else the feeder lists under Faults.
     the feeder's own limits and units;
   - the time zone, chosen by place or typed as a POSIX string (empty means the YAML's, or
     Home Assistant's), and the NTP servers (2.0.2; up to three, empty means the build's);
-  - network: the name (used after a restart), joining another Wi-Fi network (at once), and
-    the fallback access point's password (used after a restart). Passwords are never shown
+  - network: the name (used after a restart), joining another Wi-Fi network (at once),
+    forgetting it (2.3.0, builds with no network in their YAML: it restarts into the access
+    point), and the fallback access point's password (used after a restart). Passwords are never shown
     or sent back;
   - drive, board and pins (with the `hardware` package): the drive (servo or direct-drive
     disc, in a build with the disc's package), a board preset or each pin (the servo's

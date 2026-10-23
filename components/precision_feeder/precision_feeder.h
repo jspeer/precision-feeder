@@ -132,6 +132,14 @@ class PrecisionFeeder : public Component, public FeederCore {
   /// Save a Wi-Fi network in ESPHome's own slot and join it now (the one the captive portal and Improv use). Main
   /// loop only. False in a build without Wi-Fi.
   bool set_wifi(const std::string &ssid, const std::string &password);
+  /// Forget Wi-Fi (2.3.0, D30): only in a build whose YAML has no network (the prebuilt binaries), set by code
+  /// generation. Such a build keeps the network set on the device in ESPHome's slot under a fixed hash.
+  void set_wifi_forget_built(bool built) { this->wifi_forget_built_ = built; }
+  /// A network is saved on the device and this build may forget it.
+  bool wifi_forgettable() const;
+  /// Erase the saved network and restart once the tray is still: the feeder comes back on its setup access point (and
+  /// Improv), as after a fresh flash. Everything else is kept. Main loop only. False if not forgettable.
+  bool forget_wifi();
 
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   /// A build whose API key is provisioned at run time (packages/api_key_on_device.yaml): ESPHome's OTA can then only
@@ -169,7 +177,10 @@ class PrecisionFeeder : public Component, public FeederCore {
   Mutex &password_lock() { return this->password_lock_; }
   /// A firmware image was written and checked (POST /feeder/firmware): restart into it half a second from now (so the
   /// answer gets out), or once the tray stops if it is moving. Safe to call from the web server's task.
-  void restart_after_upload() { this->restart_at_.store((millis() + 500) | 1); }
+  void restart_after_upload() {
+    this->restart_reason_ = "into the uploaded firmware";
+    this->restart_at_.store((millis() + 500) | 1);
+  }
   /// Run `f` on the main loop (safe to call from the web server's task).
   void run_on_main_loop(std::function<void()> &&f) { this->defer(std::move(f)); }
 
@@ -212,6 +223,8 @@ class PrecisionFeeder : public Component, public FeederCore {
   output::FloatOutput *output_{nullptr};
   std::atomic<ApiKey> api_key_state_{ApiKey::OFF};  // read by the web server's task
   std::atomic<uint32_t> restart_at_{0};               // millis() of a restart after a firmware upload; 0: none
+  const char *restart_reason_{""};                    // for the log line
+  bool wifi_forget_built_{false};
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
   ESPHomeOTAComponent *ota_{nullptr};
 #endif

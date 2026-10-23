@@ -315,9 +315,18 @@ PAGES.configuration = {
     ].filter(Boolean)));
 
     if (n.wifi) {
+      const forget = n.forget ? btn('Forget network', async () => {
+        const ap = `${n.name}-setup`;
+        if (!await confirmDialog({ title: 'Forget the Wi-Fi network?', danger: true, ok: 'Forget',
+                                   body: 'The feeder leaves your network and restarts, once the tray is still, with ' +
+                                         `its setup access point on: join "${ap}" from a phone and the setup ` +
+                                         'page opens, to pick a network. Everything else is kept: settings, ' +
+                                         'calibration, keys and the tray.' })) return;
+        run(auth.setNetwork('forget', {}), 'Forgetting: the feeder restarts into its setup access point');
+      }, 'btn btn-small btn-danger') : null;
       box.appendChild(part('Wi-Fi network', 'Join another network. The feeder switches at once; if it cannot join, it ' +
                            'opens its access point after a minute or two so you can try again.',
-                           [btn('Join a network', () => this.wifiDialog())]));
+                           [btn('Join a network', () => this.wifiDialog()), forget].filter(Boolean)));
     }
     if (n.ap !== 'off') {
       box.appendChild(part('Access point password', 'Used by the access point the feeder opens when it cannot join ' +

@@ -14,6 +14,7 @@ from esphome.components.esp32.gpio import ESP32InternalGPIOPin
 import esphome.config_validation as cv
 from esphome.const import CONF_ENCRYPTION, CONF_ID, CONF_KEY, CONF_OUTPUT, CONF_PASSWORD, CONF_TIME_ID
 import esphome.final_validate as fv
+from esphome.core import CORE
 
 CODEOWNERS = []
 DEPENDENCIES = []
@@ -182,6 +183,11 @@ async def to_code(config):
         cg.add(var.set_status_led(light, led, config[CONF_STATUS_LED_PIN]))
     if CONF_OTA_ID in config:
         cg.add(var.set_ota(await cg.get_variable(config[CONF_OTA_ID])))
+    # Forget Wi-Fi (2.3.0, D30): only when the YAML has no network (the prebuilt binaries remove theirs), so the one set
+    # on the device is the only one. A YAML build always keeps its YAML network.
+    wifi_config = CORE.config.get("wifi")
+    if wifi_config is not None and not wifi_config.get("networks"):
+        cg.add(var.set_wifi_forget_built(True))
 
     loader = cg.new_Pvariable(config[CONF_PIN_LOADER_ID], var)  # does nothing without runtime pins
     await cg.register_component(loader, {})

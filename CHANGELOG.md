@@ -15,6 +15,9 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 - **Clear the Bluetooth key** (web app, Configuration, Keys; behind the settings password), as the Home Assistant key
   could be. Bluetooth clients are then refused until a new key is made (a YAML build goes back to its own `ble_key`),
   and a connected client is disconnected.
+- **Forget the Wi-Fi network** (web app, Configuration, Network; behind the settings password), in the prebuilt
+  firmware and any build with no network in its YAML. The feeder restarts, once the tray is still, into its setup
+  access point (`<name>-setup`) to pick a network; everything else is kept.
 
 ## 2.2.0: who can change what (2026-10-22)
 

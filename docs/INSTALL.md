@@ -112,6 +112,7 @@ The feeder's name changes to `precision-feeder-<6 hex digits>` unless you set on
 | Joined the wrong Wi-Fi, or the network changed | Wait: when it cannot join, it opens its access point (`...-setup`) after a minute or two; join it and pick the network. Or plug it into a computer and use the install page's Connect, then "Change Wi-Fi" (Improv), no reflash needed. |
 | Forgot the access point password | Plug it into a computer and set Wi-Fi over USB (as above); then change the password in the web app. |
 | An update will not start | The feeder falls back to the firmware it had (ESPHome's rollback). If it does not come back, flash the factory image from the install page; do not erase, to keep your settings. |
+| Move the feeder to another network, or take it off yours | Web app, Configuration, Network, **Forget network**: it restarts into its access point (`...-setup`), keeping everything else. |
 | Start over completely | Flash from the install page **with erase**. Everything is wiped: settings, calibration, Wi-Fi, keys, password. |
 | Tray position unknown after a power cut mid-feed | Maintenance: declare the position, or Tray Reload. See [USING.md](USING.md#safety-behaviour). |
 

@@ -757,19 +757,23 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   own reconnect joins the saved network, or opens the access point if it cannot (the second is so the answer gets
   out over the old link). ESPHome keys that slot to the build (config and ESPHome version hash)
   when the YAML has a network, so a YAML build's own network returns after an update built from a changed YAML; with
-  no network in the YAML (the prebuilt binaries) the key is fixed and the saved network stays. There is no
-  "forget": ESPHome has no call to delete the slot; an erase-and-flash clears it (no factory reset yet: section 14,
-  item 21).
+  no network in the YAML (the prebuilt binaries) the key is fixed and the saved network stays.
+- **Forget** (2.3.0, D30): ESPHome has no call to delete the slot, so in a build with no network in the YAML (code
+  generation sets `set_wifi_forget_built()`) the adapter erases it from NVS itself (namespace `esphome`, key
+  `88491487`: ESPHome's fixed hash for that case, checked against its source by tests/test_consistency.py) and
+  restarts once the tray is still, into the setup access point. Only while a network is saved (`has_sta()`). A YAML
+  build's network is in its YAML and cannot be forgotten. Everything else stays.
 - **Improv serial** (`packages/improv_serial.yaml`, on in both examples): ESP Web Tools sets Wi-Fi over the USB
   cable after flashing. Physical access is trusted (section 10.1).
 - **Endpoints** (signed like any protected change; section 10.1): `GET /feeder/network` reports the name in use,
   saved and the build's, where the access-point password comes from (`build`, `device`, `off`), whether Wi-Fi can
-  be set, and whether a restart is due; never a password. `POST /feeder/network/name?name=` (empty: the build's),
-  `/feeder/network/ap?password=<hex>` (empty: the build's) and `/feeder/network/wifi?ssid=<hex>&password=<hex>`.
+  be set, whether it can be forgotten (`forget`), and whether a restart is due; never a password. `POST /feeder/network/name?name=` (empty: the build's),
+  `/feeder/network/ap?password=<hex>` (empty: the build's), `/feeder/network/wifi?ssid=<hex>&password=<hex>` and
+  `/feeder/network/forget` (signed with nothing after the path).
   The passwords travel masked by the settings password: the text XOR HMAC-SHA256(key, nonce || "new secret 1")
   || HMAC-SHA256(key, nonce || "new secret 2"), cut to its length (`password_unmask_text()`, golden vector shared
   by tests/test_core.cpp and tests/test_web.mjs). 400 for a value FeederCore's checks refuse, 409 when the build
-  has no access point or no Wi-Fi.
+  has no access point or no Wi-Fi, or (forget) a YAML network or none saved.
 - On load, a saved name or password that no longer passes the checks is dropped (with a warning) for the build's.
 
 ### 9.4 Setup wizard (firmware 2.0.0)
@@ -1319,6 +1323,9 @@ precision-feeder/
   - D29: the BLE key saved on the device can be cleared in the web app (Configuration, Keys; `/feeder/keys/ble` with no
     key, signed), as the Home Assistant key can. The build's key is used again, or with none every AUTH is refused
     (detail 6; never an all-zero key); a connected session ends (`clear_ble_key()`, the key serial changes).
+  - D30: the Wi-Fi network can be forgotten in the web app (Configuration, Network), only in a build with no network
+    in its YAML (the prebuilt binaries): "a YAML build can't forget its network, that's fine". It restarts into the
+    setup access point (section 9.3).
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
