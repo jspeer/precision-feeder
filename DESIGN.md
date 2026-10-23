@@ -1341,6 +1341,8 @@ precision-feeder/
   - D31: the Join dialog lists the networks the feeder sees, from a scan while connected (ESP-IDF's background scan,
     which keeps the link, as ESPHome's roaming does) or the access point's own scan; a typed name stays possible
     (section 9.3).
+  - D32: open item 23's calibration is always checked by eye, also for a printed disc (owner, 2026-10-22); open
+    item 22 (the servo bench leftovers) is shelved until the servo rig is rebuilt.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1517,12 +1519,14 @@ precision-feeder/
 
 21. Factory reset: listed among the protected settings (owner, 2026-10-15) but not built in 2.0. Wiping a feeder is
     an erase-and-flash from the install page (docs/INSTALL.md, Recovery). To decide: a protected "factory reset" in
-    the web app (erase our records and ESPHome's Wi-Fi slot), or keep erase-and-flash.
+    the web app (erase our records and ESPHome's Wi-Fi slot), or keep erase-and-flash. Since 2.3.0 (D30) the Wi-Fi
+    network alone can be forgotten in the web app (prebuilt binaries); a full wipe is still erase-and-flash.
 22. 2.1.0 on the bench (servo). Checked 2026-10-21 (docs/BENCH.md): the upgrade from 2.0.2 kept settings,
     calibration, pins and the tray state; a feed, reload, calibration and the guard behaved as before; the
     two-drive firmware fed as a servo. Still to check: a multi-portion feed, a power cut mid-feed, the BLE selftest on
     the servo, the release build itself (the two-drive firmware with MQTT, as published), and GPIO3 as the button pin
-    with the button held at power-up.
+    with the button held at power-up. **Shelved 2026-10-22 (D32):** the servo rig fell apart; picked up again when it
+    is rebuilt.
 
 23. The direct-drive disc on the bench (section 3.3, plan S2.0 and S2.8). Checked 2026-10-21 (docs/BENCH.md): one
     turn is exactly 8344 ticks; feeds land within 2 ticks of the grid; the control timer's only long gap (about
@@ -1530,7 +1534,8 @@ precision-feeder/
     calibration end to end with a slot lined up by eye; 300 feed cycles; the wiggle with real food; a power cut
     mid-move; a held disc and an unplugged encoder; the STBY level at power-up (and whether a pull-down is needed);
     which way the disc turns, by eye. And the feed time: about 3.9 s on the first run against the sketch's 2.5 s,
-    2.3 s on a later feed; not explained.
+    2.3 s on a later feed; not explained. **Decided 2026-10-22 (D32):** the guided calibration, checked by eye, is the
+    method (also for a printed disc), not a stand-in for a mark.
 
 24. MQTT and the protected settings (section 9.6). Over MQTT, whoever the broker let publish could change the guard
     limits, the calibration and the pins, which the web app guards with the settings password. **Decided 2026-10-22

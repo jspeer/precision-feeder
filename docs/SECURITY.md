@@ -64,6 +64,9 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 - **The fallback access point has no password on a fresh install.** Whenever it is up (before Wi-Fi is set, or when
   Wi-Fi is lost), anyone in range can join it, reach the web app and the captive portal, and, with no settings
   password, change anything. Set an access-point password in the setup wizard.
+- **The list of nearby Wi-Fi networks is not protected** (2.3.0): anyone who can reach the web app can see the names
+  the feeder found and ask it to scan again, as ESPHome's captive portal shows them on the access point. Forgetting
+  the network is protected.
 - **Plain HTTP.** The feeder serves no HTTPS. Someone recording your network can see feeding commands and settings
   being read, and can try to guess the settings password offline from a challenge and its answer; PBKDF2 slows that
   down, but a short password falls. Use a long one.
