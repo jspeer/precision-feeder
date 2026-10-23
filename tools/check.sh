@@ -42,6 +42,10 @@ echo "== C++ host tests"
 # HTTPS and MQTT over TLS: what port 80 does, how MQTT connects, what to pin (tls_policy.h, 2.4.1).
 "$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder_tls tests/test_tls.cpp -o "$OUT/test_tls"
 "$OUT/test_tls"
+# The ACME client against a fake server: requests, JWS, retries, renewal (acme.h, 2.4.2).
+"$CXX" -O2 -std=c++17 -Wall -Wextra -Werror -Icomponents/precision_feeder_tls -Icomponents/precision_feeder \
+  tests/test_acme.cpp -o "$OUT/test_acme"
+"$OUT/test_acme"
 
 echo "== Python tests (client, and limits consistency)"
 (cd tools && python3 -m unittest -q test_precision_feeder_ble test_make_release test_check_scopes)
@@ -91,9 +95,11 @@ awk '/^  (web_ui|tls): !include/ { next } { print } /^  disc: !include/ { print 
   examples/disc.yaml > "$CONFIG/headless.yaml"
 grep -q "ble_gatt" "$CONFIG/headless.yaml"
 if grep -q "^  tls: !include" "$CONFIG/headless.yaml"; then echo "headless.yaml still has tls"; exit 1; fi
-# MQTT over TLS (mqtt.yaml and mqtt_tls.yaml, as the prebuilt binaries have them): the basic example with both.
-sed -E 's/^  # (mqtt|mqtt_tls): !include/  \1: !include/' examples/basic.yaml > "$CONFIG/mqtt_tls.yaml"
+# MQTT over TLS and ACME (mqtt.yaml, mqtt_tls.yaml and acme.yaml, as the prebuilt binaries have them): the basic
+# example with all three.
+sed -E 's/^  # (mqtt|mqtt_tls|acme): !include/  \1: !include/' examples/basic.yaml > "$CONFIG/mqtt_tls.yaml"
 grep -q "^  mqtt_tls: !include" "$CONFIG/mqtt_tls.yaml"
+grep -q "^  acme: !include" "$CONFIG/mqtt_tls.yaml"
 # Python with PyYAML for tools/check_scopes.py: ESPHome's own, else the system's.
 PY="$(dirname "$ESPHOME")/python"
 [ -x "$PY" ] || PY=python3

@@ -58,3 +58,4 @@ packages:
   # button: !include precision-feeder/packages/button.yaml                   # only if your print has the button
   # mqtt: !include precision-feeder/packages/mqtt.yaml                       # MQTT with Home Assistant discovery, set up in the web app
   # mqtt_tls: !include precision-feeder/packages/mqtt_tls.yaml             # MQTT over TLS (needs mqtt and tls)
+  # acme: !include precision-feeder/packages/acme.yaml                     # the HTTPS certificate from an ACME server (needs tls)

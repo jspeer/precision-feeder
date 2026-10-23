@@ -20,8 +20,10 @@ from the internet.
   A YAML build can also put the whole app behind a login ([BUILDING.md](BUILDING.md)).
 - **HTTPS** (2.4.1, the `tls` package, in the prebuilt firmware): the app is also at `https://<name>.local`, and
   opening it on plain HTTP (Home Assistant's "Visit" link too) sends you there. The feeder's certificate is
-  self-signed: your browser warns the first time; accept it once for that feeder. The certificates and the trust
-  store get their own page in 2.4.3; until then they are set through `/feeder/tls` (DESIGN.md section 9.7).
+  self-signed: your browser warns the first time; accept it once for that feeder. Since 2.4.2 it can get a
+  trusted certificate from your own ACME server (step-ca, say) instead. The certificates, ACME and the trust store get
+  their own page in 2.4.3; until then they are set through `/feeder/tls` and the ACME Directory setting (DESIGN.md
+  section 9.7).
 - **Phones:** the tabs move to a bar at the bottom. Add the page to your home screen
   for an app-like shortcut.
 

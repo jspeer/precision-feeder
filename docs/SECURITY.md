@@ -69,8 +69,8 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
   the network is protected.
 - **HTTPS, but self-signed by default** (2.4.1). With the `tls` package (in the prebuilt firmware) the web app is
   at `https://<name>.local`, and port 80 sends the app's page there (HTTPS Redirect). The feeder's certificate is
-  one it made itself, so your browser warns until you accept it; upload a certificate from your own CA to avoid
-  that. Until you turn on **HTTPS Only**, the rest of port 80 still answers in plain HTTP (an app opened there, older
+  one it made itself, so your browser warns until you accept it; upload a certificate from your own CA, or let the
+  feeder get one from your ACME server (2.4.2, below), to avoid that. Until you turn on **HTTPS Only**, the rest of port 80 still answers in plain HTTP (an app opened there, older
   bookmarks, scripts): someone recording your network can see what crosses it, and can try to guess the settings
   password offline from a challenge and its answer; PBKDF2 slows that down, but a short password falls. Use a long
   one. HTTPS Only never applies while the access point is up, so the setup wizard and captive portal stay plain HTTP.
@@ -79,6 +79,11 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
 - **MQTT over TLS checks the broker** (2.4.1, `mqtt_tls`): against a CA certificate you upload, or against the
   certificate the broker showed the first time ("Pin on first contact"; like SSH, safe if nobody impersonates the
   broker on that first contact). With TLS on, MQTT never falls back to plain text.
+- **ACME** (2.4.2, `acme`, in the prebuilt firmware; off until a directory is set): the feeder asks the ACME server
+  you name (step-ca on your LAN, say) for its certificate and renews it by itself. It is the feeder's only outgoing
+  HTTPS, and the server is always checked against the trust store; without a CA there, ACME does not run. Its keys
+  (the account's and the certificate's) are made on the feeder and never leave it. The challenge is answered on port
+  80, so the CA must reach the feeder's port 80; the answer is served only for the one request being made.
 - **Unprotected controls can be pressed from other websites.** ESPHome's web server allows cross-site requests, so a
   page you visit could, for example, press Feed One Portion on the feeder. The feed guard still applies; protected
   settings still need the password (DESIGN.md section 14, item 12).

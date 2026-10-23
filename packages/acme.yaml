@@ -1,0 +1,81 @@
+# Precision Feeder: the HTTPS certificate from an ACME server (optional; firmware 2.4.2, DESIGN.md section 9.7, D40).
+#
+# Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
+# Designed and written with the assistance of an AI (Anthropic's Claude);
+# reviewed by a human, but it may still contain mistakes.
+#
+# The feeder asks an ACME server (RFC 8555; for example step-ca on the LAN) for its HTTPS certificate and renews it by
+# itself, so browsers trust it without a warning once they trust the CA. Needs tls.yaml. Off until a directory is set
+# in the web app (Configuration, Certificates).
+#
+# - ACME Directory: the server's directory URL, https only (for step-ca, https://<ca>/acme/<provisioner>/directory).
+#   The server is checked against the trust store: upload the CA's root there first. Empty turns ACME off.
+# - ACME Name: the name to ask a certificate for. Empty: <name>.local, which the ACME server must resolve (mDNS on the
+#   CA's host). A name in your own DNS works too, if it points at the feeder.
+# - The challenge is http-01: the server fetches http://<name>/.well-known/acme-challenge/... from the feeder's port
+#   80, so the feeder's port 80 must be reachable from the CA (HTTPS Only never refuses it). No dns-01: it would keep
+#   DNS credentials on the feeder.
+# - The keys are made on the feeder and never leave it: the account key (kept, so the server finds the same account)
+#   and a new certificate key at every renewal. Both are in flash in the clear, as every key is.
+# - Renewal two thirds into the certificate's lifetime (16 h into step-ca's default of 24 h), only with a valid clock.
+#   A failure keeps the current certificate and tries again after 5 min, 15 min, 1 h, then every 3 h; a certificate
+#   that expires gives way to the uploaded one, else the self-signed one. A new certificate is served at once: no
+#   restart, and never a reboot.
+# - The feeder makes no other HTTPS requests: only to the directory set here (D40; DESIGN.md section 13, 2.0.0).
+# - Both settings are web app only and need the settings password when one is set.
+
+precision_feeder_tls:
+  acme: true
+
+precision_feeder:
+  protected_entities:
+    - text/ACME Directory
+    - text/ACME Name
+
+esphome:
+  on_boot:
+    # The saved values, before the first loop pass picks the certificate to serve.
+    - priority: 600
+      then:
+        - lambda: |-
+            id(feeder_tls).set_acme_directory(id(pf_acme_directory).state);
+            id(feeder_tls).set_acme_name(id(pf_acme_name).state);
+
+text:
+  - platform: template
+    id: pf_acme_directory
+    name: "ACME Directory"
+    internal: true
+    icon: mdi:certificate
+    entity_category: config
+    mode: text
+    max_length: 255
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      - lambda: id(feeder_tls).set_acme_directory(x);
+  - platform: template
+    id: pf_acme_name
+    name: "ACME Name"
+    internal: true
+    icon: mdi:dns
+    entity_category: config
+    mode: text
+    max_length: 253
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      - lambda: id(feeder_tls).set_acme_name(x);
+
+text_sensor:
+  # "off", "certificate for <name> until <date>, renewed from <date>", "failed: <why>; next try in 15 min" and so on.
+  - platform: template
+    id: pf_acme_status
+    name: "ACME"
+    internal: true
+    icon: mdi:certificate-outline
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: return id(feeder_tls).acme_text();

@@ -1,6 +1,7 @@
-// Precision Feeder TLS: HTTPS for the web app, the trust store, and MQTT over TLS (firmware 2.4.1).
+// Precision Feeder TLS: HTTPS for the web app, the trust store, MQTT over TLS (firmware 2.4.1) and ACME (2.4.2).
 //
-// The decisions (what port 80 does, how MQTT connects, what to pin) are plain C++ in tls_policy.h, tested on a host.
+// The decisions (what port 80 does, how MQTT connects, what to pin) are plain C++ in tls_policy.h, and the ACME
+// client (requests, JWS, renewal) in acme.h, both tested on a host.
 // This class does the device's side: the certificates in NVS, the TLS relay on port 443, the web endpoints, and the
 // MQTT client's TLS settings. Its tasks never call FeederCore; changes reach the main loop through defer().
 // DESIGN.md section 9.7; docs/plans/https-tls.md.
@@ -22,6 +23,9 @@
 #endif
 
 #include "tls_policy.h"
+#ifdef USE_PRECISION_FEEDER_ACME
+#include "acme.h"
+#endif
 
 namespace esphome {
 namespace precision_feeder {
@@ -41,6 +45,12 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   // ---- settings (from the package's entities; saved there) ----
   void set_redirect(bool on) { this->redirect_ = on; }
   void set_https_only(bool on) { this->https_only_ = on; }
+#ifdef USE_PRECISION_FEEDER_ACME
+  /// The ACME server's directory URL (empty: ACME off) and the name to ask for (empty: <name>.local). From the
+  /// package's entities, at boot and when changed; a change asks again at once, with no restart.
+  void set_acme_directory(const std::string &url);
+  void set_acme_name(const std::string &name);
+#endif
 
   void setup() override;
   void loop() override;
@@ -58,6 +68,11 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   std::string https_text();
   /// "off", "CA", "pinned ab:cd:..", "no CA certificate", "pinning..." and so on, for the MQTT TLS text sensor.
   std::string mqtt_text();
+#ifdef USE_PRECISION_FEEDER_ACME
+  /// "off", "certificate for <name> until <date>, renewed from <date>", "failed: <why>; next try in 15 min" and so
+  /// on, for the ACME text sensor.
+  std::string acme_text();
+#endif
   /// GET /feeder/tls: everything above as JSON, for the web app. Safe on the web server's task.
   std::string status_json();
 
@@ -84,11 +99,22 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   void listen_task_();
   void relay_task_(int client);
   void pin_task_();
+#ifdef USE_PRECISION_FEEDER_ACME
+  void acme_task_();
+  void reselect_task_();
+  /// The http-01 answer for a token, or empty (the web server's task).
+  std::string acme_challenge(const std::string &token);
+  void set_acme_challenge_(const std::string &token, const std::string &key_authorization);
+#endif
 
  protected:
   std::shared_ptr<TlsIdentity> identity_();
+  /// The identity to serve now: ACME's while it may be served, else an uploaded one that checks, else the
+  /// self-signed one (made if missing or made for another name). Needs a big stack; nullptr if none could be made.
+  std::shared_ptr<TlsIdentity> pick_identity_();
   void set_identity_(std::shared_ptr<TlsIdentity> identity);
   std::string redirect_host_();
+  std::string local_name_();
   bool make_self_signed_(std::string &cert, std::string &key, const std::string &name);
   /// Work that needs a large stack (key generation, certificate checks), run in its own task while the caller waits.
   bool run_big_(std::function<bool()> &&work);
@@ -115,6 +141,26 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   // An upload in progress (one at a time; the web server serves one request at a time).
   std::string body_;
   bool body_too_big_{false};
+
+#ifdef USE_PRECISION_FEEDER_ACME
+  void acme_check_();
+  std::string acme_name_in_use_();         // under lock_
+  tls::acme::Issued issued_now_();          // under lock_: issued_, with `same` for the settings now
+  void serve_identity_(std::shared_ptr<TlsIdentity> identity);
+
+  // Under lock_: the settings, what ACME last issued (from ac_cert, ac_name, ac_dir), the status, the challenge.
+  std::string acme_dir_, acme_name_;
+  std::string issued_name_, issued_dir_, issued_until_;
+  tls::acme::Issued issued_;
+  std::string acme_error_;  // why the last attempt failed, until one succeeds
+  std::string challenge_token_, challenge_auth_;
+  uint32_t acme_failures_{0};
+  int64_t acme_next_try_{0};
+  std::atomic<bool> acme_running_{false};  // a task (ACME or reselect) runs
+  std::atomic<bool> acme_now_{false};      // renew now, or the settings changed
+  std::atomic<bool> reselect_{false};      // pick the identity again (ACME turned off)
+  uint32_t acme_checked_{0};  // millis() of the last check (main loop)
+#endif
 
 #ifdef USE_MQTT
   mqtt::MQTTClientComponent *mqtt_{nullptr};

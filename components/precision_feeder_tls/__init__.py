@@ -1,9 +1,11 @@
-"""Precision Feeder TLS: HTTPS for the web app, the trust store, and MQTT over TLS (firmware 2.4.1).
+"""Precision Feeder TLS: HTTPS for the web app, the trust store, MQTT over TLS (firmware 2.4.1) and ACME (2.4.2).
 
 HTTPS is a relay: TLS on port 443, plain bytes to ESPHome's own web server on 127.0.0.1:80, so every handler (the
 app, /events, the settings guard, the firmware upload) works as it is. The feeder's identity is a self-signed
 certificate made on the device, or a certificate and key uploaded from the web app. The trust store holds one CA
 certificate, which MQTT checks its broker against; or MQTT pins the broker's certificate on first contact (D36).
+With `acme: true` (packages/acme.yaml) the feeder also asks an ACME server it is given (step-ca on the LAN, say) for
+its certificate, over http-01, and renews it (D40).
 Decisions and measurements: docs/plans/https-tls.md, DESIGN.md section 9.7.
 
 Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
@@ -28,6 +30,7 @@ CONF_FEEDER = "feeder"
 CONF_MAX_SESSIONS = "max_sessions"
 CONF_IDLE_TIMEOUT = "idle_timeout"
 CONF_PORT = "port"
+CONF_ACME = "acme"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -42,16 +45,21 @@ CONFIG_SCHEMA = cv.Schema(
             cv.positive_time_period_seconds, cv.Range(min=cv.TimePeriod(seconds=12), max=cv.TimePeriod(seconds=300))
         ),
         cv.Optional(CONF_PORT, default=443): cv.port,
+        # The ACME client (packages/acme.yaml sets it): about 21 KB of flash (an HTTPS client, CSRs), and an HTTPS
+        # client's heap while it asks (minutes a day at most).
+        cv.Optional(CONF_ACME, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
 
 def _sockets(config):
     # Each session: the browser's socket and ours to 127.0.0.1:80 (ESPHome's server counts its own end); the
-    # listener; and one for MQTT's first contact with a broker (pinning).
+    # listener; one for MQTT's first contact with a broker (pinning); and one for the ACME client.
     socket.consume_sockets(2 * config[CONF_MAX_SESSIONS], "precision_feeder_tls")(config)
     socket.consume_sockets(1, "precision_feeder_tls", socket.SocketType.TCP_LISTEN)(config)
     socket.consume_sockets(1, "precision_feeder_tls_pin")(config)
+    if config[CONF_ACME]:
+        socket.consume_sockets(1, "precision_feeder_tls_acme")(config)
     return config
 
 
@@ -66,6 +74,11 @@ async def to_code(config):
     cg.add(var.set_idle_timeout_s(config[CONF_IDLE_TIMEOUT].total_seconds))
     cg.add(var.set_port(config[CONF_PORT]))
     cg.add_define("USE_PRECISION_FEEDER_TLS")
+    if config[CONF_ACME]:
+        cg.add_define("USE_PRECISION_FEEDER_ACME")
+        esp32.request_http_client()
+        # The HTTP client brings WebSocket support along (about 7 KB); nothing here uses it.
+        add_idf_sdkconfig_option("CONFIG_WS_TRANSPORT", False)
 
     # mbedTLS: the server side, the peer's chain kept after a handshake (pinning), session tickets (a returning
     # browser resumes in about 0.1 s instead of 0.3 to 0.6 s). TLS 1.2 only (TLS 1.3 stays off, ESPHome's default):

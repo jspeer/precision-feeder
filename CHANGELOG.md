@@ -6,6 +6,25 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.2: ACME (2026-10-23, not tagged)
+
+**Upgrade note:** nothing to do. ACME is off until you set a directory.
+
+- **The HTTPS certificate from your own ACME server** (`packages/acme.yaml`, in the prebuilt firmware; a commented
+  line in the examples). Set ACME Directory to your server's directory URL (step-ca:
+  `https://<ca>/acme/<provisioner>/directory`) and upload its root to the trust store: the feeder asks for a
+  certificate for `<name>.local` (or ACME Name), answers the http-01 challenge on port 80, checks what comes back and
+  serves it at once, with no restart. Browsers that trust your CA then open the feeder without a warning.
+- **It renews by itself**, two thirds into the certificate's lifetime (16 h into step-ca's default 24 h), and only
+  with a valid clock. A failed renewal keeps the current certificate and tries again after 5 min, 15 min, 1 h, then
+  every 3 h; once a certificate expires, the feeder goes back to an uploaded one, else its own, without a restart.
+- **Only the server you set, always checked**: the ACME server is checked against the trust store (no CA there, no
+  ACME), and it is the feeder's only outgoing HTTPS (DESIGN.md D40). The account key and each certificate's key are
+  made on the feeder and never leave it. http-01 only: dns-01 would keep DNS credentials on the feeder.
+- The settings (ACME Directory, ACME Name) are web app only and protected by the settings password; an ACME status
+  shows what it did last. `POST /feeder/tls/acme/renew` asks again now. The web app's page comes in 2.4.3.
+- Size: the full prebuilt image is 47 KB larger (1,540,671 bytes, 84% of the app slot), with 1 KB more static RAM.
+
 ## 2.4.1: HTTPS and MQTT over TLS (2026-10-23, not tagged)
 
 **Upgrade note:** nothing to do. The web app is now also at `https://<name>.local`, and opening it on plain HTTP sends

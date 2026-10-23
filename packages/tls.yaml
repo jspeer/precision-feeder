@@ -10,7 +10,8 @@
 # - The certificate: at its first start the feeder makes a self-signed one for <name>.local (P-256, about a second;
 #   made again when the name changes). Browsers warn about it until you trust it once. A certificate and key of your
 #   own (for example from your own CA) can be uploaded instead; it is checked against the trust store's CA when one
-#   is set. Both are kept in the feeder's flash, the key in the clear: anyone who can read the flash can read it.
+#   is set. Or the feeder gets one from your ACME server (acme.yaml), which wins while ACME is on. All are kept in
+#   the feeder's flash, the keys in the clear: anyone who can read the flash can read them.
 # - Port 80 (HTTPS Redirect, on by default): opening the app on port 80 sends the browser to
 #   https://<certificate's name>/. Home Assistant's "Visit" link is always http://<address>:80 (Home Assistant builds
 #   it), so this is what brings it to HTTPS. Everything else on port 80 keeps working.

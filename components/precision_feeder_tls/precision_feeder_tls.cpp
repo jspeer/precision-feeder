@@ -10,6 +10,7 @@
 
 #include <cstring>
 #include <ctime>
+#include <strings.h>
 #include <functional>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
 #include <mbedtls/ctr_drbg.h>
+#include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/pem.h>
 #include <mbedtls/pk.h>
@@ -29,7 +31,12 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 #include <nvs.h>
+#ifdef USE_PRECISION_FEEDER_ACME
+#include <esp_http_client.h>
+#include <mbedtls/x509_csr.h>
+#endif
 
+#include "acme.h"
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -44,7 +51,9 @@ namespace precision_feeder {
 static const char *const TAG = "precision_feeder_tls";
 static const char *const NVS_NAMESPACE = "pf_tls";  // new in 2.4.1; no existing record changes
 // Keys: "ss_cert", "ss_key", "ss_name" (the self-signed identity and the name it was made for), "up_cert", "up_key"
-// (an uploaded identity), "ca" (the trust store), "mq_pin" (MQTT's pinned broker certificate).
+// (an uploaded identity), "ca" (the trust store), "mq_pin" (MQTT's pinned broker certificate); since 2.4.2 "ac_acct"
+// (the ACME account key), "ac_cert", "ac_key" (the identity ACME issued), "ac_name", "ac_dir" (the name it was
+// issued for and the directory it came from).
 
 static constexpr uint32_t BIG_STACK = 10240;   // key generation, certificate checks, a TLS client handshake
 static constexpr uint32_t RELAY_STACK = 6144;  // one HTTPS session (measured on the board, docs/BENCH.md)
@@ -117,6 +126,7 @@ static std::string hex_fingerprint(const unsigned char *der, size_t len, size_t 
 /// What the web app shows about a certificate: its first DNS name, its subject, when it expires, its fingerprint.
 struct CertFacts {
   std::string dns, subject, not_after, fingerprint;
+  int64_t from{0}, until{0};  // seconds since 1970, UTC
   bool ok{false};
 };
 
@@ -128,6 +138,10 @@ static CertFacts facts_of(const mbedtls_x509_crt &crt) {
   std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", crt.valid_to.year, crt.valid_to.mon, crt.valid_to.day);
   f.not_after = buf;
   f.fingerprint = hex_fingerprint(crt.raw.p, crt.raw.len);
+  f.from = tls::acme::utc_seconds(crt.valid_from.year, crt.valid_from.mon, crt.valid_from.day, crt.valid_from.hour,
+                                  crt.valid_from.min, crt.valid_from.sec);
+  f.until = tls::acme::utc_seconds(crt.valid_to.year, crt.valid_to.mon, crt.valid_to.day, crt.valid_to.hour,
+                                   crt.valid_to.min, crt.valid_to.sec);
   for (const mbedtls_x509_sequence *san = &crt.subject_alt_names; san != nullptr && san->buf.p != nullptr;
        san = san->next) {
     mbedtls_x509_subject_alternative_name name;
@@ -159,7 +173,7 @@ static bool clock_valid() { return std::time(nullptr) > 1700000000; }
 
 struct TlsIdentity {
   std::string cert, key;  // PEM; std::string keeps the terminating NUL that mbedTLS's parser wants
-  std::string source;     // "self-signed" or "uploaded"
+  std::string source;     // "self-signed", "uploaded" or "ACME"
   CertFacts facts;
   esp_tls_cfg_server_t cfg{};
   bool tickets{false};
@@ -333,6 +347,19 @@ void PrecisionFeederTls::setup() {
   if (!this->pin_pem_.empty())
     this->pin_text_ = facts_of_pem(this->pin_pem_).fingerprint.substr(0, 23);
   this->feeder_->set_request_filter(this);
+#ifdef USE_PRECISION_FEEDER_ACME
+  {
+    const CertFacts f = facts_of_pem(nvs_get("ac_cert"));
+    if (f.ok) {
+      this->issued_.have = true;
+      this->issued_.not_before = f.from;
+      this->issued_.not_after = f.until;
+      this->issued_until_ = f.not_after;
+      this->issued_name_ = nvs_get("ac_name");
+      this->issued_dir_ = nvs_get("ac_dir");
+    }
+  }
+#endif
 
   class Endpoints : public AsyncWebHandler {
    public:
@@ -344,7 +371,7 @@ void PrecisionFeederTls::setup() {
         return url == "/feeder/tls";
       return request->method() == HTTP_POST &&
              (url == "/feeder/tls/ca" || url == "/feeder/tls/identity" || url == "/feeder/tls/self-signed" ||
-              url == "/feeder/tls/mqtt-pin/forget");
+              url == "/feeder/tls/mqtt-pin/forget" || url == "/feeder/tls/acme/renew");
     }
     void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) override {
       this->parent_->handle_body(request, data, len, index, total);
@@ -359,6 +386,36 @@ void PrecisionFeederTls::setup() {
   };
   if (web_server_base::global_web_server_base != nullptr)
     web_server_base::global_web_server_base->add_handler(new Endpoints(this));  // lives as long as the device
+
+#ifdef USE_PRECISION_FEEDER_ACME
+  // ACME's http-01 challenge on port 80: the key authorization for the one token being asked about, else nothing (the
+  // request goes on to the other handlers and ends in a 404).
+  class Challenge : public AsyncWebHandler {
+   public:
+    explicit Challenge(PrecisionFeederTls *parent) : parent_(parent) {}
+    bool canHandle(AsyncWebServerRequest *request) const override {
+      if (request->method() != HTTP_GET)
+        return false;
+      char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+      const std::string url = request->url_to(buf).str();
+      const size_t n = std::strlen(tls::ACME_CHALLENGE_PREFIX);
+      return url.size() > n && url.compare(0, n, tls::ACME_CHALLENGE_PREFIX) == 0 &&
+             !this->parent_->acme_challenge(url.substr(n)).empty();
+    }
+    void handleRequest(AsyncWebServerRequest *request) override {
+      char buf[AsyncWebServerRequest::URL_BUF_SIZE];
+      const std::string url = request->url_to(buf).str();
+      const std::string answer = this->parent_->acme_challenge(url.substr(std::strlen(tls::ACME_CHALLENGE_PREFIX)));
+      ESP_LOGI(TAG, "ACME challenge fetched");
+      request->send(200, "application/octet-stream", answer.c_str());
+    }
+
+   protected:
+    PrecisionFeederTls *parent_;
+  };
+  if (web_server_base::global_web_server_base != nullptr)
+    web_server_base::global_web_server_base->add_handler(new Challenge(this));
+#endif
 }
 
 static void identity_entry(void *arg) {
@@ -380,6 +437,9 @@ void PrecisionFeederTls::loop() {
     if (xTaskCreate(identity_entry, "tls_start", BIG_STACK, this, 2, nullptr) != pdPASS)
       ESP_LOGE(TAG, "HTTPS did not start (no memory for its task)");
   }
+#ifdef USE_PRECISION_FEEDER_ACME
+  this->acme_check_();
+#endif
 #ifdef USE_MQTT
   if (this->pin_done_.exchange(false)) {
     std::string pin;
@@ -405,25 +465,47 @@ void PrecisionFeederTls::loop() {
 #endif
 }
 
-void PrecisionFeederTls::identity_task_() {
-  std::string name = App.get_name().c_str();
-  name += ".local";
+std::string PrecisionFeederTls::local_name_() { return std::string(App.get_name().c_str()) + ".local"; }
+
+std::shared_ptr<TlsIdentity> PrecisionFeederTls::pick_identity_() {
+  const std::string name = this->local_name_();
+  std::string ca;
+  {
+    LockGuard guard(this->lock_);
+    ca = this->ca_pem_;
+  }
   auto identity = std::make_shared<TlsIdentity>();
-  // An uploaded identity wins if it still checks; else the self-signed one, made again when the name changed.
-  identity->cert = nvs_get("up_cert");
-  identity->key = nvs_get("up_key");
-  if (!identity->cert.empty()) {
-    std::string ca, error;
-    {
-      LockGuard guard(this->lock_);
-      ca = this->ca_pem_;
-    }
-    if (check_identity(identity->cert, identity->key, ca, error)) {
-      identity->source = "uploaded";
-    } else {
-      ESP_LOGW(TAG, "The uploaded certificate no longer checks (%s); using the self-signed one", error.c_str());
-      LockGuard guard(this->lock_);
-      this->identity_error_ = error;
+#ifdef USE_PRECISION_FEEDER_ACME
+  // ACME's certificate wins while ACME is on, the certificate is for the name and directory set now, and it is within
+  // its dates (as far as the clock can tell).
+  bool acme_ok;
+  {
+    LockGuard guard(this->lock_);
+    acme_ok = tls::acme::servable(std::time(nullptr), clock_valid(), this->issued_now_());
+  }
+  if (acme_ok) {
+    identity->cert = nvs_get("ac_cert");
+    identity->key = nvs_get("ac_key");
+    std::string error;
+    if (check_identity(identity->cert, identity->key, ca, error))
+      identity->source = "ACME";
+    else
+      ESP_LOGW(TAG, "The ACME certificate does not check (%s)", error.c_str());
+  }
+#endif
+  // Then an uploaded identity if it still checks; else the self-signed one, made again when the name changed.
+  if (identity->source.empty()) {
+    identity->cert = nvs_get("up_cert");
+    identity->key = nvs_get("up_key");
+    if (!identity->cert.empty()) {
+      std::string error;
+      if (check_identity(identity->cert, identity->key, ca, error)) {
+        identity->source = "uploaded";
+      } else {
+        ESP_LOGW(TAG, "The uploaded certificate no longer checks (%s); using the self-signed one", error.c_str());
+        LockGuard guard(this->lock_);
+        this->identity_error_ = error;
+      }
     }
   }
   if (identity->source.empty()) {
@@ -432,8 +514,8 @@ void PrecisionFeederTls::identity_task_() {
     if (identity->cert.empty() || identity->key.empty() || nvs_get("ss_name") != name) {
       const uint32_t start = millis();
       if (!this->make_self_signed_(identity->cert, identity->key, name)) {
-        ESP_LOGE(TAG, "Could not make a self-signed certificate; HTTPS is off");
-        return;
+        ESP_LOGE(TAG, "Could not make a self-signed certificate");
+        return nullptr;
       }
       nvs_put("ss_cert", identity->cert);
       nvs_put("ss_key", identity->key);
@@ -443,6 +525,15 @@ void PrecisionFeederTls::identity_task_() {
     identity->source = "self-signed";
   }
   identity->prepare();
+  return identity;
+}
+
+void PrecisionFeederTls::identity_task_() {
+  auto identity = this->pick_identity_();
+  if (identity == nullptr) {
+    ESP_LOGE(TAG, "HTTPS is off: no certificate");
+    return;
+  }
   this->set_identity_(identity);
   this->listen_task_();  // runs for as long as the device does
 }
@@ -658,6 +749,9 @@ std::string PrecisionFeederTls::mqtt_text() {
 
 std::string PrecisionFeederTls::status_json() {
   auto identity = this->identity_();
+#ifdef USE_PRECISION_FEEDER_ACME
+  const std::string acme_status = this->acme_text();
+#endif
   std::string j = "{\"https\":{\"ready\":";
   j += this->https_ready_ ? "true" : "false";
   j += ",\"port\":" + std::to_string(this->port_);
@@ -677,8 +771,14 @@ std::string PrecisionFeederTls::status_json() {
   j += ",\"ca\":{\"set\":";
   j += this->ca_pem_.empty() ? "false" : "true";
   j += ",\"subject\":\"" + json_escape(this->ca_text_) + "\"}";
-  j += ",\"mqtt\":{\"status\":\"" + json_escape(this->mqtt_status_) + "\",\"pin\":\"" + this->pin_text_ + "\"}}";
-  return j;
+  j += ",\"mqtt\":{\"status\":\"" + json_escape(this->mqtt_status_) + "\",\"pin\":\"" + this->pin_text_ + "\"}";
+#ifdef USE_PRECISION_FEEDER_ACME
+  j += ",\"acme\":{\"directory\":\"" + json_escape(this->acme_dir_) + "\",\"name\":\"" +
+       json_escape(this->acme_name_in_use_()) + "\",\"status\":\"" + json_escape(acme_status) + "\",\"until\":\"" +
+       (this->issued_now_().same ? this->issued_until_ : std::string()) + "\",\"error\":\"" +
+       json_escape(this->acme_error_) + "\"}";
+#endif
+  return j + "}";
 }
 
 void PrecisionFeederTls::dump_config() {
@@ -828,6 +928,25 @@ void PrecisionFeederTls::handle_request(AsyncWebServerRequest *request, const st
     return;
   }
 
+  if (url == "/feeder/tls/acme/renew") {
+#ifdef USE_PRECISION_FEEDER_ACME
+    {
+      LockGuard guard(this->lock_);
+      if (this->acme_dir_.empty()) {
+        request->send(409, "application/json", "{\"error\":\"acme off\"}");
+        return;
+      }
+      this->acme_failures_ = 0;
+      this->acme_next_try_ = 0;
+    }
+    this->acme_now_ = true;
+    request->send(200, "application/json", "{}");
+#else
+    request->send(404, "application/json", "{}");
+#endif
+    return;
+  }
+
   if (url == "/feeder/tls/mqtt-pin/forget") {
     this->feeder_->run_on_main_loop([this]() { this->forget_mqtt_pin(); });
     request->send(200, "application/json", "{}");
@@ -835,6 +954,389 @@ void PrecisionFeederTls::handle_request(AsyncWebServerRequest *request, const st
   }
   request->send(404, "application/json", "{}");
 }
+
+#ifdef USE_PRECISION_FEEDER_ACME
+// ---- ACME ----------------------------------------------------------------------------------------------------
+// The exchange itself is acme.h's Client; this is its I/O: an HTTPS client checked against the trust store, the
+// account key, the CSR. It runs in its own task, at low priority, never on the main loop.
+
+static constexpr uint32_t ACME_CHECK_MS = 30000;
+static constexpr size_t ACME_MAX_BODY = 16384;  // a chain of a few certificates; ACME's JSON is far smaller
+
+static bool make_p256(mbedtls_pk_context *pk) {
+  return mbedtls_pk_setup(pk, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY)) == 0 &&
+         mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(*pk), rng, nullptr) == 0;
+}
+
+static std::string key_pem(mbedtls_pk_context *pk) {
+  std::vector<unsigned char> buf(800);
+  std::string out;
+  if (mbedtls_pk_write_key_pem(pk, buf.data(), buf.size()) == 0)
+    out = reinterpret_cast<const char *>(buf.data());
+  std::fill(buf.begin(), buf.end(), 0);
+  return out;
+}
+
+class AcmeIo : public tls::acme::Io {
+ public:
+  AcmeIo(PrecisionFeederTls *parent, mbedtls_pk_context *account, const std::string &ca)
+      : parent_(parent), account_(account), ca_(ca) {
+    mbedtls_pk_init(&this->cert_key);
+  }
+  ~AcmeIo() override { mbedtls_pk_free(&this->cert_key); }
+
+  mbedtls_pk_context cert_key;  // the certificate's new key, made by csr()
+
+  tls::acme::Answer request(tls::acme::Method method, const std::string &url, const std::string &body) override {
+    tls::acme::Answer a;
+    esp_http_client_config_t cfg{};
+    cfg.url = url.c_str();
+    cfg.method = method == tls::acme::Method::GET    ? HTTP_METHOD_GET
+                 : method == tls::acme::Method::HEAD ? HTTP_METHOD_HEAD
+                                                     : HTTP_METHOD_POST;
+    cfg.cert_pem = this->ca_.c_str();  // the server is always checked against the trust store, with its name
+    cfg.timeout_ms = 15000;
+    cfg.disable_auto_redirect = true;
+    cfg.buffer_size = 1024;  // a response header line (Link, Location) must fit
+    cfg.event_handler = on_event;
+    cfg.user_data = &a;
+    esp_http_client_handle_t c = esp_http_client_init(&cfg);
+    if (c == nullptr)
+      return a;
+    if (method == tls::acme::Method::POST) {
+      esp_http_client_set_header(c, "Content-Type", "application/jose+json");
+      esp_http_client_set_post_field(c, body.c_str(), static_cast<int>(body.size()));
+    }
+    const esp_err_t err = esp_http_client_perform(c);
+    a.status = esp_http_client_get_status_code(c);
+    esp_http_client_cleanup(c);
+    a.ok = err == ESP_OK;
+    if (!a.ok)
+      ESP_LOGW(TAG, "ACME: %s %s", url.c_str(), esp_err_to_name(err));
+    return a;
+  }
+
+  std::string jwk() override {
+    // The public key's DER ends with the uncompressed point: 0x04, X, Y.
+    unsigned char der[160];
+    const int len = mbedtls_pk_write_pubkey_der(this->account_, der, sizeof(der));
+    if (len < 65 || der[sizeof(der) - 65] != 0x04)
+      return {};
+    const unsigned char *xy = der + sizeof(der) - 64;
+    return tls::acme::jwk_p256(xy, xy + 32);
+  }
+
+  std::string sha256(const std::string &data) override {
+    unsigned char h[32];
+    mbedtls_sha256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), h, 0);
+    return std::string(reinterpret_cast<const char *>(h), sizeof(h));
+  }
+
+  std::string sign(const std::string &input) override {
+    unsigned char h[32], der[MBEDTLS_ECDSA_MAX_LEN];
+    uint8_t raw[64];
+    size_t len = 0;
+    mbedtls_sha256(reinterpret_cast<const unsigned char *>(input.data()), input.size(), h, 0);
+    if (mbedtls_pk_sign(this->account_, MBEDTLS_MD_SHA256, h, sizeof(h), der, sizeof(der), &len, rng, nullptr) != 0 ||
+        !tls::acme::der_to_raw(der, len, raw))
+      return {};
+    return std::string(reinterpret_cast<const char *>(raw), sizeof(raw));
+  }
+
+  std::string csr(const std::string &name) override {
+    mbedtls_pk_free(&this->cert_key);
+    mbedtls_pk_init(&this->cert_key);
+    if (!make_p256(&this->cert_key))
+      return {};
+    mbedtls_x509write_csr req;
+    mbedtls_x509write_csr_init(&req);
+    mbedtls_x509_san_list san{};
+    san.node.type = MBEDTLS_X509_SAN_DNS_NAME;
+    san.node.san.unstructured_name.p = reinterpret_cast<unsigned char *>(const_cast<char *>(name.c_str()));
+    san.node.san.unstructured_name.len = name.size();
+    const std::string dn = "CN=" + name;
+    std::vector<unsigned char> der(700);
+    mbedtls_x509write_csr_set_key(&req, &this->cert_key);
+    mbedtls_x509write_csr_set_md_alg(&req, MBEDTLS_MD_SHA256);
+    int len = -1;
+    if (mbedtls_x509write_csr_set_subject_name(&req, dn.c_str()) == 0 &&
+        mbedtls_x509write_csr_set_subject_alternative_name(&req, &san) == 0)
+      len = mbedtls_x509write_csr_der(&req, der.data(), der.size(), rng, nullptr);  // written at the buffer's end
+    mbedtls_x509write_csr_free(&req);
+    if (len <= 0)
+      return {};
+    return tls::acme::b64url(der.data() + der.size() - len, static_cast<size_t>(len));
+  }
+
+  void serve(const std::string &token, const std::string &key_authorization) override {
+    this->parent_->set_acme_challenge_(token, key_authorization);
+  }
+
+  void sleep_ms(uint32_t ms) override { vTaskDelay(pdMS_TO_TICKS(ms)); }
+
+ protected:
+  static esp_err_t on_event(esp_http_client_event_t *evt) {
+    auto *a = static_cast<tls::acme::Answer *>(evt->user_data);
+    if (evt->event_id == HTTP_EVENT_ON_HEADER) {
+      if (strcasecmp(evt->header_key, "Replay-Nonce") == 0)
+        a->nonce = evt->header_value;
+      else if (strcasecmp(evt->header_key, "Location") == 0)
+        a->location = evt->header_value;
+    } else if (evt->event_id == HTTP_EVENT_ON_DATA && a->body.size() + evt->data_len <= ACME_MAX_BODY) {
+      a->body.append(static_cast<const char *>(evt->data), evt->data_len);
+    }
+    return ESP_OK;
+  }
+
+  PrecisionFeederTls *parent_;
+  mbedtls_pk_context *account_;
+  const std::string &ca_;
+};
+
+/// What ACME issued, checked before it is kept: the chain parses, its key is the one the CSR was made with, and it
+/// verifies against the trust store for the name asked for.
+static bool check_issued(const std::string &chain, mbedtls_pk_context *key, const std::string &ca,
+                         const std::string &name, std::string &error) {
+  mbedtls_x509_crt crt, anchor;
+  mbedtls_x509_crt_init(&crt);
+  mbedtls_x509_crt_init(&anchor);
+  uint32_t flags = 0;
+  bool ok = false;
+  if (mbedtls_x509_crt_parse(&crt, reinterpret_cast<const unsigned char *>(chain.c_str()), chain.size() + 1) != 0)
+    error = "the certificate does not parse";
+  else if (mbedtls_pk_check_pair(&crt.pk, key, rng, nullptr) != 0)
+    error = "the certificate is not for the key asked with";
+  else if (mbedtls_x509_crt_parse(&anchor, reinterpret_cast<const unsigned char *>(ca.c_str()), ca.size() + 1) != 0 ||
+           mbedtls_x509_crt_verify(&crt, &anchor, nullptr, name.c_str(), &flags, nullptr, nullptr) != 0)
+    error = "the certificate does not verify against the trust store";
+  else
+    ok = true;
+  mbedtls_x509_crt_free(&crt);
+  mbedtls_x509_crt_free(&anchor);
+  return ok;
+}
+
+static void acme_entry(void *arg) {
+  static_cast<PrecisionFeederTls *>(arg)->acme_task_();
+  vTaskDelete(nullptr);
+}
+
+static void reselect_entry(void *arg) {
+  static_cast<PrecisionFeederTls *>(arg)->reselect_task_();
+  vTaskDelete(nullptr);
+}
+
+std::string PrecisionFeederTls::acme_name_in_use_() {
+  return this->acme_name_.empty() ? this->local_name_() : this->acme_name_;
+}
+
+tls::acme::Issued PrecisionFeederTls::issued_now_() {
+  tls::acme::Issued c = this->issued_;
+  c.same = c.have && !this->acme_dir_.empty() && this->issued_dir_ == this->acme_dir_ &&
+           this->issued_name_ == this->acme_name_in_use_();
+  return c;
+}
+
+void PrecisionFeederTls::set_acme_directory(const std::string &url) {
+  LockGuard guard(this->lock_);
+  if (url == this->acme_dir_)
+    return;
+  this->acme_dir_ = url;
+  this->acme_failures_ = 0;
+  this->acme_next_try_ = 0;
+  this->acme_error_.clear();
+  if (this->started_)
+    this->reselect_ = true;  // ACME's certificate is served, or no longer, at once
+}
+
+void PrecisionFeederTls::set_acme_name(const std::string &name) {
+  LockGuard guard(this->lock_);
+  if (name == this->acme_name_)
+    return;
+  this->acme_name_ = name;
+  this->acme_failures_ = 0;
+  this->acme_next_try_ = 0;
+  this->acme_error_.clear();
+  if (this->started_)
+    this->reselect_ = true;
+}
+
+std::string PrecisionFeederTls::acme_challenge(const std::string &token) {
+  LockGuard guard(this->lock_);
+  return !token.empty() && token == this->challenge_token_ ? this->challenge_auth_ : std::string();
+}
+
+void PrecisionFeederTls::set_acme_challenge_(const std::string &token, const std::string &key_authorization) {
+  LockGuard guard(this->lock_);
+  this->challenge_token_ = token;
+  this->challenge_auth_ = key_authorization;
+}
+
+static std::string utc_text(int64_t t) {
+  const time_t tt = static_cast<time_t>(t);
+  struct tm tm {};
+  gmtime_r(&tt, &tm);
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M UTC", &tm);
+  return buf;
+}
+
+std::string PrecisionFeederTls::acme_text() {
+  const int64_t now = std::time(nullptr);
+  const bool clock = clock_valid();
+  LockGuard guard(this->lock_);
+  if (this->acme_dir_.empty())
+    return "off";
+  if (this->acme_running_ && !this->challenge_token_.empty())
+    return "asking for a certificate for " + this->acme_name_in_use_() + " (challenge served)";
+  if (this->acme_running_)
+    return "asking for a certificate for " + this->acme_name_in_use_();
+  const tls::acme::Issued c = this->issued_now_();
+  std::string t = c.same ? "certificate for " + this->issued_name_ + " until " + utc_text(c.not_after) +
+                               ", renewed from " + utc_text(tls::acme::renew_at(c))
+                         : std::string("no certificate yet");
+  if (!this->acme_error_.empty()) {
+    t += "; failed: " + this->acme_error_;
+    if (this->acme_next_try_ > now)
+      t += "; next try in " + std::to_string((this->acme_next_try_ - now + 59) / 60) + " min";
+  }
+  if (!clock)
+    t += " (waiting for a valid clock)";
+  return t;
+}
+
+void PrecisionFeederTls::serve_identity_(std::shared_ptr<TlsIdentity> identity) {
+  if (identity == nullptr)
+    return;
+  auto current = this->identity_();
+  if (current != nullptr && current->facts.fingerprint == identity->facts.fingerprint)
+    return;
+  ESP_LOGI(TAG, "HTTPS now serves the %s certificate for %s until %s", identity->source.c_str(),
+           identity->facts.dns.c_str(), identity->facts.not_after.c_str());
+  this->set_identity_(std::move(identity));  // new sessions get it; open ones keep theirs to the end
+}
+
+void PrecisionFeederTls::acme_check_() {
+  // Every 30 s once HTTPS runs, or at once when asked (renew now, settings changed). Main loop: cheap, no I/O.
+  if (!this->https_ready_ || this->acme_running_)
+    return;
+  const bool asked = this->acme_now_ || this->reselect_;
+  if (!asked && millis() - this->acme_checked_ < ACME_CHECK_MS)
+    return;
+  this->acme_checked_ = millis();
+  const int64_t now = std::time(nullptr);
+  const bool clock = clock_valid();
+  tls::acme::Issued issued;
+  bool on;
+  int64_t next_try;
+  {
+    LockGuard guard(this->lock_);
+    issued = this->issued_now_();
+    on = !this->acme_dir_.empty();
+    next_try = this->acme_next_try_;
+  }
+  if (!on)
+    this->acme_now_ = false;
+  auto current = this->identity_();
+  const bool serving_acme = current != nullptr && current->source == "ACME";
+  void (*entry)(void *) = nullptr;
+  if (on && clock && (this->acme_now_ || tls::acme::due(now, clock, issued, next_try))) {
+    this->acme_now_ = false;
+    this->reselect_ = false;  // the run picks the identity at its end
+    entry = acme_entry;
+  } else if (this->reselect_.exchange(false) || (serving_acme && !tls::acme::servable(now, clock, issued))) {
+    // Settings changed, or ACME's certificate expired (a failed renewal kept it until now): the next best one.
+    entry = reselect_entry;
+  }
+  if (entry == nullptr)
+    return;
+  this->acme_running_ = true;
+  if (xTaskCreate(entry, "tls_acme", BIG_STACK, this, 2, nullptr) != pdPASS)
+    this->acme_running_ = false;
+}
+
+void PrecisionFeederTls::reselect_task_() {
+  this->serve_identity_(this->pick_identity_());
+  this->acme_running_ = false;
+}
+
+void PrecisionFeederTls::acme_task_() {
+  std::string dir, name, ca;
+  {
+    LockGuard guard(this->lock_);
+    dir = this->acme_dir_;
+    name = this->acme_name_in_use_();
+    ca = this->ca_pem_;
+  }
+  const uint32_t start = millis();
+  std::string error, chain, key;
+  if (ca.empty()) {
+    error = "no CA certificate in the trust store (the ACME server is checked against it)";
+  } else {
+    // The account key: made at the first run and kept, so the server finds the same account every time.
+    mbedtls_pk_context account;
+    mbedtls_pk_init(&account);
+    std::string pem = nvs_get("ac_acct");
+    bool have = !pem.empty() && mbedtls_pk_parse_key(&account, reinterpret_cast<const unsigned char *>(pem.c_str()),
+                                                     pem.size() + 1, nullptr, 0, rng, nullptr) == 0;
+    std::fill(pem.begin(), pem.end(), '\0');
+    if (!have) {
+      mbedtls_pk_free(&account);
+      mbedtls_pk_init(&account);
+      std::string made;
+      have = make_p256(&account) && !(made = key_pem(&account)).empty() && nvs_put("ac_acct", made);
+      std::fill(made.begin(), made.end(), '\0');
+    }
+    if (!have) {
+      error = "could not make the account key";
+    } else {
+      AcmeIo io(this, &account, ca);
+      tls::acme::Client client(io);
+      const tls::acme::Result r = client.run(dir, name);
+      if (!r.ok) {
+        error = r.error;
+      } else if (check_issued(r.chain, &io.cert_key, ca, name, error)) {
+        chain = r.chain;
+        key = key_pem(&io.cert_key);
+        if (key.empty())
+          error = "could not keep the certificate's key";
+      }
+    }
+    mbedtls_pk_free(&account);
+  }
+  if (error.empty() &&
+      !(nvs_put("ac_cert", chain) && nvs_put("ac_key", key) && nvs_put("ac_name", name) && nvs_put("ac_dir", dir)))
+    error = "flash";
+  std::fill(key.begin(), key.end(), '\0');
+  const CertFacts f = error.empty() ? facts_of_pem(chain) : CertFacts{};
+  {
+    LockGuard guard(this->lock_);
+    if (error.empty()) {
+      this->issued_.have = true;
+      this->issued_.not_before = f.from;
+      this->issued_.not_after = f.until;
+      this->issued_until_ = f.not_after;
+      this->issued_name_ = name;
+      this->issued_dir_ = dir;
+      this->acme_failures_ = 0;
+      this->acme_next_try_ = 0;
+      this->acme_error_.clear();
+    } else {
+      this->acme_failures_++;
+      this->acme_next_try_ = std::time(nullptr) + tls::acme::retry_delay_s(this->acme_failures_);
+      this->acme_error_ = error;
+    }
+  }
+  if (error.empty())
+    ESP_LOGI(TAG, "ACME: certificate for %s until %s (%u ms)", name.c_str(), f.not_after.c_str(),
+             (unsigned) (millis() - start));
+  else
+    ESP_LOGW(TAG, "ACME: no certificate for %s: %s", name.c_str(), error.c_str());
+  // A new certificate is served at once; a failed renewal keeps the current one while it is valid.
+  this->serve_identity_(this->pick_identity_());
+  this->acme_running_ = false;
+}
+#endif
 
 // ---- MQTT ----------------------------------------------------------------------------------------------------
 

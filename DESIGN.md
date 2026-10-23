@@ -901,11 +901,12 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   broker accounts and ACLs (docs/SECURITY.md). Components are never on MQTT (D26; closes open item 24).
 - Cost: about 132 KB of flash (mostly per-entity discovery code, generated for every entity even when internal).
 
-### 9.7 HTTPS, the trust store and MQTT over TLS (firmware 2.4.1, D36 to D39)
+### 9.7 HTTPS, the trust store, MQTT over TLS and ACME (firmware 2.4.1 and 2.4.2, D36 to D40)
 
-`components/precision_feeder_tls`, with `packages/tls.yaml` (HTTPS) and `packages/mqtt_tls.yaml` (MQTT over TLS,
-needs `mqtt.yaml`); both in the prebuilt binaries, HTTPS in the examples. The decisions are plain C++ in
-`tls_policy.h` (`tests/test_tls.cpp`); `precision_feeder_tls.cpp` is the device's side. Measurements and the options
+`components/precision_feeder_tls`, with `packages/tls.yaml` (HTTPS), `packages/mqtt_tls.yaml` (MQTT over TLS,
+needs `mqtt.yaml`) and `packages/acme.yaml` (the certificate from an ACME server, 2.4.2); all three in the prebuilt
+binaries, HTTPS in the examples. The decisions are plain C++ in `tls_policy.h` (`tests/test_tls.cpp`), the ACME
+client in `acme.h` (`tests/test_acme.cpp`); `precision_feeder_tls.cpp` is the device's side. Measurements and the options
 weighed: docs/plans/https-tls.md.
 
 - **HTTPS is a relay (D37).** A task listens on port 443; each connection gets its own task (6 KB stack, about 15 KB
@@ -921,8 +922,29 @@ weighed: docs/plans/https-tls.md.
   certificate chain and key (`up_cert`, `up_key`) win while they still check (every certificate parses, the key
   matches the first one, the chain verifies against the trust store's CA when one is set; dates only once the clock
   is valid); one that no longer checks at a start falls back to the self-signed one, and the HTTPS status says why.
-  A new identity is used after a restart (Restart Needed). The keys are in flash in the clear (no flash encryption,
-  as the other keys: docs/SECURITY.md).
+  An uploaded identity is used after a restart (Restart Needed); ACME's is served at once (below). The keys are in
+  flash in the clear (no flash encryption, as the other keys: docs/SECURITY.md).
+- **ACME (2.4.2, D40).** With ACME Directory set (an `https://` URL; internal, protected), the feeder asks that ACME
+  server (RFC 8555; step-ca on the LAN, say) for a certificate for ACME Name (empty: `<name>.local`) and serves it
+  ahead of an uploaded one. `acme.h` holds everything that is not I/O or cryptography: a small JSON reader, the JWS
+  (ES256: the protected header with `jwk` until the account is known, then `kid`; DER signatures turned into r || s),
+  the exchange (directory, nonce, account, order, each pending authorization through http-01, finalize, polls every
+  2 s for at most a minute each, the certificate), one retry on `badNonce`, the checks on what is asked for (a DNS
+  name without a wildcard; an https directory), and when to ask. The device's side (`AcmeIo`) is esp_http_client
+  checked against the trust store with the server's name (no trust store, no ACME: never unchecked; no public CA
+  bundle), the account key (P-256, made at the first run and kept, `ac_acct`), and a CSR with a new P-256 key for
+  every certificate. The challenge's key authorization is served on port 80 at
+  `/.well-known/acme-challenge/<token>` only for the token being asked about (D38's filter never touches that path).
+  What comes back is checked before it is kept: the chain parses, its key is the CSR's, and it verifies against the
+  trust store for the name. Saved as `ac_cert`, `ac_key`, `ac_name`, `ac_dir` and served at once: new sessions get
+  it, open ones keep theirs. It runs in its own task (10 KB stack, priority 2), never on the main loop, which only
+  checks every 30 s whether it is due: only with a valid clock; at once with no certificate, or one for another name
+  or directory; else two thirds into its lifetime (16 h into step-ca's default 24 h). A failure keeps the current
+  certificate and waits 5 min, 15 min, 1 h, then 3 h between tries; a certificate past its end gives way to the
+  uploaded one, else the self-signed one, without a restart (and never a reboot). Clearing the directory goes back the
+  same way. Status: the ACME text sensor and `GET /feeder/tls`'s `acme`; `POST /feeder/tls/acme/renew` (signed, empty
+  body) asks again now. Flash: about 47 KB (the HTTP client and its parser most of it; its WebSocket transport is
+  turned off).
 - **Port 80 (D38).** Home Assistant's ESPHome integration builds the device's link itself, always
   `http://<address>:<web server port>` (Home Assistant core, `manager.py`), and ESPHome's MQTT discovery sends none,
   so the feeder cannot make Home Assistant show an https link. Instead, with HTTPS Redirect on (the default), a GET of
@@ -939,7 +961,7 @@ weighed: docs/plans/https-tls.md.
   SHA-256 fingerprint, the trust store's subject, MQTT's TLS status and pin). `POST /feeder/tls/ca` (body: the PEM,
   empty clears it), `/feeder/tls/identity` (body: the private key's hex, masked, on the first line, then the chain's
   PEM; empty goes back to the self-signed one), `/feeder/tls/self-signed` (make a new one at the next start),
-  `/feeder/tls/mqtt-pin/forget`. Bodies are raw (`application/octet-stream`; ESPHome's form parser takes at most
+  `/feeder/tls/mqtt-pin/forget`, and since 2.4.2 `/feeder/tls/acme/renew`. Bodies are raw (`application/octet-stream`; ESPHome's form parser takes at most
   1 KB), at most 10 KB. Each is signed with the settings password as the firmware upload is (section 9.5): the
   `?sha256=` parameter must be the body's hash, and the tag covers `<path>\n<sha256>`. The private key is masked with
   `FeederCore::password_unmask_blob` (HMAC-SHA-256 blocks keyed with the password's derived key over the signature's
@@ -1245,7 +1267,8 @@ precision-feeder/
   - Update checks run in the browser, not the feeder. The browser reads a manifest
     from GitHub Pages; the user downloads the image and uploads it. A failed check
     only shows a link to the releases page. The feeder makes no update requests
-    and has no HTTPS client.
+    and has no HTTPS client. (Since 2.4.2, D40, it has one for ACME alone, talking only to the directory the owner
+    sets; it still makes no update requests.)
   - Web auth is not required. A settings password (none by default) protects
     Wi-Fi, hostname, pins, keys, the password, firmware, factory reset, guard
     limits and calibration; never the schedule or feeding. Holding BOOT for 10 s
@@ -1452,6 +1475,11 @@ precision-feeder/
     Redirect, on by default). HTTPS Only (off by default) refuses the rest of port 80, but never the relay, the access
     point's captive portal, ACME's challenge, or anything while HTTPS is not running.
   - D39: with MQTT TLS on, MQTT never falls back to plain text: no CA (or no pin yet) means the client does not start.
+  - D40: ACME (2.4.2, owner's order): an HTTPS client on the feeder, which reverses part of the 2.0.0 appliance
+    decision ("no HTTPS client"; E7 of the TLS plan). It talks only to the ACME directory the owner sets, checked
+    against the trust store; no public CA bundle (E4: out, since MQTT and ACME both use the trust store); http-01
+    only, no dns-01 (E6: it would keep DNS credentials on the feeder). ACME's certificate wins over an uploaded one
+    while ACME is on, and is served without a restart.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1671,9 +1699,18 @@ precision-feeder/
     the event stream through the relay, the signed firmware upload over HTTPS, the redirect from Home Assistant's
     "Visit" link, HTTPS Only with the captive portal, an uploaded chain from a private CA, MQTT checked against a CA
     (port 8883) and pinned on first contact (a self-signed broker; a leaf-only broker refused), and that MQTT never
-    connects in plain text with TLS on.
+    connects in plain text with TLS on. ACME (2.4.2) against step-ca on the LAN: the first certificate, a renewal
+    while a page is open (the new certificate served without a restart), a failure (CA unreachable) keeping the
+    current certificate, expiry falling back to the self-signed one, the heap while the HTTP client runs beside 4
+    HTTPS sessions, and that a 24 h certificate's renewal every 16 h stays quiet.
 
-## 15. Implementation status (v2.4.1)
+## 15. Implementation status (v2.4.2)
+
+2.4.2 (ACME, D40; section 9.7) is built and compiled in every example and both prebuilt configs, with host tests for
+the client against a fake ACME server (`tests/test_acme.cpp`: the exchange, badNonce, a failed challenge, a reused
+authorization, a certificate that never comes, renewal times). The full image is 1,540,671 bytes (84.0% of the
+app slot; 2.4.1: 1,493,615), static RAM 149,779 bytes (2.4.1: 148,779). Not tagged, and not on hardware: the bench's ACME run (docs/BENCH.md) used a scratch
+client, not this one; the checks are in open item 27.
 
 2.4.1 (HTTPS, the trust store and MQTT over TLS, D36 to D39; section 9.7) is built and compiled in every example and
 both prebuilt configs, with host tests for its decisions (`tests/test_tls.cpp`) and for the masked key upload. The full image is
