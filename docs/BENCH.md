@@ -777,3 +777,61 @@ The `full` image built from `release/2.3.0-loose-ends` (M6 of docs/plans/2.3.0-l
   - MQTT `policy/*/set` refused: MQTT is off on the rig; the host tests (tests/test_mqtt.cpp) cover it.
   - A power cut mid-move and a held disc.
 - Left on this 2.3.0 bench build, with its settings, BLE key and Wi-Fi as before.
+
+## HTTPS, ACME and the BLE stacks on the disc rig (2026-10-23, scratch bench builds)
+
+M0 of [docs/plans/https-tls.md](plans/https-tls.md) and [docs/plans/nimble.md](plans/nimble.md), in one run. Five
+scratch images, none of them a release, each shaped like `firmware/full.yaml` (components of 2.3.1, ESPHome 2026.10.0,
+ESP-IDF 5.5.6), flashed over USB from 2.3.0 `full`. The whole 4 MB flash was read first and written back at the end:
+the rig is on its 2.3.0 image again, settings, keys and Wi-Fi as before (only one NVS sector differs, written by the
+first boot).
+
+Every image carries a scratch heap probe and a scratch TLS layer (about 12 KB of heap at idle). The probe samples the
+internal heap every 20 ms; `GET /lab/heap` returns its lowest point since the last read. The TLS layer is a proxy on
+443 relaying to the web server on 80, TLS 1.2 only, ECDSA P-256, at most 4 sessions, session tickets, lean buffers
+(16 KB in, 4 KB out), upload checks and an ACME client. The load ran from the Mac over Wi-Fi. A "session" is one
+connection holding `/events` for 20 s, the way an open page does.
+
+| Image | Flash | Static RAM | Free at idle | BLE costs |
+|---|---|---|---|---|
+| No BLE | 1,331,547 (72.6%) | 134,167 | about 201 KB | |
+| Bluedroid, as ESPHome builds it (today's `full`) | 1,681,367 (91.6%) | 165,367 | about 110 KB | about 91 KB |
+| NimBLE, ESP-IDF's defaults (the scratch stub) | 1,527,727 (83.3%) | 159,099 | about 110 KB | about 91 KB |
+| Bluedroid, controller trimmed (`esp32_ble: max_connections: 1`, 2 controller activities instead of 6, no scanning) | 1,659,307 (90.4%) | 156,327 | about 125 KB | about 76 KB |
+| NimBLE trimmed (1 connection, small buffer pools, no BLE 5 extras, the same controller trim) | 1,478,143 (80.6%) | 146,443 | about 143 KB | about 58 KB |
+
+The stock 2.3.0 `full` (no lab code) read 123.4 KB free at idle, and 120.8 KB with a BLE client connected.
+
+Lowest free heap during the load (KB, several runs where repeated):
+
+| Image | 1 session | 3 sessions | 4 sessions | 10 requests at once |
+|---|---|---|---|---|
+| No BLE | 181 | 137 | 127 to 129 | 124 |
+| Bluedroid, today | 90 | 44 to 52 | 11 to 33 | 15 (the all-time low reached 3) |
+| NimBLE, defaults | 89 | 50 | 33 | 10 (all-time 3) |
+| Bluedroid, trimmed | 106 | 67 to 69 | 51 to 52 | 50 (all-time 35) |
+| NimBLE, trimmed | 121 | 86 to 88 | 68 to 73 | 66 (all-time 52) |
+
+- **BLE is the largest user of heap, not TLS.** Either stack costs about 91 KB with its defaults. NimBLE saves nothing
+  until it is trimmed: its defaults (3 connections, 24 ACL and 30 event buffers, BLE 5 features) are larger than
+  ESPHome's Bluedroid. Trimming the controller saves about 15 KB on Bluedroid. NimBLE, trimmed the same way, saves
+  about 18 KB more (58 KB in all, in line with the 60 to 88 KB quoted on Espressif's forums).
+- **A TLS session costs about 15 KB on top of the plain connection it relays** (one plain `/events` costs about 5 KB,
+  one over TLS about 19 to 22 KB). Four sessions take about 72 KB. The low point varies with how many handshakes
+  overlap.
+- **Four TLS sessions are not safe on today's build:** the heap went down to 3 KB once. Three leave 44 to 52 KB.
+  Trimmed NimBLE leaves 65 KB or more with four.
+- Handshakes: 0.33 to 0.6 s one at a time, 0.7 to 1.4 s with four at once, 0.1 s resumed (tickets work). 100
+  handshakes in a row: no leak (0.6 KB lower after, within the noise). All 10 parallel requests answered (the cap
+  queues the rest).
+- **ACME against a local step-ca works:** http-01, the board's mDNS name, 23.7 s from start to certificate. The
+  certificate and its intermediate are served after a restart, and curl verifies them against the CA's root alone.
+  It needed a firewall rule from the IoT network to the CA (443), and mDNS on the CA host to resolve the board's name.
+  The step-ca default lifetime is 24 hours, so renewal will run about every 16 hours.
+- **BLE, Bluedroid:** advertises the 128-bit service UUID and the name with the MAC suffix; the Device Information
+  Service and the 9 characteristics; MTU 517 with macOS. The NimBLE stub advertised its name only, so the client could
+  not find it by service UUID, and one byte of its UUIDs was in the wrong order: both are scratch bugs, and B5 and B2
+  of the NimBLE plan are there to catch them. macOS kept the same device identifier across the two stacks.
+- One NimBLE run with a BLE client connected was disturbed by another HTTPS client (relay tasks the load did not
+  open), so there is no clean "NimBLE, BLE connected" figure. Not run: MQTT over TLS, PSRAM for TLS, pairing from
+  iOS or Android.

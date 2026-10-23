@@ -1,7 +1,7 @@
 # Plan: BLE on NimBLE instead of Bluedroid (experiment)
 
 Status: **experiment, nothing built.** Branch `experiment/https-tls`, from main at 2.3.1. It follows proposal E9 of
-[https-tls.md](https-tls.md), which left the NimBLE port to its own plan. The decisions below (B1 to B8) are
+[https-tls.md](https-tls.md), which left the NimBLE port to its own plan. The decisions below (B1 to B10) are
 proposals awaiting the owner; none is logged in [DESIGN.md](../../DESIGN.md) yet, and no firmware version is
 assigned.
 
@@ -29,7 +29,8 @@ they are, byte for byte.
   characteristics with the same properties, Secure Connections with bonding, "Just Works" and bonds stored in NVS.
   It took the place of `esp32_ble`, `esp32_ble_server` and our adapter. It had no BleEngine, so it linked
   everything the radio needs and none of the protocol.
-- Compiled only. QEMU has no Bluetooth radio, so nothing was run, and **heap at run time is not measured.**
+- Compiled only at first; QEMU has no Bluetooth radio. Heap at run time was measured later on the board (M0, "On
+  the board" below).
 
 ### Facts from ESPHome (2026.10.0)
 
@@ -80,8 +81,8 @@ touches the stack:
 
   NimBLE puts more of its code in IRAM. On the S3, IRAM and DRAM are carved from the same 512 KB of SRAM, so the
   extra IRAM takes back most of the DRAM saving.
-- **Heap at run time is the number that matters for TLS** ([https-tls.md](https-tls.md), "Heap"), and it is not
-  measured. Figures quoted on Espressif's forums (owner, 2026-10-23; **unverified**, the configuration and chip
+- **Heap at run time is the number that matters for TLS** ([https-tls.md](https-tls.md), "Heap"). It was measured
+  in M0 ("On the board" below). Figures quoted on Espressif's forums (owner, 2026-10-23; **unverified**, the configuration and chip
   behind them not known) put NimBLE at about 13 to 14 KB of static DRAM and 47 KB of static IRAM. They put its
   total RAM at about 60 to 88 KB against 150 to 200 KB or more for Bluedroid, a saving of about 100 KB. Our static
   figures agree in shape. So nearly all of that saving would have to be heap Bluedroid takes at start: its task
@@ -90,6 +91,32 @@ touches the stack:
   smaller. M0 measures it on the board.
 - With NimBLE and the whole TLS set (TLS 1.2 only, ACME, upload checks), the image would be about 1.53 MB (83%)
   instead of about 1.68 MB (92%).
+
+### On the board (M0, 2026-10-23)
+
+Measured on the disc rig with five scratch images, all with the same TLS lab code; the details are in
+[docs/BENCH.md](../BENCH.md), "HTTPS, ACME and the BLE stacks on the disc rig". Heap free at idle:
+
+| Image | Free at idle | BLE costs |
+|---|---|---|
+| No BLE | about 201 KB | |
+| Bluedroid, as ESPHome builds it | about 110 KB | about 91 KB |
+| NimBLE, ESP-IDF's defaults | about 110 KB | about 91 KB |
+| Bluedroid, controller trimmed | about 125 KB | about 76 KB |
+| NimBLE trimmed | about 143 KB | about 58 KB |
+
+- **NimBLE saves nothing as it comes.** ESP-IDF's NimBLE defaults (3 connections, 24 ACL and 30 event buffers,
+  BLE 5 features, 6 controller activities) cost as much heap as ESPHome's Bluedroid.
+- **Most of the gain is the controller, which both stacks share.** One connection, 2 controller activities and no
+  scanning save about 15 KB on Bluedroid with three YAML lines (`esp32_ble: max_connections: 1` and
+  `sdkconfig_options`).
+- **Trimmed NimBLE saves about 18 KB more than trimmed Bluedroid**, about 33 KB more than today's build, and about
+  180 KB of flash. Its total, about 58 KB, is in line with the forum figures. The forum's 150 to 200 KB for Bluedroid
+  is not what this build pays: ESPHome already trims it to about 91 KB.
+- With four TLS sessions, the lowest free heap was 11 to 33 KB on today's Bluedroid (3 KB once), 51 to 52 KB on
+  trimmed Bluedroid and 68 to 73 KB on trimmed NimBLE.
+- The stub advertised its name only (no service UUID) and had one UUID byte out of order: scratch bugs, which B5 and
+  the consistency test (B2) are there to catch. macOS kept the same device identifier across the stacks.
 
 ## Proposed design
 
@@ -147,15 +174,17 @@ NimBLE calls us from its host task; BleEngine and FeederCore are main-loop only.
 | B6 | **The protocol stays at version 2.** Nothing a client sees changes apart from the stack. The firmware gets a minor version, and the CHANGELOG says that existing bonds must be made again |
 | B7 | **NimBLE's memory stays in internal RAM.** PSRAM (`CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL`) is a lever, used only if the board's heap needs it and only once it is shown to work there (as E10 in [https-tls.md](https-tls.md)) |
 | B8 | **Order with the TLS plan: after MQTT over TLS, before HTTPS** (see "Order" below). The HTTPS server is what needs the heap, and this plan is the largest way to free it short of PSRAM |
+| B9 | **The port ships trimmed** (one connection, small buffer pools, no BLE 5 extras, the controller trim): ESP-IDF's NimBLE defaults save nothing (M0). The values are measured on the board and kept in the component |
+| B10 | **Trim Bluedroid's controller first, on its own** (`esp32_ble: max_connections: 1`, 2 controller activities, no scanning): about 15 KB for three YAML lines, useful whether or not this port happens. It checks that nothing on the feeder needs scanning or a second link |
 
 ## Order (with the TLS plan)
 
-1. **One bench run for both plans' M0** (the owner's OK to flash). Free heap on today's Bluedroid build, then on
-   the scratch NimBLE build, then 1, 3 and 4 HTTPS sessions on each. Both scratch builds and the heap probe
-   already exist.
-2. **MQTT over TLS** (TLS plan M1). It is the audit finding, it costs about 1 KB of flash and one TLS session, and
+1. **One bench run for both plans' M0.** Done 2026-10-23 (BENCH.md): trimmed NimBLE frees about 33 KB over
+   today's build, of which about 15 KB comes from the controller trim alone (B10).
+2. **The controller trim on Bluedroid** (B10), then **MQTT over TLS** (TLS plan M1). It is the audit finding, it costs about 1 KB of flash and one TLS session, and
    it fits with either BLE stack, so it does not wait for this port.
-3. **This plan, M1 to M5**, if M0 shows NimBLE frees enough heap to matter for HTTPS.
+3. **This plan, M1 to M5.** M0 says it is worth it: about 18 KB of heap over trimmed Bluedroid and about 180 KB
+   of flash, enough for four TLS sessions with 65 KB or more to spare.
 4. **HTTPS** (TLS plan M2 to M6), tuned once, on the BLE stack that ships.
 
 What M0 can change:
@@ -217,7 +246,7 @@ Each step is one commit, with `tools/check.sh` green and DESIGN.md and the guide
 
 | Risk | Mitigation |
 |---|---|
-| The heap gain is smaller than hoped (only static RAM is measured, -6 KB net; the forum's ~100 KB is unverified) | M0 measures heap on the board before any code is written; if the gain is small, the port is still worth about 140 KB of flash, and the owner decides whether that is enough |
+| The heap gain is smaller than hoped | Measured in M0: about 18 KB over trimmed Bluedroid, about 33 KB over today's, but only when NimBLE is trimmed (B9). M4 measures the real adapter against these figures |
 | A thread bug: an engine call from NimBLE's task, or a read that sees half a value | Every NimBLE callback only copies into a queue or reads a locked buffer; BleEngine is called only from `loop()`; host tests for the queue; the M4 soak and retry storm |
 | A write is lost when the queue is full | The client gets an ATT error, not silence, and retries; the retry cache makes an exact retry safe; the queue is sized from the protocol (one client, one write at a time) |
 | Bonded clients cached the old GATT handles, and a write lands on the wrong characteristic after the update | Every write's tag is bound to its characteristic (DESIGN.md section 10), so a write on the wrong one is refused and cannot act; Service Changed tells bonded clients to discover again (checked in M0) |

@@ -83,6 +83,30 @@ browsers at once"):
 TLS 1.3 with four sessions would leave about 33 KB, too little; TLS 1.2 about 80 KB. NimBLE should give some RAM
 back (static RAM 6 KB less; its heap use is not measured).
 
+### On the board (M0, 2026-10-23)
+
+The disc rig, scratch images with the TLS proxy (TLS 1.2 only, tickets, lean buffers, at most 4 sessions), each
+session holding `/events` as an open page does. Details in [docs/BENCH.md](../BENCH.md), "HTTPS, ACME and the BLE
+stacks on the disc rig".
+
+| BLE in the image | Free at idle | Lowest, 3 sessions | Lowest, 4 sessions |
+|---|---|---|---|
+| None | about 201 KB | 137 KB | 127 to 129 KB |
+| Bluedroid, today | about 110 KB | 44 to 52 KB | 11 to 33 KB (3 KB once) |
+| Bluedroid, controller trimmed | about 125 KB | 67 to 69 KB | 51 to 52 KB |
+| NimBLE, trimmed | about 143 KB | 86 to 88 KB | 68 to 73 KB |
+
+- A TLS session costs about 15 KB on top of the plain connection it relays, close to QEMU's figure. BLE costs much
+  more (58 to 91 KB, see [nimble.md](nimble.md)).
+- **Four sessions are not safe on today's build; three are.** With the controller trim or NimBLE, four are.
+- Handshakes take 0.33 to 0.6 s (0.7 to 1.4 s with four at once); resumption works (0.1 s); 100 handshakes leak
+  nothing.
+- **ACME works against a local step-ca** (http-01, the board's mDNS name): 23.7 s to a certificate the board then
+  serves with its intermediate, verified by curl against the root alone. It needed a firewall rule from the IoT
+  network to the CA, and mDNS on the CA host. step-ca's default lifetime is 24 hours, so renewal runs about every 16
+  hours and must be cheap and quiet.
+- Not measured: MQTT over TLS, PSRAM for the TLS buffers.
+
 ### Other findings
 
 - **Parallel requests are reset on plain HTTP too.** Six or ten at once to ESPHome's own server on port 80: some are
@@ -192,16 +216,15 @@ can allow `*.local`. For development, a local step-ca can run on the Mac and be 
 | E5 | "Allow insecure TLS" for MQTT pins the broker's certificate on first contact instead of trusting anything. Which way it is built (upstream change or our own transport) is decided in M0 |
 | E6 | HTTPS identity: self-signed by default, uploaded, or ACME (http-01 only; no dns-01, which would store DNS credentials on the feeder) |
 | E7 | **ACME reverses part of a logged decision.** The 2.0.0 appliance decision (DESIGN.md section 13) says the feeder "makes no update requests and has no HTTPS client". ACME needs an HTTPS client, talking only to the ACME server the owner configures. The no-update-requests part stays |
-| E8 | At most 3 or 4 TLS sessions, a short idle timeout. Measured on the board before it is fixed |
+| E8 | At most 3 TLS sessions on Bluedroid as it is today (4 went down to 3 KB free on the board), 4 with the controller trim or trimmed NimBLE; a short idle timeout |
 | E9 | NimBLE: port the BLE adapter to NimBLE in its own plan, [nimble.md](nimble.md) (BleEngine and the protocol stay; only the radio side changes). Not needed for TLS on flash, but it gives back about 140 KB of flash, and forum figures (unverified) claim about 100 KB of RAM, nearly all heap. It comes after M1 and before M2 if M0 confirms the heap gain (see "Order") |
 | E10 | PSRAM for TLS buffers only if the board's heap needs it, and only after it is shown to work on the board |
 
 ## Order (with the NimBLE plan)
 
-1. **M0 of both plans in one bench run** (the owner's OK to flash): heap on Bluedroid and on the scratch NimBLE
-   build, each with 1, 3 and 4 HTTPS sessions.
-2. **M1, MQTT over TLS.** The audit finding; about 1 KB of flash and one session, so it fits with either BLE stack.
-3. **The NimBLE port** ([nimble.md](nimble.md), M1 to M5), if M0 shows it frees enough heap to matter for HTTPS.
+1. **M0 of both plans in one bench run.** Done 2026-10-23 ("On the board" above).
+2. **The Bluedroid controller trim** ([nimble.md](nimble.md), B10), then **M1, MQTT over TLS.** The audit finding; about 1 KB of flash and one session, so it fits with either BLE stack.
+3. **The NimBLE port** ([nimble.md](nimble.md), M1 to M5): M0 shows it is worth it, trimmed.
 4. **M2 to M6, HTTPS**, tuned once on the BLE stack that ships.
 
 If NimBLE frees little and Bluedroid has room, M2 follows M1 directly. If neither leaves room, PSRAM (E10) is the
