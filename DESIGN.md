@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **release 2.2.0, tested on bench builds and its release images** (section 15). This is the current design;
+Status: **release 2.3.0, tested on bench builds** (section 15). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
@@ -1557,7 +1557,13 @@ precision-feeder/
     (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
     ESPHome upgrade.
 
-## 15. Implementation status (v2.2.0)
+## 15. Implementation status (v2.3.0)
+
+2.3.0 (loose ends, D28 to D32): protected settings read-only over MQTT, clearing the BLE key, forgetting the Wi-Fi
+network, and picking it from a scan. On the disc rig (docs/BENCH.md): the upgrade from 2.2.0 kept every value, and a
+scan while connected kept the link. Not yet on hardware: forgetting the network and clearing the BLE key (host tests
+and the mock device only).
+
 
 2.2.0 (who can change what, section 10.2; MQTT's own topics, section 9.6) carries 2.1.2, below. Its release images ran
 on both rigs: the servo's upgrade from 2.1.1 kept every value, and Home Assistant removed the hidden entities by

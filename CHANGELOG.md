@@ -6,7 +6,10 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## 2.3.0: loose ends (in progress)
+## 2.3.0: loose ends (2026-10-23)
+
+**Upgrade note:** if you turned on **MQTT Can Change Guard Limits** in 2.2.0, it is gone and MQTT can no longer change
+the guard's limits; change them in the web app (Configuration). Everything else is kept.
 
 - **Protected settings are read-only over MQTT.** The feed guard's limits (daily cap, gaps, portions per command) are
   still published on their MQTT topics, but changing them there is refused ("not allowed", with the value in force).
