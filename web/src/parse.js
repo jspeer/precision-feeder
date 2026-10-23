@@ -24,6 +24,13 @@ function parseWifiNetworks(json) {
   return out;
 }
 
+/** Wi-Fi list after a scan (2.3.1): keeps what the user picked ('' is Other), listed if the scan missed it. */
+function wifiChoice(shown, found, value, touched) {
+  const has = found.some(n => n.hex === value), old = !has && shown.find(n => n.hex === value);
+  if (!touched) return { networks: found, value: has ? value : found.length ? found[0].hex : '' };
+  return { networks: old ? found.concat(old) : found, value };
+}
+
 /** "a=1;b=x" -> {a: '1', b: 'x'} (BLE Info, BLE Session). */
 function parseKV(text) {
   const out = {};

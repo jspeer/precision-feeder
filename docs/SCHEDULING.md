@@ -80,7 +80,7 @@ feeder's log says why (for example `Event time '25:00' not understood`).
 | Profile Fast Days | weekdays with no feeding in this profile | days, as below |
 | Edit Event | which of the profile's four events the controls below change | 1 to 4 |
 | Event Anchor | what the time is measured from | clock, sunrise, sunset |
-| Event Time | clock: time of day. Sunrise/sunset: offset from the sun event | clock: `HH:MM`, 00:00 to 23:59 (`8:30` is fine). Sun: `+HH:MM` or `-HH:MM`, up to 12 hours either way; `+90` means plus 90 minutes; no sign means plus |
+| Event Time | clock: time of day. Sunrise/sunset: offset from the sun event | clock: `HH:MM`, 00:00 to 23:59 (`8:30` is fine). Sun: `+HH:MM` or `-HH:MM`, up to 12 hours either way; `+90` means plus 90 minutes; no sign means plus. Nothing may follow the time (`08:00 PM` is refused) |
 | Event Days | weekdays this event feeds on | `all` (or `daily`), `none`, `weekdays` (Mon to Fri), `weekend`, or day names separated by commas or spaces: `mon,wed,fri` (`monday` works too) |
 | Event Portions | portions this event feeds | 1 to 6 (the tray's capacity) |
 | Event Enabled | whether the event runs | on / off |

@@ -1050,6 +1050,28 @@ static void test_calibration_stop_and_power_cut() {
   }
 }
 
+// ---- Codex review of 2.3.0: unknown in RAM is not unknown on flash (2.3.1) ----------------------------------------
+static void test_calibration_after_failed_reload() {
+  current = "2.3.1: a refused reload, then calibration, with saves failing";
+  Disc d;
+  CHECK(!d.f->position_unknown() && d.flash.state.unknown == 0, "a trusted position");
+  d.flash.fail_saves = true;
+  const int32_t at = d.ticks();
+  d.f->tray_reload();
+  d.run(300);
+  CHECK(d.f->position_unknown(), "the reload is refused: unknown in RAM");
+  CHECK(d.flash.state.unknown == 0, "flash still holds the trusted position");
+  d.f->set_calibration_mode(true);
+  CHECK(d.f->calibration_action(N20_CAL_START) == Result::STORAGE_FAILED, "the direction test is refused");
+  d.run(300);
+  CHECK(d.ticks() == at, "the disc did not move");
+  d.flash.fail_saves = false;
+  CHECK(d.f->calibration_action(N20_CAL_START) == Result::OK, "once saves work, it starts");
+  CHECK(d.flash.state.unknown == 1, "with unknown on flash first");
+  d.run(300);
+  CHECK(d.ticks() != at, "and the disc moves");
+}
+
 int main() {
   test_motion_matches_sketch();
   test_mechanism_feeds();
@@ -1069,6 +1091,7 @@ int main() {
   test_motor_pins();
   test_single_binary();
   test_calibration_stop_and_power_cut();
+  test_calibration_after_failed_reload();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

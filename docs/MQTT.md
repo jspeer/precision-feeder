@@ -56,7 +56,7 @@ Commands without a state:
 
 | Topic | Payload |
 |---|---|
-| `oneshot/add` | `YYYY-MM-DD HH:MM PORTIONS` in the feeder's time (portions optional, 1 by default). The same feed again is not added twice |
+| `oneshot/add` | `YYYY-MM-DD HH:MM PORTIONS` in the feeder's time (portions optional, 1 by default; nothing else, so `08:00 PM` is refused). The same feed again is not added twice |
 | `oneshot/clear` | anything: removes every one-shot feed |
 | `schedule/<P>/restart_cycle` | anything: the every-N-days cycle starts today (needs the clock) |
 

@@ -6,6 +6,22 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.3.1: fixes from a code review of 2.3.0 (2026-10-23)
+
+Fixes for the three findings of a Codex review of 2.3.0, each reproduced in a host test first. No settings change.
+
+- **Calibration after a failed save no longer moves the tray.** If saving to flash failed (a reload refused because
+  its save failed), the position was unknown in memory but still trusted on flash, and a calibration move was let
+  through: a power cut then could bring the old position back. A calibration move now waits until "unknown" is
+  really on flash, and is refused (`STORAGE_FAILED`) while saves fail.
+- **Event times and one-shot feeds are read strictly.** `08:00 PM`, `08:00garbage` or a huge hour (`71582789:00`)
+  was taken as some other time, over MQTT or Home Assistant; now the whole text must be a time (`HH:MM`, or for the
+  sun `+HH:MM`, `-HH:MM`, `+90`; spaces around it are fine) or it is refused and the event is unchanged. One-shot
+  feeds take `YYYY-MM-DD HH:MM` and nothing after it.
+- **The Join dialog keeps your choice.** Picking "Other network..." (or a network) while a scan was still running
+  was undone when the scan finished, so Join could go to another network than the one typed. A choice you made is
+  now kept, and a network you picked stays listed if the next scan misses it.
+
 ## 2.3.0: loose ends (2026-10-23)
 
 **Upgrade note:** if you turned on **MQTT Can Change Guard Limits** in 2.2.0, it is gone and MQTT can no longer change

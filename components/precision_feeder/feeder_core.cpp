@@ -137,6 +137,9 @@ void FeederCore::clamp_loaded_() {
 
 bool FeederCore::save_state_(bool flush) {
   const bool ok = this->hal_save_state(this->state_, flush);
+  // Whether flash surely says "unknown": only a flushed save that worked says so; any save of a known position may
+  // have reached flash, and a failed one leaves flash as it was.
+  this->unknown_durable_ = this->state_.unknown && ((flush && ok) || this->unknown_durable_);
   if (flush) {
     if (!ok && !this->storage_fault_)
       this->log_(LogLevel::kError, "Saving the tray state to flash failed");
@@ -448,6 +451,7 @@ void FeederCore::core_start(const Settings *settings, const Calibration *calibra
     this->log_(LogLevel::kInfo, "No saved calibration, using the YAML pulse range and zero offsets");
   if (state != nullptr && state->version == STATE_VERSION) {
     this->state_ = *state;
+    this->unknown_durable_ = this->state_.unknown != 0;
   } else {
     this->log_(LogLevel::kInfo, "No saved tray state, assuming a freshly loaded tray at position 0");
   }
@@ -573,17 +577,21 @@ bool FeederCore::begin_positioning_(uint8_t target) {
 }
 
 bool FeederCore::invalidate_position_(const char *why) {
-  if (this->state_.unknown)
+  // Unknown in RAM is not enough: a failed save (a refused reload) can leave a trusted position in flash, which a
+  // power cut would bring back after this move (Codex review, 2.3.0).
+  if (this->state_.unknown && this->unknown_durable_)
     return true;
+  const bool was_unknown = this->state_.unknown;
   this->state_.unknown = 1;
   this->state_.moving_to = NO_MOVE;
   if (!this->save_state_(true)) {
     this->log_(LogLevel::kError, "Could not save the tray position as unknown: refused");
-    this->state_.unknown = 0;
+    this->state_.unknown = was_unknown;
     return false;
   }
   this->project_dirty_ = true;
-  this->log_(LogLevel::kWarn, "Tray position is now UNKNOWN (%s): reload the tray before feeding", why);
+  if (!was_unknown)
+    this->log_(LogLevel::kWarn, "Tray position is now UNKNOWN (%s): reload the tray before feeding", why);
   return true;
 }
 

@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '3c2696fcd7f5';
+const BUILD_ID = 'e3cab2599fde';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -189,6 +189,13 @@ function parseWifiNetworks(json) {
                         signal: rssi >= -60 ? 'good' : rssi >= -70 ? 'fair' : 'weak' });
   }
   return out;
+}
+
+/** Wi-Fi list after a scan (2.3.1): keeps what the user picked ('' is Other), listed if the scan missed it. */
+function wifiChoice(shown, found, value, touched) {
+  const has = found.some(n => n.hex === value), old = !has && shown.find(n => n.hex === value);
+  if (!touched) return { networks: found, value: has ? value : found.length ? found[0].hex : '' };
+  return { networks: old ? found.concat(old) : found, value };
 }
 
 /** "a=1;b=x" -> {a: '1', b: 'x'} (BLE Info, BLE Session). */
@@ -2811,18 +2818,20 @@ PAGES.configuration = {
     const typed = field('Network (SSID)', ssid);
     const pwField = field('Password', pw, 'Empty for an open network. This page loses the feeder when it switches: ' +
                           'find it again on the new network.');
-    const chosen = () => (list ? list.networks.find(n => n.hex === pick.value) : null);
+    let shown = [], touched = false;
+    const chosen = () => shown.find(n => n.hex === pick.value);
     const sync = () => {
       const n = chosen();
       typed.hidden = !!n;
       pwField.hidden = !!n && !n.secured;
     };
     const fill = () => {
-      const keep = pick.value;
-      pick.replaceChildren(...list.networks.map(n => h('option', { value: n.hex },
+      const c = wifiChoice(shown, list.networks, pick.value, touched);
+      shown = c.networks;
+      pick.replaceChildren(...shown.map(n => h('option', { value: n.hex },
                              `${n.name} (${n.signal}, ${n.secured ? 'secured' : 'open'})`)),
                            h('option', { value: '' }, 'Other network...'));
-      pick.value = list.networks.some(n => n.hex === keep) ? keep : list.networks.length ? list.networks[0].hex : '';
+      pick.value = c.value;
       setText(status, list.scanning ? 'Scanning...' : list.networks.length ? '' : 'None found: type the name.');
       rescan.hidden = !list.scan;
       rescan.disabled = list.scanning;
@@ -2845,7 +2854,7 @@ PAGES.configuration = {
       if (open) fill();
     };
     rescan.onclick = scan;
-    pick.onchange = sync;
+    pick.onchange = () => { touched = true; sync(); };
     let body;
     if (list) {
       fill();

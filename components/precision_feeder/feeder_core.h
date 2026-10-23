@@ -1056,6 +1056,7 @@ class FeederCore : private ServoOutput {
   bool calibrating_{false};
   bool positioning_{false};    // the phase is a positioning move with a saved intent (cleared when it settles)
   bool storage_fault_{false};  // the last flushed save failed
+  bool unknown_durable_{false};  // flash surely holds the position as unknown (see save_state_())
   bool restart_noted_{false};  // note_restart_needed() was called this boot
   uint8_t cal_pos_{0};
 

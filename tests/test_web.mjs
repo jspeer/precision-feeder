@@ -14,7 +14,7 @@ const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8'
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
   formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots, addressKind, compareVersions,
-  updateState, identifyImage, parseWifiNetworks };`, ctx);
+  updateState, identifyImage, parseWifiNetworks, wifiChoice };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -331,4 +331,15 @@ test('Wi-Fi scan results (2.3.0): names as hex, decoded where they are UTF-8', (
                    [['Home', '486f6d65', 'good', true], ['Caf\u00e9', '436166c3a9', 'fair', false],
                     ['A?B', '41ff42', 'weak', true]]);
   assert.deepEqual(plain(P.parseWifiNetworks(null)), { scan: false, scanning: false, networks: [] });
+});
+
+test('Wi-Fi dialog (2.3.1): a scan refresh keeps the user\'s choice', () => {
+  const a = { hex: '61' }, b = { hex: '62' }, c = { hex: '63' };
+  const pick = (...args) => { const r = P.wifiChoice(...args); return [r.networks.map(n => n.hex), r.value]; };
+  assert.deepEqual(pick([], [a, b], '', false), [['61', '62'], '61'], 'untouched: the first network found');
+  assert.deepEqual(pick([], [], '', false), [[], ''], 'nothing found yet: "Other network..."');
+  assert.deepEqual(pick([a, b], [b, a], '62', false), [['62', '61'], '62'], 'a default still listed is kept');
+  assert.deepEqual(pick([], [a, b], '', true), [['61', '62'], ''], '"Other network..." picked before results came');
+  assert.deepEqual(pick([a, b], [c, a], '62', true), [['63', '61', '62'], '62'], 'a picked network the scan missed stays');
+  assert.deepEqual(pick([a, b], [b], '62', true), [['62'], '62'], 'and is not listed twice');
 });

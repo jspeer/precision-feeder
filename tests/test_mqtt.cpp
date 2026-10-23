@@ -71,6 +71,10 @@ static void test_events() {
   CHECK(sent(r.out, "result") == "schedule/A/event/1/time/set: ok", "and the result");
   CHECK(r.send("schedule/A/event/1/time/set", "25:00") == Result::INVALID_ARG, "a bad time refused");
   CHECK(sent(r.out, "schedule/A/event/1/time") == "07:30", "answered with the time in force");
+  for (const char *bad : {"08:00 PM", "08:00garbage", "71582789:00"}) {
+    CHECK(r.send("schedule/A/event/1/time/set", bad) == Result::INVALID_ARG, bad);
+    CHECK(r.f->cfg.profiles[0].ev[0].offset_min == 7 * 60 + 30, "the time in force kept (2.3.1)");
+  }
   CHECK(r.send("schedule/a/event/1/enabled/set", "on") == Result::OK && r.f->cfg.profiles[0].ev[0].enabled == 1,
         "enabled, lower-case profile and value");
   CHECK(r.send("schedule/A/event/1/enabled/set", "maybe") == Result::INVALID_ARG, "not a switch value");
@@ -108,6 +112,7 @@ static void test_oneshots() {
   CHECK(r.f->oneshots_text().find(';') == std::string::npos, "still one");
   CHECK(r.send("oneshot/add", "2026-10-14 10:00") == Result::OK, "portions default to 1");
   CHECK(r.send("oneshot/add", "tomorrow") == Result::INVALID_ARG, "not a date");
+  CHECK(r.send("oneshot/add", "2026-10-14 09:30x 1") == Result::INVALID_ARG, "not a time (2.3.1)");
   CHECK(r.send("oneshot/add", "2026-10-14 11:00 7") == Result::INVALID_ARG, "more than a load");
   CHECK(r.send("oneshot/clear", "") == Result::OK && sent(r.out, "oneshot/list") == "none", "cleared");
 }

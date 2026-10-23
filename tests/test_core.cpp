@@ -174,6 +174,36 @@ static void test_refusal_reported_once() {
   CHECK(g->count(Source::SCHEDULE, Result::DAILY_CAP) == 1, "daily cap reported once");
 }
 
+// Codex review of 2.3.0: the whole text or nothing, and no overflow (2.3.1).
+static void test_strict_times() {
+  current = "2.3.1: event times and one-shots parsed strictly";
+  Flash flash;
+  auto f = boot(flash, T0);
+  Event &e = f->cfg.profiles[0].ev[0];
+  e.anchor = static_cast<uint8_t>(Anchor::CLOCK);
+  CHECK(f->set_event_time(0, 0, "07:30") == Result::OK && e.offset_min == 7 * 60 + 30, "07:30");
+  CHECK(f->set_event_time(0, 0, " 8:05 ") == Result::OK && e.offset_min == 8 * 60 + 5, "spaces and one hour digit");
+  for (const char *bad : {"08:00 PM", "08:00garbage", "71582789:00", "08:", ":30", "08:000", "008:00", "08:60",
+                          "24:00", "8", "+08:00", "08-00", "", "0x10:00", "08:3a", "99999999999999999999:00"}) {
+    CHECK(f->set_event_time(0, 0, bad) == Result::INVALID_ARG, bad);
+    CHECK(e.offset_min == 8 * 60 + 5, "and the event is unchanged");
+  }
+  e.anchor = static_cast<uint8_t>(Anchor::SUNRISE);
+  CHECK(f->set_event_time(0, 0, "+90") == Result::OK && e.offset_min == 90, "+90 minutes");
+  CHECK(f->set_event_time(0, 0, "-01:15") == Result::OK && e.offset_min == -75, "-01:15");
+  CHECK(f->set_event_time(0, 0, "01:30") == Result::OK && e.offset_min == 90, "no sign means plus");
+  CHECK(f->set_event_time(0, 0, "+720") == Result::OK && e.offset_min == 720, "12 hours");
+  for (const char *bad : {"+721", "+13:00", "+90 min", "-01:15x", "+", "90", "+1000", "+-5", "--5"}) {
+    CHECK(f->set_event_time(0, 0, bad) == Result::INVALID_ARG, bad);
+    CHECK(e.offset_min == 720, "and the event is unchanged");
+  }
+  CHECK(f->add_oneshot("2026-10-14 08:30", 1), "a one-shot");
+  CHECK(f->add_oneshot("2026-10-14 9:05", 1), "one hour digit");
+  for (const char *bad : {"2026-10-14 08:45 PM", "2026-10-14 08:45x", "2026-10-1408:45", "26-10-14 08:45",
+                          "2026-10-14T08:45", "2026-10-14 08:45:00", "02026-10-14 08:45", "2026-10-14 008:45"})
+    CHECK(!f->add_oneshot(bad, 1), bad);
+}
+
 static void test_oneshot_and_scheduler_switch() {
   current = "one-shots and the scheduler switch (bugs 5, 6)";
   Flash flash;
@@ -2130,6 +2160,7 @@ int main() {
   test_daylight_saving();
   test_web_app_data();
   test_tz_parser();
+  test_strict_times();
   test_device_record();
   test_pins();
   test_reserved_pins();

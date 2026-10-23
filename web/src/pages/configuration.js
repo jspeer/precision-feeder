@@ -380,18 +380,20 @@ PAGES.configuration = {
     const typed = field('Network (SSID)', ssid);
     const pwField = field('Password', pw, 'Empty for an open network. This page loses the feeder when it switches: ' +
                           'find it again on the new network.');
-    const chosen = () => (list ? list.networks.find(n => n.hex === pick.value) : null);
+    let shown = [], touched = false;
+    const chosen = () => shown.find(n => n.hex === pick.value);
     const sync = () => {
       const n = chosen();
       typed.hidden = !!n;
       pwField.hidden = !!n && !n.secured;
     };
     const fill = () => {
-      const keep = pick.value;
-      pick.replaceChildren(...list.networks.map(n => h('option', { value: n.hex },
+      const c = wifiChoice(shown, list.networks, pick.value, touched);
+      shown = c.networks;
+      pick.replaceChildren(...shown.map(n => h('option', { value: n.hex },
                              `${n.name} (${n.signal}, ${n.secured ? 'secured' : 'open'})`)),
                            h('option', { value: '' }, 'Other network...'));
-      pick.value = list.networks.some(n => n.hex === keep) ? keep : list.networks.length ? list.networks[0].hex : '';
+      pick.value = c.value;
       setText(status, list.scanning ? 'Scanning...' : list.networks.length ? '' : 'None found: type the name.');
       rescan.hidden = !list.scan;
       rescan.disabled = list.scanning;
@@ -414,7 +416,7 @@ PAGES.configuration = {
       if (open) fill();
     };
     rescan.onclick = scan;
-    pick.onchange = sync;
+    pick.onchange = () => { touched = true; sync(); };
     let body;
     if (list) {
       fill();

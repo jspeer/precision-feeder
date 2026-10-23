@@ -265,7 +265,9 @@ States: `LOADED(n)` (position n, 0 to 5), `EMPTY` (position 6), `UNKNOWN`
   (the disc's), and before a change to a value that moves the slots, the position is saved as `UNKNOWN`, so a power
   cut in calibration never leaves a trusted position behind (before, it was marked only when calibration was turned
   off). The servo's calibration only points the servo at absolute angles and keeps the position. Stop stops a
-  calibration move too, and a restart waits for one (`FeederCore::busy()`, `Mechanism::moving()`).
+  calibration move too, and a restart waits for one (`FeederCore::busy()`, `Mechanism::moving()`). Unknown in memory
+  is not enough (2.3.1): unless the last save that reached flash said unknown, it is saved again, and the action is
+  refused (`STORAGE_FAILED`) if that fails.
 - On boot, command the servo to the saved position, never to 0.
 - Detach the PWM output after a short hold time to avoid jitter and heat.
   Needs a bench check that the tray does not drift when detached.
@@ -582,7 +584,8 @@ enabled (switch), stop/abort (button).
 Editor: profile to edit, event to edit, and fields (enabled, anchor, time,
 portions, days), plus profile fields (every N days, fast days). Edits apply
 immediately and are saved a couple of seconds later, so there is no Save
-button. Event time and days are text entities (`HH:MM` or signed `+03:00`;
+button. Event time and days are text entities (`HH:MM` or signed `+03:00`, the whole text: anything after it is
+refused;
 `mon,wed,fri` / `weekdays` / `all`). Config: guard settings, gap between
 portions, latitude, longitude, reload pause, refill interval
 and the timezone (a POSIX string, see section 6). Hardware (firmware 2.0.0, section 2.1):
@@ -1344,6 +1347,17 @@ precision-feeder/
   - D32: open item 23's calibration is always checked by eye, also for a printed disc (owner, 2026-10-22); open
     item 22 (the servo bench leftovers) is shelved until the servo rig is rebuilt.
 
+- **Codex review of 2.3.0 (firmware 2.3.1, 2026-10-23; owner asked for the fixes):** each finding reproduced in a
+  host test before it was fixed; no new decision, they make existing rules hold.
+  - Calibration that can move the tray needs "unknown" on flash, not only in memory: the core tracks whether the
+    last save that reached flash said unknown (`unknown_durable_`), and saves again (or refuses, `STORAGE_FAILED`)
+    when it did not. A failed reload had left a trusted position on flash under an unknown one in memory (section 3.1).
+  - Event times and one-shots are parsed whole, digit counts bounded before any arithmetic: a suffix (`08:00 PM`) or
+    an oversized hour is refused, not read as another time (section 7).
+  - The Join dialog keeps the user's choice across a scan refresh ("Other network..." included), and keeps a picked
+    network listed when a refresh misses it (section 9.3). The web app's budget is 67 KB gzipped (2.3.0 left 127
+    bytes).
+
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
   - The feed history holds 64 feeds (the largest cap), not 8: State version 3, migrated (section 4).
@@ -1557,7 +1571,10 @@ precision-feeder/
     (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
     ESPHome upgrade.
 
-## 15. Implementation status (v2.3.0)
+## 15. Implementation status (v2.3.1)
+
+2.3.1 fixes a Codex review of 2.3.0 (decisions log): logic only, checked with host tests, the mock device and both
+release builds; not on hardware (nothing in it needs the bench).
 
 2.3.0 (loose ends, D28 to D32): protected settings read-only over MQTT, clearing the BLE key, forgetting the Wi-Fi
 network, and picking it from a scan. On the disc rig (docs/BENCH.md): the upgrade from 2.2.0 kept every value, and a

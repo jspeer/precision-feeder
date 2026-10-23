@@ -21,6 +21,23 @@ namespace precision_feeder {
 // Editor helpers
 // ---------------------------------------------------------------------------------------------
 
+static void skip_spaces(const char *&s) {
+  while (*s == ' ')
+    s++;
+}
+
+// min_n to max_n decimal digits into out, and no digit after them (so it cannot overflow); s moves past them.
+static bool read_digits(const char *&s, int min_n, int max_n, int &out) {
+  int n = 0;
+  out = 0;
+  while (n < max_n && *s >= '0' && *s <= '9') {
+    out = out * 10 + (*s - '0');
+    s++;
+    n++;
+  }
+  return n >= min_n && !(*s >= '0' && *s <= '9');
+}
+
 void FeederCore::restart_cadence_today(int profile) {
   if (!this->time_valid())
     return;
@@ -177,9 +194,9 @@ Result FeederCore::set_event_time(uint8_t profile, uint8_t event, const std::str
   if (!event_ok(profile, event))
     return Result::INVALID_ARG;
   Event &e = this->cfg.profiles[profile].ev[event];
+  // The whole text or nothing: "08:00 PM" or "08:00x" is refused, not read as 08:00 (Codex review, 2.3.0).
   const char *s = text.c_str();
-  while (*s == ' ')
-    s++;
+  skip_spaces(s);
   int sign = 1;
   bool has_sign = false;
   if (*s == '+' || *s == '-') {
@@ -189,15 +206,22 @@ Result FeederCore::set_event_time(uint8_t profile, uint8_t event, const std::str
   }
   int h = 0, m = 0;
   int minutes;
-  if (std::sscanf(s, "%d:%d", &h, &m) == 2) {
-    if (h < 0 || m < 0 || m > 59)
+  const char *digits = s;
+  if (!read_digits(s, 1, 3, h))
+    return Result::INVALID_ARG;
+  if (*s == ':') {
+    s++;
+    if (s - digits > 3 || !read_digits(s, 1, 2, m) || m > 59)  // at most two hour digits
       return Result::INVALID_ARG;
     minutes = h * 60 + m;
-  } else if (std::sscanf(s, "%d", &h) == 1 && h >= 0 && has_sign) {
+  } else if (has_sign) {
     minutes = h;  // "+90" means plus 90 minutes (solar anchors only)
   } else {
     return Result::INVALID_ARG;
   }
+  skip_spaces(s);
+  if (*s != '\0')
+    return Result::INVALID_ARG;
   if (e.anchor == static_cast<uint8_t>(Anchor::CLOCK)) {
     if (has_sign || minutes > 24 * 60 - 1)
       return Result::INVALID_ARG;
@@ -212,8 +236,18 @@ Result FeederCore::set_event_time(uint8_t profile, uint8_t event, const std::str
 }
 
 bool FeederCore::add_oneshot(const std::string &local_datetime, uint8_t portions) {
+  // "YYYY-MM-DD HH:MM" and nothing else: "... 08:00 PM" is refused, not read as 08:00.
   int y, mo, d, h, mi;
-  if (std::sscanf(local_datetime.c_str(), "%d-%d-%d %d:%d", &y, &mo, &d, &h, &mi) != 5)
+  const char *s = local_datetime.c_str();
+  skip_spaces(s);
+  if (!read_digits(s, 4, 4, y) || *s++ != '-' || !read_digits(s, 1, 2, mo) || *s++ != '-' ||
+      !read_digits(s, 1, 2, d) || *s != ' ')
+    return false;
+  skip_spaces(s);
+  if (!read_digits(s, 1, 2, h) || *s++ != ':' || !read_digits(s, 1, 2, mi))
+    return false;
+  skip_spaces(s);
+  if (*s != '\0')
     return false;
   if (y < 2019 || y > 2105 || mo < 1 || mo > 12 || d < 1 || h < 0 || h > 23 || mi < 0 || mi > 59)
     return false;
