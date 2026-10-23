@@ -37,7 +37,7 @@ that protects the fish from being over-fed.
 > has been calibrated and fed on a bench rig (with BLE and MQTT), and the two-drive firmware switched drives on both
 > rigs. 2.2.0's release images were run on both rigs, including the servo's upgrade from 2.1.1; 2.3.0 was run on
 > the disc rig ([docs/BENCH.md](docs/BENCH.md)); 2.3.1's fixes are logic only, checked with host tests. 2.4.0 (Bluetooth on NimBLE), 2.4.1 (HTTPS and MQTT over
-> TLS) and 2.4.2 (ACME) are built but not tagged or tested on hardware yet. The disc has not yet fed animals, and neither has had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
+> TLS), 2.4.2 (ACME) and 2.4.3 (their web app pages) are built but not tagged or tested on hardware yet. The disc has not yet fed animals, and neither has had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
 > fed.
 
 > **Written with AI.** This project was designed and written with the assistance of an AI (Anthropic's Claude). A

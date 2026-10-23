@@ -144,6 +144,7 @@ const E = {
   bleSession: 'text_sensor/BLE Session',
   bleGuard: 'switch/BLE Can Change Guard Limits',
   bleCalibration: 'switch/BLE Can Change Calibration',
+  bleForgetBonds: 'button/Forget BLE Bonds',
 
   // packages/mqtt.yaml
   mqtt: 'switch/MQTT',
@@ -154,4 +155,15 @@ const E = {
   mqttPrefix: 'text/MQTT Topic Prefix',
   mqttPrefixInUse: 'text_sensor/MQTT Topic Prefix In Use',
   mqttConnected: 'binary_sensor/MQTT Connected',
+
+  // packages/tls.yaml, mqtt_tls.yaml and acme.yaml (2.4.1, 2.4.2)
+  httpsRedirect: 'switch/HTTPS Redirect',
+  httpsOnly: 'switch/HTTPS Only',
+  mqttTls: 'switch/MQTT TLS',
+  mqttTlsCheck: 'select/MQTT TLS Check',
+  mqttTlsStatus: 'text_sensor/MQTT TLS',
+  httpsStatus: 'text_sensor/HTTPS',
+  acmeStatus: 'text_sensor/ACME',
+  acmeDirectory: 'text/ACME Directory',
+  acmeName: 'text/ACME Name',
 };

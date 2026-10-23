@@ -260,3 +260,15 @@ function identifyImage(manifest, sha256hex) {
   }
   return null;
 }
+
+/** The PEM blocks in what was pasted or chosen for an HTTPS certificate (2.4.3): {certs: [block, ...], key: block or
+ *  '', encrypted: a passphrase-protected key, which the feeder cannot use}. Text around the blocks (openssl's "Bag
+ *  Attributes", comments) is dropped. The feeder checks the rest: that it parses, the key fits, the chain verifies. */
+function splitPem(text) {
+  const blocks = String(text || '').match(/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/g) || [];
+  const label = b => /^-----BEGIN ([A-Z0-9 ]+)-----/.exec(b)[1];
+  const certs = blocks.filter(b => label(b) === 'CERTIFICATE');
+  const keys = blocks.filter(b => /(^|[A-Z]+ )PRIVATE KEY$/.test(label(b)));
+  return { certs, key: keys.find(b => label(b) !== 'ENCRYPTED PRIVATE KEY') || '',
+           encrypted: keys.some(b => label(b) === 'ENCRYPTED PRIVATE KEY' || /Proc-Type: 4,ENCRYPTED/.test(b)) };
+}

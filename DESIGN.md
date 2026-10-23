@@ -617,7 +617,9 @@ never repeats scheduler or guard logic. Each fits Home Assistant's 255-character
 - With the BLE package, two diagnostic text sensors (disabled by default in Home
   Assistant) and one web endpoint. They never contain the key, a nonce or a tag:
   - `BLE Info`: `service=<uuid>;protocol=2;auth=hmac-sha256;time=<policy>;stale_h=<h>;key=<none|build|device>;
-    guard=<0|1>;calibration=<0|1>` (where the key comes from, and the two BLE permissions; firmware 2.0.0).
+    guard=<0|1>;calibration=<0|1>;bonds=<n>` (where the key comes from, and the two BLE permissions, firmware 2.0.0;
+    the clients that paired, 2.4.3, once the stack has counted them).
+  - `Forget BLE Bonds` (2.4.3, internal, protected): a button that unpairs every bonded client (section 10).
   - Two config switches (firmware 2.0.0, section 10): `BLE Can Change Guard Limits` and
     `BLE Can Change Calibration`.
   - `BLE Session`: `connected;auth;peer;mtu;since;last;conns;wr;wrb;rd;rdb;nt;ntb;authok;
@@ -901,7 +903,7 @@ which the dashboard and Home Assistant use to find the feeder's addresses). The 
   broker accounts and ACLs (docs/SECURITY.md). Components are never on MQTT (D26; closes open item 24).
 - Cost: about 132 KB of flash (mostly per-entity discovery code, generated for every entity even when internal).
 
-### 9.7 HTTPS, the trust store, MQTT over TLS and ACME (firmware 2.4.1 and 2.4.2, D36 to D40)
+### 9.7 HTTPS, the trust store, MQTT over TLS and ACME (firmware 2.4.1 to 2.4.3, D36 to D41)
 
 `components/precision_feeder_tls`, with `packages/tls.yaml` (HTTPS), `packages/mqtt_tls.yaml` (MQTT over TLS,
 needs `mqtt.yaml`) and `packages/acme.yaml` (the certificate from an ACME server, 2.4.2); all three in the prebuilt
@@ -955,8 +957,8 @@ weighed: docs/plans/https-tls.md.
   `/.well-known/acme-challenge/`, and everything until HTTPS is listening, so a failed HTTPS never locks the owner
   out. The filter is `PrecisionFeeder::RequestFilter`, a handler registered before the settings guard. Both switches
   are internal and protected.
-- **The trust store.** One PEM bundle (`ca`: one or more CA certificates) the owner uploads; MQTT checks its broker
-  against it, and an uploaded identity is checked against it.
+- **The trust store.** One PEM bundle (`ca`: one or more CA certificates) the owner uploads; MQTT and ACME check
+  their servers against it, and an uploaded identity is checked against it.
 - **Endpoints.** `GET /feeder/tls` (JSON: HTTPS state, sessions, the certificate's source, name, subject, expiry and
   SHA-256 fingerprint, the trust store's subject, MQTT's TLS status and pin). `POST /feeder/tls/ca` (body: the PEM,
   empty clears it), `/feeder/tls/identity` (body: the private key's hex, masked, on the first line, then the chain's
@@ -965,8 +967,15 @@ weighed: docs/plans/https-tls.md.
   1 KB), at most 10 KB. Each is signed with the settings password as the firmware upload is (section 9.5): the
   `?sha256=` parameter must be the body's hash, and the tag covers `<path>\n<sha256>`. The private key is masked with
   `FeederCore::password_unmask_blob` (HMAC-SHA-256 blocks keyed with the password's derived key over the signature's
-  nonce, "new secret blob" and a counter; no mask with no password, as for the other keys). The web app's page for
-  them comes in 2.4.3.
+  nonce, "new secret blob" and a counter; no mask with no password, as for the other keys).
+- **The web app (2.4.3, D41).** Configuration has an "HTTPS and certificates" card, drawn from `GET /feeder/tls` and
+  read again when the HTTPS or ACME status changes: the certificate in use (source, name, expiry, fingerprint, open
+  sessions, why an upload is not used, a link to the app over HTTPS), uploading a certificate and key (pasted or
+  from files; the browser picks the PEM blocks out, refuses an encrypted key and the sizes the device refuses, and
+  masks the key: `maskBlob` in `auth.js`, tested against the device's vector), removing it, making a new self-signed
+  one, the two port 80 switches, the trust store (upload, replace, clear), and ACME (status, Renew now, the two
+  settings). The MQTT card has MQTT TLS, MQTT TLS Check, the TLS status and the pinned certificate's fingerprint with
+  Forget. The page never decides anything: the device checks every upload again.
 - **MQTT over TLS (D36, D39).** MQTT TLS (off by default) and MQTT TLS Check ("CA certificate" or "Pin on first
   contact") are internal, protected and applied at boot (on_boot priority 590, after `mqtt.yaml`'s 600 and before
   the client starts); changing them sets Restart Needed. "CA certificate": the client checks the broker against the
@@ -1021,7 +1030,10 @@ Hence application-layer authentication, plus link encryption where offered:
 - LE Secure Connections with bonding, so a client that pairs gets an encrypted link (also
   hiding what it reads). Since 2.4.0 (NimBLE) at most 3 bonds are kept in NVS and the oldest makes room; a bonded peer
   that pairs again replaces its old bond. Bonds made with 2.3.x (Bluedroid) are not carried over: a client that had
-  paired pairs again (D35).
+  paired pairs again (D35). Forget BLE Bonds (2.4.3, D41; the web app's Configuration, Keys, behind the settings
+  password) unpairs every bonded client with `ble_gap_unpair`, which also ends a bonded client's connection; clients
+  that never paired are untouched, and the key does not change (it, not the bond, is what lets a client act). BLE
+  Info reports how many bonds are kept.
 - Not covered: the feeder does not prove its identity to the client, and
   answers are not signed (no room in the 20-byte Status). The feeder only acts on
   authenticated writes, so the animals are protected; a client that must trust
@@ -1465,7 +1477,7 @@ precision-feeder/
   - D35: characteristic permissions stay plain (no "encryption required"); pairing stays optional, LE Secure
     Connections with bonding, at most 3 bonds in NVS, the oldest replaced. Old Bluedroid bonds are not carried over.
     BLE's clients are a PLC bridge and scripts, not phones: bench tests use the Python client; phone pairing is not
-    tested (owner). A "Forget BLE bonds" button waits for the configuration page.
+    tested (owner). "Forget BLE bonds" came with the configuration page (2.4.3, D41).
   - D36: MQTT's "insecure" mode pins the broker's certificate on first contact instead of skipping verification
     (owner; E5 of the TLS plan). Built in 2.4.1 (section 9.7).
   - D37: HTTPS is a relay from port 443 to ESPHome's web server on 127.0.0.1:80, not a second web server, so every
@@ -1480,6 +1492,11 @@ precision-feeder/
     against the trust store; no public CA bundle (E4: out, since MQTT and ACME both use the trust store); http-01
     only, no dns-01 (E6: it would keep DNS credentials on the feeder). ACME's certificate wins over an uploaded one
     while ACME is on, and is served without a restart.
+  - D41: the configuration page (2.4.3). HTTPS, the trust store and ACME get their own card in Configuration; MQTT's
+    TLS settings join the MQTT card. "Forget BLE bonds" is in Configuration, Keys, beside the Bluetooth key, not in
+    Maintenance as the NimBLE plan's B4 had it: it is about who may connect, like the key. It is a protected button
+    entity (`Forget BLE Bonds`), not a new endpoint. The web app's size budget goes to 71 KB gzipped (from 67 KB):
+    these cards are about 4 KB, and the full image has about 280 KB of flash to spare.
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1702,9 +1719,19 @@ precision-feeder/
     connects in plain text with TLS on. ACME (2.4.2) against step-ca on the LAN: the first certificate, a renewal
     while a page is open (the new certificate served without a restart), a failure (CA unreachable) keeping the
     current certificate, expiry falling back to the self-signed one, the heap while the HTTP client runs beside 4
-    HTTPS sessions, and that a 24 h certificate's renewal every 16 h stays quiet.
+    HTTPS sessions, and that a 24 h certificate's renewal every 16 h stays quiet. The web app's pages for them (2.4.3)
+    were checked against tools/mock_device.py only: an upload of a real chain and key (with and without a settings
+    password), the CA bundle, Renew now, Forget for the MQTT pin, and Forget BLE Bonds with a client that paired
+    (that the bond count changes and a bonded client is disconnected) are to check on the bench.
 
-## 15. Implementation status (v2.4.2)
+## 15. Implementation status (v2.4.3)
+
+2.4.3 (the configuration page, D41; section 9.7, section 10) is built and compiled in every example and both prebuilt
+configs. The page was checked against tools/mock_device.py (which now serves `/feeder/tls`, the TLS, ACME and MQTT
+entities and Forget BLE Bonds): uploads with and without a settings password, the trust store, ACME's settings and
+Renew now, Forget pairings, a phone-width layout; the key's mask is tested against the device's vector
+(`tests/test_web.mjs`). The full image is 1,546,295 bytes (84.3% of the app slot; 2.4.2: 1,540,671), static RAM
+149,867 bytes; no-ble 1,377,351. Not tagged, and not on hardware (open item 27).
 
 2.4.2 (ACME, D40; section 9.7) is built and compiled in every example and both prebuilt configs, with host tests for
 the client against a fake ACME server (`tests/test_acme.cpp`: the exchange, badNonce, a failed challenge, a reused

@@ -57,11 +57,22 @@ class PrecisionFeederBle : public Component, public BleTransport {
 
   // ---- diagnostics ----
   /// For the "BLE Info" and "BLE Session" text sensors (packages/ble_gatt.yaml).
-  std::string info_text() const { return this->engine_ != nullptr ? this->engine_->info_text() : ""; }
+  /// BLE Info ends with ";bonds=N", the clients paired with the feeder (2.4.3), once the stack has counted them.
+  std::string info_text() const {
+    if (this->engine_ == nullptr)
+      return "";
+    const int bonds = this->bonds_.load();
+    return this->engine_->info_text() + (bonds >= 0 ? ";bonds=" + std::to_string(bonds) : std::string());
+  }
   std::string session_text() const { return this->engine_ != nullptr ? this->engine_->session_text() : ""; }
   /// The activity log as JSON (GET /feeder/ble on the web server). Safe to call from the web server's task: it
   /// returns a copy made on the main loop.
   std::string activity_json_copy();
+
+  // ---- bonds ----
+  /// Forget every bond (the web app's "Forget BLE Bonds", 2.4.3): each bonded client is unpaired, and disconnected
+  /// if it is the one connected. Clients that never paired, such as a PLC bridge, are untouched. Main loop only.
+  void forget_bonds();
 
   // ---- NimBLE callbacks (its host task; static trampolines in the .cpp) ----
   int on_gap_event(ble_gap_event *event);
@@ -71,6 +82,7 @@ class PrecisionFeederBle : public Component, public BleTransport {
  protected:
   void start_engine_();
   void advertise_();
+  void count_bonds_();
   bool subscribed_(uint8_t channel) const;
 
   PrecisionFeeder *feeder_{nullptr};
@@ -90,6 +102,7 @@ class PrecisionFeederBle : public Component, public BleTransport {
   // Set on NimBLE's task, read on the main loop.
   std::atomic<uint16_t> conn_handle_{0xFFFF};  // BLE_HS_CONN_HANDLE_NONE: no client
   std::atomic<uint16_t> subscriptions_{0};     // bit per channel: the client turned notifications on
+  std::atomic<int> bonds_{-1};                 // bonds in the store; -1 until the stack has synced
   uint16_t val_handles_[gatt::COUNT]{};
 
   // The activity JSON, rebuilt on the main loop when the log changes and read by the web server's task.

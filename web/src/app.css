@@ -286,6 +286,7 @@ a { color: var(--accent); }
 .key-part { padding: 10px 0; border-bottom: 1px solid var(--border); }
 .key-part p { margin: 4px 0 8px; }
 .input.mono { font-family: var(--mono); font-size: 13px; width: 100%; }
+.key-part .mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .btn[hidden] { display: none; }
 .choices { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; color: var(--text); }
 .choice { display: flex; gap: 10px; align-items: center; padding: 6px 4px; cursor: pointer; }

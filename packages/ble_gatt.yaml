@@ -86,12 +86,30 @@ switch:
     turn_off_action:
       - lambda: id(feeder).set_ble_may_change_calibration(false);
 
+# Forget BLE Bonds (firmware 2.4.3): unpairs every client that paired (a phone, say), so a lost or sold one cannot
+# reconnect encrypted without pairing again; a bonded client that is connected is disconnected. Clients that never
+# paired, such as a PLC bridge, are untouched, and the BLE key is not changed: a client is let in by the key, not the
+# bond. Web app only (Configuration, Keys), behind the settings password.
+precision_feeder:
+  protected_entities:
+    - button/Forget BLE Bonds
+
+button:
+  - platform: template
+    id: pf_ble_forget_bonds
+    name: "Forget BLE Bonds"
+    internal: true
+    icon: mdi:link-variant-off
+    entity_category: config
+    on_press:
+      - lambda: id(feeder_ble).forget_bonds();
+
 # Diagnostics for the web app's Bluetooth page (and Home Assistant, where they start disabled). Nothing here is
 # secret: no key, nonce or tag, and only the last two bytes of the client's address. The activity log itself is
 # served by the web server at /feeder/ble (only when the web_server package is included).
 text_sensor:
   # Service UUID, protocol version, authentication, time policy, where the key comes from (none, build or device;
-  # never the key itself) and the two permissions above.
+  # never the key itself), the two permissions above, and how many clients are paired (bonds).
   - platform: template
     id: pf_ble_info
     name: "BLE Info"

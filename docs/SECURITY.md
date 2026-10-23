@@ -40,7 +40,7 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
   minute and answers one request.
 - **Wrong guesses wait:** 1 s after the first failure, doubling to 60 s.
 - **New secrets travel masked:** a new password key, an API or BLE key, the Wi-Fi and access-point passwords are
-  masked with a key derived from the current password. With no password set they cross the network as they are
+  masked with a key derived from the current password, and since 2.4.1 so is an uploaded HTTPS private key. With no password set they cross the network as they are
   (anyone there could set their own anyway).
 - **Another website cannot use your browser** to make a protected change: the signature header needs the browser's
   permission (a CORS preflight), which the feeder does not grant.
@@ -57,6 +57,9 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0). Th
   saved on the feeder can be cleared in the web app (2.3.0): clients are then refused again (a YAML build goes back to
   its own key), and a connected one is cut off. Two
   protected switches decide whether BLE may change the guard limits and the calibration (both on by default).
+- **Bluetooth pairing** (bonding) only encrypts the link; the key is what lets a client act. Up to 3 bonds are kept.
+  Forget pairings (Configuration, Keys, 2.4.3; protected) unpairs them all, for a lost or sold phone; change the BLE
+  key too if that client knew it.
 - **Keys are made in your browser** (or by Home Assistant) and shown once; the feeder never sends a key back.
 
 ## Known limits

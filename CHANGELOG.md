@@ -6,6 +6,25 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.3: The configuration page for certificates (2026-10-23, not tagged)
+
+**Upgrade note:** nothing to do.
+
+- **HTTPS and certificates** (Configuration, in builds with the `tls` package): the certificate in use (self-signed,
+  uploaded or from ACME, with its name, expiry and fingerprint), and a link to the app over HTTPS. Upload a
+  certificate and key of your own (pasted or from files: the page picks the PEM blocks out, refuses an encrypted key,
+  and masks the key with the settings password), remove it, or make a new self-signed one. The two port 80 switches,
+  the trust store (upload your CA's root, replace or clear it), and ACME: the directory, the name, what it did last
+  and Renew now.
+- **MQTT over TLS** in the MQTT card: TLS on or off, how the broker is checked (a CA certificate, or pinned on first
+  contact), the TLS status, and the pinned certificate's fingerprint with Forget.
+- **Forget Bluetooth pairings** (Configuration, Keys, protected by the settings password): unpairs every client that
+  paired, and disconnects a paired client that is connected. Clients that never paired, such as a PLC bridge, and the
+  BLE key are unchanged. BLE Info and the Bluetooth page show how many clients are paired (at most 3). A new button
+  entity, Forget BLE Bonds (internal).
+- The web app's size budget is 71 KB gzipped (was 67 KB; DESIGN.md D41). The full prebuilt image is 5.6 KB larger
+  (1,546,295 bytes, 84.3% of the app slot). Checked against the mock device, not yet on a feeder.
+
 ## 2.4.2: ACME (2026-10-23, not tagged)
 
 **Upgrade note:** nothing to do. ACME is off until you set a directory.

@@ -121,6 +121,20 @@ function maskText(text, currentKey, nonce) {
   return bytes.map((b, i) => b ^ mask[i]);
 }
 
+/** A longer secret (a PEM private key for HTTPS, up to 2048 bytes) travels masked by HMAC blocks with a 4-byte
+ *  counter, as FeederCore::password_unmask_blob expects (none: unmasked). */
+function maskBlob(bytes, currentKey, nonce) {
+  if (!currentKey) return bytes.slice();
+  const out = new Uint8Array(bytes.length);
+  for (let at = 0; at < bytes.length; at += 32) {
+    const n = at / 32;
+    const counter = new Uint8Array([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+    const mask = hmacSha256(currentKey, concatBytes(nonce, utf8('new secret blob'), counter));
+    for (let i = 0; i < 32 && at + i < bytes.length; i++) out[at + i] = bytes[at + i] ^ mask[i];
+  }
+  return out;
+}
+
 /** A 32-byte key as base64, as ESPHome (api: encryption: key) and the BLE clients write it. */
 function keyToBase64(bytes) { return btoa(String.fromCharCode(...bytes)); }
 /** A key typed in: base64 of exactly 32 bytes, not all zero; null otherwise. */
@@ -318,6 +332,57 @@ const auth = {
       flash: 'The feeder refused the image (wrong board, or too big); nothing changed.',
       image: 'That is not an update image (a .factory.bin is for USB); nothing changed.',
     }[error] || `The feeder answered ${status}; nothing changed.`);
+  },
+
+  /** HTTPS, the trust store, MQTT over TLS and ACME (packages/tls.yaml, DESIGN.md section 9.7), as GET /feeder/tls
+   *  reports them; null when the build has no TLS or the device does not answer. Never a key. */
+  tls: null,
+  async loadTls() {
+    try {
+      const r = await fetch(`${location.origin}/feeder/tls`, { cache: 'no-store' });
+      this.tls = r.ok ? await r.json() : null;
+    } catch (e) {
+      this.tls = null;
+    }
+    this._changed();
+    return this.tls;
+  },
+
+  /** POST to /feeder/tls/<what> with a raw body (a PEM; '' to clear), signed over the path and the body's SHA-256,
+   *  which the device checks again. An identity is {cert, key}: the key travels masked by the settings password, in
+   *  hex on the body's first line. Resolves with the device's answer. */
+  async tlsPost(what, body = '') {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = `/feeder/tls/${what}`;
+    if (typeof body !== 'string') {
+      body = body.cert ? toHex(maskBlob(utf8(body.key), this.set ? this.key : null, c.nonceBytes)) + '\n' + body.cert : '';
+    }
+    const bytes = utf8(body), sha = toHex(sha256(bytes));
+    const headers = { 'Content-Type': 'application/octet-stream' };
+    if (this.set) headers['X-Feeder-Auth'] = authHeader(this.key, c.nonceBytes, `${path}\n${sha}`);
+    let r;
+    try {
+      r = await fetch(`${location.origin}${path}?sha256=${sha}`, { method: 'POST', headers, body: bytes });
+    } catch (e) {
+      throw new Error('The feeder could not be reached.');
+    }
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    let answer = {};
+    try { answer = await r.json(); } catch (e) { /* no body */ }
+    if (!r.ok) {
+      const error = answer.error || '';
+      throw new Error({
+        certificate: 'The feeder could not read that certificate (PEM).',
+        key: 'The feeder could not read the private key (PEM, not encrypted).',
+        'too large': 'Too large: a chain of at most three certificates, and one key.',
+        sha256: 'The upload changed on the way; nothing changed. Try again.',
+        flash: 'The feeder could not save it; nothing changed.',
+        'acme off': 'Set the ACME directory first.',
+      }[error] || (error ? `The feeder refused it: ${error}.` : `The feeder answered ${r.status}.`));
+    }
+    await this.loadTls();
+    return answer;
   },
 
   /** Set a new password (or change it: needs to be unlocked), or clear it with ''. */

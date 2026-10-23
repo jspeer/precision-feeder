@@ -117,11 +117,23 @@ PAGES.configuration = {
       setting('Username', 'Empty: none.', E.mqttUsername),
       setting('Password', 'Not shown once saved. Set to change it.', E.mqttPassword),
       setting('Topic prefix', 'Empty: the device name.', E.mqttPrefix),
+      // packages/mqtt_tls.yaml (2.4.1, D36)
+      setting('TLS', 'Encrypts MQTT and checks the broker; use its TLS port, usually 8883. With TLS on, MQTT never ' +
+              'falls back to plain text. Used after a restart.', E.mqttTls),
+      setting('Check the broker', 'CA certificate: against the trust store (HTTPS and certificates), with the ' +
+              'broker\'s name. Pin on first contact: keeps the certificate the broker shows the first time and trusts ' +
+              'only that one from then on, like SSH.', E.mqttTlsCheck),
     ]);
     if (mqtt) {
       this.timeRows.push(boundRow(mqtt, 'Connected', () => store.bool(E.mqttConnected) ? 'Yes' : 'No'),
                          boundRow(mqtt, 'Prefix in use', () => store.text(E.mqttPrefixInUse)));
+      if (store.has(E.mqttTlsStatus)) {
+        this.timeRows.push(boundRow(mqtt, 'TLS in use', () => store.text(E.mqttTlsStatus)));
+        this.pinBox = h('div');
+        mqtt.appendChild(this.pinBox);
+      }
     }
+    const tls = this.tlsCard();
 
     this.pw = card('Settings password');
     this.pw.hidden = true;
@@ -134,17 +146,229 @@ PAGES.configuration = {
                     setting('Bluetooth may change the calibration', 'Offsets, servo pulse range and calibration mode.',
                             E.bleCalibration)].filter(Boolean);
     this.rows.push(...this.keyRows);
+    // Forget BLE Bonds (ble_gatt.yaml, 2.4.3): with the Bluetooth key, in the Keys card.
+    this.bondPart = null;
+    if (store.has(E.bleForgetBonds)) {
+      const words = h('p');
+      this.bondPart = h('div', { class: 'key-part' }, h('div', { class: 'setting-label' }, 'Bluetooth pairings'), words,
+        h('div', { class: 'actions' }, h('button', { class: 'btn btn-small btn-danger', onclick: async () => {
+          if (!await confirmDialog({ title: 'Forget every Bluetooth pairing?', danger: true, ok: 'Forget',
+                                     body: 'Every phone or client that paired with the feeder must pair again, and one ' +
+                                           'that is connected is disconnected. Clients that never paired, such as a ' +
+                                           'PLC bridge, are not affected. The Bluetooth key stays as it is: change it ' +
+                                           'too if a client with the key was lost.' })) return;
+          api.press(E.bleForgetBonds).then(() => toast('Bluetooth pairings forgotten', 'ok'), toastError);
+        } }, 'Forget pairings')));
+      this.timeRows.push(() => {
+        const n = parseKV(store.text(E.bleInfo)).bonds;
+        setText(words, n === undefined ? 'Clients that paired (bonded) with the feeder; at most 3 are kept.'
+                       : `${n === '0' ? 'None' : n} of at most 3 kept: clients that paired (bonded) with the feeder. ` +
+                         'Pairing encrypts the link; the key is what lets a client in.');
+      });
+    }
     auth.onChange(() => {
       this.updatePassword();
       this.updateKeys();
       this.updateNetwork();
+      this.updateTls();
     });
     auth.refresh();
     auth.loadNetwork();
+    if (tls) auth.loadTls();
 
     append(root, h('div', { class: 'grid' }, safety, tray), h('div', { class: 'grid' }, loc, dev),
-           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net), mqtt);
+           h('div', { class: 'grid' }, this.hw, this.pw), h('div', { class: 'grid' }, this.keys, this.net),
+           h('div', { class: 'grid' }, tls, mqtt));
     this.update();
+  },
+
+  /** A note and a Restart button, shown while a change waits for a restart (Restart Needed). Null without Restart. */
+  restartBlock() {
+    if (!store.has(E.restart)) return null;
+    const note = h('p', {}, 'A change is waiting for a restart.');
+    const btn = h('button', { class: 'btn', onclick: async () => {
+      if (!await confirmDialog({ title: 'Restart the feeder?', ok: 'Restart',
+                                 body: 'It is back in a few seconds and carries on feeding by itself. Refused ' +
+                                       'while the tray moves.' })) return;
+      api.press(E.restart).then(() => toast('Restarting', 'ok'), toastError);
+    } }, 'Restart');
+    this.timeRows.push(() => {
+      const needed = store.bool(E.restartNeeded) === true;
+      note.hidden = !needed;
+      btn.classList.toggle('btn-primary', needed);
+    });
+    return h('div', {}, note, h('div', { class: 'actions' }, btn));
+  },
+
+  /** HTTPS and certificates (packages/tls.yaml, DESIGN.md section 9.7): the certificate in use, the switches, the
+   *  trust store and ACME. The parts that come from GET /feeder/tls are redrawn by updateTls; the setting rows stay
+   *  put, so typing in them is never interrupted. Null in a build without TLS. */
+  tlsCard() {
+    if (!store.has(E.httpsStatus)) return null;
+    const c = card('HTTPS and certificates');
+    c.hidden = true;
+    this.tlsBox = c;
+    this.idBox = h('div');
+    this.caBox = h('div');
+    this.acmeBox = h('div');
+    const switches = [
+      setting('Send port 80 to HTTPS', 'Opening the app at http:// moves the browser to https://. Home Assistant\'s ' +
+              'Visit link is http://, so this is what brings it to HTTPS.', E.httpsRedirect),
+      setting('HTTPS only', 'Port 80 answers nothing but that move, the setup access point\'s page and ACME. Turn it ' +
+              'on once HTTPS works in every browser you use. While HTTPS is not running, port 80 still works.',
+              E.httpsOnly),
+    ].filter(Boolean);
+    const acme = [
+      setting('ACME directory', 'Your ACME server\'s directory URL, https only; for step-ca, ' +
+              'https://<ca>/acme/<provisioner>/directory. Its CA must be in the trust store. Empty: ACME is off.',
+              E.acmeDirectory),
+      setting('ACME name', 'The name to ask a certificate for. Empty: <name>.local, which the ACME server must be ' +
+              'able to resolve.', E.acmeName),
+    ].filter(Boolean);
+    this.rows.push(...switches, ...acme);
+    append(c, this.idBox, switches, this.caBox, acme.length ? this.acmeBox : null, acme,
+           acme.length ? h('p', { class: 'hint' }, 'The ACME server checks the feeder over http:// on port 80 ' +
+                                                     '(http-01), so port 80 must be reachable from it.') : null,
+           this.restartBlock(),
+           h('p', { class: 'hint' }, 'Keys are made on the feeder or travel to it masked by the settings password. ' +
+                                     'They are kept in its flash unencrypted, like every key it holds.'));
+    // The certificate in use and ACME's progress show in these two; read the details again when either changes.
+    let seen = '';
+    this.timeRows.push(() => {
+      const now = `${store.text(E.httpsStatus)}|${store.text(E.acmeStatus)}`;
+      if (seen && now !== seen) auth.loadTls();
+      seen = now;
+    });
+    return c;
+  },
+
+  updateTls() {
+    const t = auth.tls;
+    if (this.pinBox) {
+      const pin = t && t.mqtt && t.mqtt.pin;
+      this.pinBox.replaceChildren(...(!pin ? [] : [h('div', { class: 'key-part' },
+        h('div', { class: 'setting-label' }, 'Pinned broker certificate'), h('p', { class: 'mono' }, `SHA-256 ${pin}…`),
+        h('div', { class: 'actions' }, h('button', { class: 'btn btn-small', onclick: async () => {
+          if (!await confirmDialog({ title: 'Forget the pinned certificate?', ok: 'Forget',
+                                     body: 'At the next start the feeder keeps whatever certificate the broker shows ' +
+                                           'then. Do this after the broker\'s certificate changed.' })) return;
+          auth.tlsPost('mqtt-pin/forget').then(() => toast('Forgotten: pinned again at the next start', 'ok'), toastError);
+        } }, 'Forget')))]));
+    }
+    const box = this.tlsBox;
+    if (!box || !box.isConnected) return;
+    box.hidden = !t;
+    if (!t) return;
+    const https = t.https || {}, ca = t.ca || {}, acme = t.acme;
+    const btn = (label, onclick, cls = 'btn btn-small') => h('button', { class: cls, onclick }, label);
+    const part = (title, words, actions) => h('div', { class: 'key-part' },
+      h('div', { class: 'setting-label' }, title), ...words.filter(Boolean).map(w => (typeof w === 'string' ? h('p', {}, w) : w)),
+      actions.filter(Boolean).length ? h('div', { class: 'actions' }, actions.filter(Boolean)) : null);
+    const saved = p => p.then(() => toast('Saved: used after the next restart', 'ok'), toastError);
+
+    const name = https.name || location.hostname;
+    const words = {
+      'self-signed': `Self-signed, for ${name}, until ${https.not_after}. Browsers warn about it until you trust it ` +
+                     'once; a certificate from your own CA, uploaded or from ACME, avoids that.',
+      uploaded: `Uploaded, for ${name}, until ${https.not_after}.`,
+      ACME: `From the ACME server, for ${name}, until ${https.not_after}. Renewed by the feeder.`,
+    }[https.source];
+    const url = `https://${name}${https.port && https.port !== 443 ? ':' + https.port : ''}/`;
+    this.idBox.replaceChildren(part('Certificate in use', [
+      !https.ready ? 'HTTPS is not running yet: the feeder may still be making its certificate (Diagnostics, Log).' : '',
+      words || '',
+      https.fingerprint ? h('p', { class: 'hint mono' }, `SHA-256 ${https.fingerprint}`) : null,
+      https.upload_error ? `The uploaded certificate is not used: ${https.upload_error}.` : '',
+      https.ready ? `${https.sessions} of ${https.max_sessions} HTTPS connections open.` : '',
+      https.ready && location.protocol === 'http:' ? h('p', {}, h('a', { href: url }, `Open this app over HTTPS`)) : null,
+    ], [
+      btn('Upload a certificate', () => this.identityDialog()),
+      https.source === 'uploaded' ? btn('Remove it', async () => {
+        if (!await confirmDialog({ title: 'Remove the uploaded certificate?', danger: true, ok: 'Remove',
+                                   body: 'After the next restart HTTPS uses the ACME certificate, if there is one, ' +
+                                         'else the self-signed one.' })) return;
+        saved(auth.tlsPost('identity', ''));
+      }, 'btn btn-small btn-danger') : null,
+      https.source === 'self-signed' ? btn('Make a new one', async () => {
+        if (!await confirmDialog({ title: 'Make a new self-signed certificate?', ok: 'Make',
+                                   body: 'Made at the next restart. Browsers that trusted the old one warn again.' })) return;
+        saved(auth.tlsPost('self-signed'));
+      }) : null,
+    ]));
+
+    this.caBox.replaceChildren(part('Trust store', [
+      ca.set ? `${ca.subject}.` : 'Empty.',
+      'Your own CA\'s root certificate. MQTT over TLS and ACME check their servers against it, and an ' +
+      'uploaded certificate must chain to it.',
+    ], [
+      btn(ca.set ? 'Replace' : 'Upload the CA certificate', () => this.caDialog()),
+      ca.set ? btn('Clear', async () => {
+        if (!await confirmDialog({ title: 'Clear the trust store?', danger: true, ok: 'Clear',
+                                   body: 'After the next restart MQTT over TLS checked against a CA does not start, and ' +
+                                         'ACME stops renewing.' })) return;
+        saved(auth.tlsPost('ca', ''));
+      }, 'btn btn-small btn-danger') : null,
+    ]));
+
+    if (acme) {
+      this.acmeBox.replaceChildren(part('ACME', [
+        acme.status ? `${acme.status.charAt(0).toUpperCase()}${acme.status.slice(1)}.` : '',
+        acme.directory && !ca.set ? 'Upload the ACME server\'s CA certificate to the trust store first.' : '',
+        acme.directory ? `Asks for ${acme.name}.` : 'Set the directory below to get the certificate from your own ACME ' +
+                                                   'server (step-ca, say); it is then renewed by itself.',
+      ], [
+        acme.directory ? btn('Renew now', () => auth.tlsPost('acme/renew')
+          .then(() => toast('Asking the ACME server: this takes up to a minute', 'ok'), toastError)) : null,
+      ]));
+    }
+  },
+
+  /** A PEM field for a dialog: a box to paste into, and a file to read into it. */
+  pemField(label, placeholder, hint) {
+    const text = h('textarea', { class: 'input mono', rows: 5, spellcheck: 'false', autocomplete: 'off', placeholder });
+    const file = h('input', { type: 'file', accept: '.pem,.crt,.cer,.key,.txt', 'aria-label': `${label}: file`,
+                              onchange: async () => {
+                                if (file.files[0]) text.value = await file.files[0].text();
+                              } });
+    return { text, el: field(label, h('div', {}, text, file), hint) };
+  },
+
+  async identityDialog() {
+    const chain = this.pemField('Certificate', '-----BEGIN CERTIFICATE-----',
+                                'The feeder\'s certificate first, then its intermediates (fullchain.pem).');
+    const key = this.pemField('Private key', '-----BEGIN PRIVATE KEY-----',
+                              'EC P-256 or RSA, not encrypted. It travels masked by the settings password.');
+    let pem;
+    const ok = await formDialog({ title: 'Upload a certificate', ok: 'Upload', body: [chain.el, key.el,
+      h('p', { class: 'hint' }, 'The feeder checks that the key fits the certificate and, with a CA in the trust ' +
+                                'store, that the chain leads to it. Used after the next restart.')],
+      validate: () => {
+        pem = splitPem(`${chain.text.value}\n${key.text.value}`);
+        if (!pem.certs.length) return 'No certificate (-----BEGIN CERTIFICATE-----)';
+        if (pem.encrypted && !pem.key) return 'The key is encrypted: export it without a passphrase';
+        if (!pem.key) return 'No private key (-----BEGIN PRIVATE KEY-----)';
+        if (pem.certs.join('\n').length + 1 > 6144) return 'The chain is too long: at most three certificates';
+        if (pem.key.length + 1 > 2048) return 'The key is too large';
+        return '';
+      } });
+    if (ok) {
+      auth.tlsPost('identity', { cert: pem.certs.join('\n') + '\n', key: pem.key + '\n' })
+        .then(() => toast('Checked and saved: used after the next restart', 'ok'), toastError);
+    }
+  },
+
+  async caDialog() {
+    const ca = this.pemField('CA certificate', '-----BEGIN CERTIFICATE-----', 'Your CA\'s root certificate ' +
+                             '(for step-ca, root_ca.crt), or a few in one file. Used after the next restart.');
+    let pem;
+    const ok = await formDialog({ title: 'Trust store', ok: 'Upload', body: ca.el,
+      validate: () => {
+        pem = splitPem(ca.text.value);
+        if (!pem.certs.length) return 'No certificate (-----BEGIN CERTIFICATE-----)';
+        if (pem.certs.join('\n').length + 1 > 6144) return 'Too long: at most three certificates';
+        return '';
+      } });
+    if (ok) auth.tlsPost('ca', pem.certs.join('\n') + '\n').then(() => toast('Saved: used after the next restart', 'ok'), toastError);
   },
 
   /** Board and pins (packages/hardware.yaml), and the disc's motor pins (mechanism_n20.yaml, D19): saved at once, used
@@ -193,21 +417,7 @@ PAGES.configuration = {
                      '(for example the N8R8 DevKitC-1): use them only on boards without. A servo on GPIO43 or 44 may ' +
                      'twitch at reset, when the chip prints its boot messages there.'));
     this.timeRows.push(boundRow(hw, 'In use', () => store.text(E.pinsInUse)));
-    if (store.has(E.restart)) {
-      const note = h('p', {}, 'A change is waiting for a restart.');
-      const btn = h('button', { class: 'btn', onclick: async () => {
-        if (!await confirmDialog({ title: 'Restart the feeder?', ok: 'Restart',
-                                   body: 'It is back in a few seconds and carries on feeding by itself. Refused ' +
-                                         'while the tray moves.' })) return;
-        api.press(E.restart).then(() => toast('Restarting', 'ok'), toastError);
-      } }, 'Restart');
-      hw.appendChild(h('div', {}, note, h('div', { class: 'actions' }, btn)));
-      this.timeRows.push(() => {
-        const needed = store.bool(E.restartNeeded) === true;
-        note.hidden = !needed;
-        btn.classList.toggle('btn-primary', needed);
-      });
-    }
+    append(hw, this.restartBlock());
     return hw;
   },
 
@@ -248,7 +458,7 @@ PAGES.configuration = {
     const box = this.keys;
     if (!box || !box.isConnected) return;
     const k = auth.keys;
-    box.hidden = !auth.available || (k.api === 'off' && k.ble === 'off' && !this.keyRows.length);
+    box.hidden = !auth.available || (k.api === 'off' && k.ble === 'off' && !this.keyRows.length && !this.bondPart);
     while (box.children.length > 1) box.lastChild.remove();
     const btn = (label, onclick, cls = 'btn btn-small') => h('button', { class: cls, onclick }, label);
     const part = (title, words, actions) => h('div', { class: 'key-part' },
@@ -283,6 +493,7 @@ PAGES.configuration = {
       }
       box.appendChild(part('Bluetooth key', words, actions));
     }
+    if (this.bondPart) box.appendChild(this.bondPart);
     for (const r of this.keyRows) box.appendChild(r);
     box.appendChild(h('p', { class: 'hint' }, 'A key is shown once, when it is made: copy it then. ' +
       (auth.set ? 'It travels to the feeder masked by the settings password.'

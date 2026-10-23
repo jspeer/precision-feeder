@@ -5,7 +5,7 @@ at 2.3.1. It follows proposal E9 of [https-tls.md](https-tls.md), which left the
 owner decided (2026-10-23, DESIGN.md decisions D33 to D35): NimBLE first, before TLS; non-breaking, so
 `ble_gatt.yaml` itself moves to NimBLE and there is no Bluedroid overlap release (replaces B1); no phones, the clients
 are a PLC bridge and scripts, and the Python client is enough for the bench (M2's phone pairing and "Forget BLE
-bonds" are dropped or wait for the configuration page). B2, B3, B5, B6, B7 and B9 are as proposed; B4 without the
+bonds" are dropped or wait for the configuration page; "Forget BLE bonds" came in 2.4.3, in Configuration, Keys, D41). B2, B3, B5, B6, B7 and B9 are as proposed; B4 without the
 button for now; B8 and B10 are overtaken by the new order (the controller trim is part of the port).
 
 Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).

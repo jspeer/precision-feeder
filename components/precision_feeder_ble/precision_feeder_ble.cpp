@@ -216,7 +216,31 @@ std::string PrecisionFeederBle::activity_json_copy() {
 void PrecisionFeederBle::on_sync() {
   ble_hs_util_ensure_addr(0);  // the chip's public address, as the Bluedroid build used
   ble_hs_id_infer_auto(0, &this->own_addr_type_);
+  this->count_bonds_();
   this->advertise_();
+}
+
+void PrecisionFeederBle::count_bonds_() {
+  ble_addr_t peers[MYNEWT_VAL(BLE_STORE_MAX_BONDS)];
+  int n = 0;
+  if (ble_store_util_bonded_peers(peers, &n, MYNEWT_VAL(BLE_STORE_MAX_BONDS)) == 0)
+    this->bonds_ = n;
+}
+
+void PrecisionFeederBle::forget_bonds() {
+  if (!this->stack_ok_)
+    return;
+  ble_addr_t peers[MYNEWT_VAL(BLE_STORE_MAX_BONDS)];
+  int n = 0, forgotten = 0;
+  if (ble_store_util_bonded_peers(peers, &n, MYNEWT_VAL(BLE_STORE_MAX_BONDS)) == 0) {
+    for (int i = 0; i < n; i++) {
+      // Deletes its keys and its subscriptions from the store, and ends its connection if it has one.
+      if (ble_gap_unpair(&peers[i]) == 0)
+        forgotten++;
+    }
+  }
+  this->count_bonds_();
+  ESP_LOGW(TAG, "Bluetooth bonds forgotten from the web app: %d of %d", forgotten, n);
 }
 
 void PrecisionFeederBle::advertise_() {
@@ -271,7 +295,11 @@ int PrecisionFeederBle::on_gap_event(ble_gap_event *event) {
       this->conn_handle_ = BLE_HS_CONN_HANDLE_NONE;
       this->subscriptions_ = 0;
       this->queue_.push_disconnect();
+      this->count_bonds_();
       this->advertise_();
+      break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+      this->count_bonds_();  // pairing may have added a bond (or replaced the oldest)
       break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
       this->advertise_();

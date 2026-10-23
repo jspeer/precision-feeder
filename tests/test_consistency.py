@@ -59,8 +59,9 @@ def yaml_entities() -> dict[str, dict[str, float]]:
     return entities
 
 
-def entity_domains() -> dict[str, str]:
-    """name -> the top-level YAML key it is defined under (number, switch, ...), for every package entity."""
+def entity_domains() -> dict[str, set[str]]:
+    """name -> the top-level YAML keys it is defined under (number, switch, ...), for every package entity. A name can
+    be in two domains: "MQTT TLS" is a switch and a text sensor."""
     domains = {}
     for path in (ROOT / "packages").glob("*.yaml"):
         domain = None
@@ -70,7 +71,7 @@ def entity_domains() -> dict[str, str]:
                 domain = m.group(1)
             m = re.match(r'\s+name: "(.*)"', line)
             if m and domain:
-                domains[m.group(1)] = domain
+                domains.setdefault(m.group(1), set()).add(domain)
     return domains
 
 
@@ -206,7 +207,7 @@ class Consistency(unittest.TestCase):
         for entry in listed:
             domain, name = entry.split("/", 1)
             self.assertIn(name, self.e, f"protected entity {entry!r} not found in packages/")
-            self.assertEqual(entity_domains().get(name), domain, entry)
+            self.assertIn(domain, entity_domains().get(name, set()), entry)
         names = {entry.split("/", 1)[1] for entry in listed}
         for guard in ("Minimum Gap Between Feeds", "Gap Between Portions", "Daily Portion Cap",
                       "Portions Counted (24 h)", "Max Portions Per Command"):

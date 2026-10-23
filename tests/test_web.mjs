@@ -14,7 +14,7 @@ const src = readFileSync(new URL('../web/src/parse.js', import.meta.url), 'utf8'
 const ctx = vm.createContext({});
 vm.runInContext(`${src}\nthis.P = { parseKV, parseList, parseLocalDateTime, parseDeviceTime, formatClock, formatDate,
   formatDuration, parseLogLine, parseTodaysFeeds, parseRecentFeeds, parseLastFeed, sourceLabel, relativeDay, parseHold, parseScheduleData, daysText, eventTimeText, parseOneshots, addressKind, compareVersions,
-  updateState, identifyImage, parseWifiNetworks, wifiChoice };`, ctx);
+  updateState, identifyImage, parseWifiNetworks, wifiChoice, splitPem };`, ctx);
 const P = ctx.P;
 // Objects made inside the context have their own prototypes; compare them as plain data.
 const plain = x => JSON.parse(JSON.stringify(x));
@@ -156,10 +156,28 @@ test('address kinds', () => {
   assert.equal(P.addressKind('::'), '');
 });
 
+test('splitPem: certificates and the key out of what was pasted (2.4.3)', () => {
+  const cert = n => `-----BEGIN CERTIFICATE-----\nMII${n}\n-----END CERTIFICATE-----`;
+  const ec = '-----BEGIN EC PRIVATE KEY-----\nMHc\n-----END EC PRIVATE KEY-----';
+  const pk8 = '-----BEGIN PRIVATE KEY-----\nMIG\n-----END PRIVATE KEY-----';
+  let r = P.splitPem(`Bag Attributes\n${cert('A')}\nsubject=x\n${cert('B')}\n${ec}\n`);
+  assert.deepEqual(plain(r), { certs: [cert('A'), cert('B')], key: ec, encrypted: false });
+  r = P.splitPem(pk8);
+  assert.deepEqual(plain(r), { certs: [], key: pk8, encrypted: false });
+  r = P.splitPem('-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIH\n-----END ENCRYPTED PRIVATE KEY-----');
+  assert.equal(r.key, '');
+  assert.equal(r.encrypted, true);
+  r = P.splitPem('-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nx\n-----END RSA PRIVATE KEY-----');
+  assert.equal(r.encrypted, true, 'an old-style encrypted key');
+  assert.deepEqual(plain(P.splitPem('-----BEGIN CERTIFICATE-----\nMII')), { certs: [], key: '', encrypted: false },
+                   'a block cut off is not a block');
+  assert.deepEqual(plain(P.splitPem(undefined)), { certs: [], key: '', encrypted: false });
+});
+
 // ---- the settings password (web/src/auth.js): the same answers as the device (tests/test_core.cpp) ----
 const authSrc = readFileSync(new URL('../web/src/auth.js', import.meta.url), 'utf8');
 const actx = vm.createContext({ TextEncoder, atob, btoa });
-vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey, maskText,
+vm.runInContext(`${authSrc}\nthis.A = { sha256, hmacSha256, pbkdf2Sha256, toHex, fromHex, utf8, authHeader, authMessage, maskKey, maskText, maskBlob,
                                        keyToBase64, keyFromBase64 };`, actx);
 const A = actx.A;
 
@@ -207,6 +225,17 @@ test('network: secret texts masked as the device unmasks them (2.0.0 N5)', () =>
   assert.equal(A.toHex(A.maskText(text, key, nonce)),
                'a8685e68331b4ef6464670da56f92f1fcdcfcab7533f75b6a2a34b3a2eed915476e0934605b6633c2ac93e3d');
   assert.equal(A.toHex(A.maskText('hello', null, nonce)), A.toHex(A.utf8('hello')), 'no password: not masked');
+});
+
+test('HTTPS: a private key masked as the device unmasks it (2.4.3)', () => {
+  // tests/test_core.cpp's blob: 100 bytes, A to Z repeated, four HMAC blocks with a 4-byte counter.
+  const key = A.fromHex('f353b5100691ea4531a49c82821a088e2083178c2c6954a17a1ec53b3900da25');
+  const nonce = Uint8Array.from({ length: 16 }, (_, i) => 16 + i);
+  const blob = Uint8Array.from({ length: 100 }, (_, i) => 65 + i % 26);
+  assert.equal(A.toHex(A.maskBlob(blob, key, nonce)),
+               'be0003998b68762c46278b43e41eaaa1b95e790aa3cc8ba8e75fd08043937577f5cff307fe12ca53da72f0a7383d624f' +
+               '2a65d55fa59e1b203870bcd9be058f5d0f716b6bdc6f036090cef92623c4fb3f3e3c7c704320fe313767f91d48bb573eebb93c3d');
+  assert.equal(A.toHex(A.maskBlob(blob, null, nonce)), A.toHex(blob), 'no password: not masked');
 });
 
 test('keys: base64 in and out (2.0.0 N4)', () => {

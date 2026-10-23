@@ -48,6 +48,10 @@ PAGES.bluetooth = {
                                       off: 'Refused' }[this.info().time] || this.info().time || ''));
     p('Key', () => ({ none: 'None set: every client is refused', build: 'From the YAML',
                       device: 'Saved on the feeder' }[this.info().key] || '—'));
+    p('Paired clients', () => {  // 2.4.3: bonds kept, at most 3 (forgotten in Configuration, Keys)
+      const n = this.info().bonds;
+      return n === undefined ? '—' : `${n} of at most 3`;
+    });
     p('Clients may change', () => {
       const i = this.info();
       if (i.guard === undefined) return '—';

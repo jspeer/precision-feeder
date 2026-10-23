@@ -21,9 +21,8 @@ from the internet.
 - **HTTPS** (2.4.1, the `tls` package, in the prebuilt firmware): the app is also at `https://<name>.local`, and
   opening it on plain HTTP (Home Assistant's "Visit" link too) sends you there. The feeder's certificate is
   self-signed: your browser warns the first time; accept it once for that feeder. Since 2.4.2 it can get a
-  trusted certificate from your own ACME server (step-ca, say) instead. The certificates, ACME and the trust store get
-  their own page in 2.4.3; until then they are set through `/feeder/tls` and the ACME Directory setting (DESIGN.md
-  section 9.7).
+  trusted certificate from your own ACME server (step-ca, say) instead, or use one you upload (Configuration, HTTPS
+  and certificates, since 2.4.3).
 - **Phones:** the tabs move to a bar at the bottom. Add the page to your home screen
   for an app-like shortcut.
 
@@ -77,11 +76,20 @@ else the feeder lists under Faults.
     saved on the feeder); generate one (made in the browser and shown once), enter
     your own, or clear a key saved on the feeder (the Home Assistant key, and since 2.3.0 the Bluetooth key),
     where the build allows it; and the two
-    switches for what Bluetooth may change. The feeder never sends a key back;
+    switches for what Bluetooth may change. The feeder never sends a key back. Since 2.4.3, how many Bluetooth
+    clients have paired, and Forget pairings (they must pair again; clients that never paired, and the key, are
+    unchanged);
   - MQTT (with the `mqtt` package, 2.1.0): on or off, the broker, port, username,
-    password and topic prefix, whether it is connected and the prefix in use; and (2.2.0) whether MQTT may
-    change the safety limits. Saved at once; once MQTT has connected, changes are used after a restart.
-    The password is never shown or sent back.
+    password and topic prefix, whether it is connected and the prefix in use; and (2.4.3, with the `mqtt_tls`
+    package) TLS, how the broker is checked (a CA certificate, or pinned on first contact), the TLS status and the
+    pinned certificate, with Forget. Saved at once; once MQTT has connected, changes are used after a restart.
+    The password is never shown or sent back;
+  - HTTPS and certificates (2.4.3, with the `tls` package): the certificate in use (self-signed, uploaded or from
+    ACME; its name, expiry and fingerprint), upload a certificate and key of your own (pasted or from files; the key
+    travels masked by the settings password), remove it or make a new self-signed one, Send port 80 to HTTPS and
+    HTTPS only, the trust store (your CA's root certificate: upload, replace, clear), and ACME (the directory, the
+    name, its status and Renew now). An upload is checked by the feeder and used after a restart; ACME's
+    certificate is used at once.
 - **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
   Configuration (Device). Steps: welcome, network, time zone (by place) and location,
   board and pins, keys, settings password, calibration. Each saves as it goes and can be

@@ -14,6 +14,7 @@ wrong is the device's word that counts.
     python3 tools/mock_device.py --auth user:pass    HTTP basic authentication, as web_server's auth: block
     python3 tools/mock_device.py --unknown           start with the tray position unknown
     python3 tools/mock_device.py --mechanism n20     the direct-drive disc (packages/mechanism_n20.yaml) instead of the servo
+    python3 tools/mock_device.py --no-tls            as a build without tls.yaml, mqtt_tls.yaml and acme.yaml
 
 Standard library only. The app is served from web/dist/ (app.js, app.css) when it exists.
 
@@ -123,6 +124,7 @@ class Feeder:
         self.unknown = args.unknown
         self.calibrating = False
         self.history: list[tuple[float, int, str]] = []  # (epoch, portions, source), newest first
+        self.bonds = 1  # BLE clients that paired (2.4.3)
         self.last_feed_mono = -1e9
         self.hold_until: float | None = None
         self.edit_profile, self.edit_event = 0, 0
@@ -152,6 +154,18 @@ class Feeder:
         self.wifi_found = [("example-network", -58, True), ("Café upstairs", -66, True), ("guest", -71, False),
                            ("neighbour-5G", -84, True)]
         self.wifi_scan_at = 0.0
+        # HTTPS, the trust store, MQTT over TLS and ACME, as GET /feeder/tls reports them (2.4.1, 2.4.2). A change
+        # waits for a restart (tls_pending), except ACME's renewal and forgetting the pin, as on the device.
+        self.tls = {"https": {"ready": True, "port": 443, "sessions": 1, "max_sessions": 4, "redirect": True,
+                              "https_only": False, "source": "self-signed", "name": "precision-feeder.local",
+                              "subject": "CN=precision-feeder.local", "not_after": "2036-01-01",
+                              "fingerprint": "3f:a9:0c:51:7e:22:b8:d4:61:0a:9e:c3:58:17:f0:2b:4d:93:6c:e1:05:7a:bb:12:"
+                                             "c8:3e:90:44:d7:21:6f:a8", "upload_error": ""},
+                    "ca": {"set": False, "subject": ""},
+                    "mqtt": {"status": "off", "pin": ""},
+                    "acme": {"directory": "", "name": "precision-feeder.local", "status": "off", "until": "",
+                             "error": ""}}
+        self.tls_pending: dict = {}
         self.entities: dict[str, Entity] = {}
         self._build(args)
 
@@ -289,6 +303,28 @@ class Feeder:
                  "(network time is fresh)", "detail": 0},
                 {"id": 4, "t": 9, "kind": "record", "name": "CONFIG_WRITE", "seq": 3, "result": "ok", "detail": 5},
             ]
+        if not getattr(args, "no_ble", False):
+            a("button", "Forget BLE Bonds", icon="mdi:link-variant-off", category=CONFIG)
+        # mqtt.yaml
+        a("switch", "MQTT", False, icon="mdi:server-network", category=CONFIG)
+        a("text", "MQTT Broker", "", icon="mdi:server", category=CONFIG, max_length=63)
+        a("number", "MQTT Port", 1883, icon="mdi:ethernet", category=CONFIG, min_value=1, max_value=65535, step=1)
+        a("text", "MQTT Username", "", icon="mdi:account", category=CONFIG, max_length=63)
+        a("text", "MQTT Password", "", icon="mdi:key", category=CONFIG, max_length=63, mode=1)
+        a("text", "MQTT Topic Prefix", "", icon="mdi:format-text", category=CONFIG, max_length=63)
+        a("binary_sensor", "MQTT Connected", False, icon="mdi:lan-connect", category=DIAGNOSTIC)
+        a("text_sensor", "MQTT Topic Prefix In Use", "precision-feeder", category=DIAGNOSTIC)
+        if not getattr(args, "no_tls", False):  # tls.yaml, mqtt_tls.yaml, acme.yaml
+            a("switch", "HTTPS Redirect", True, icon="mdi:lock-check", category=CONFIG)
+            a("switch", "HTTPS Only", False, icon="mdi:lock", category=CONFIG)
+            a("text_sensor", "HTTPS", "", icon="mdi:certificate", category=DIAGNOSTIC)
+            a("switch", "MQTT TLS", False, icon="mdi:lock-outline", category=CONFIG)
+            a("select", "MQTT TLS Check", "CA certificate", icon="mdi:certificate-outline", category=CONFIG,
+              options=["CA certificate", "Pin on first contact"])
+            a("text_sensor", "MQTT TLS", "off", icon="mdi:shield-lock-outline", category=DIAGNOSTIC)
+            a("text", "ACME Directory", "", icon="mdi:certificate", category=CONFIG, max_length=255)
+            a("text", "ACME Name", "", icon="mdi:dns", category=CONFIG, max_length=253)
+            a("text_sensor", "ACME", "off", icon="mdi:certificate-outline", category=DIAGNOSTIC)
         if not args.no_network:  # network_info.yaml (ESPHome's wifi_info and wifi_signal)
             a("text_sensor", "Wi-Fi Network", "example-network", category=DIAGNOSTIC)
             a("text_sensor", "IP Address", "192.168.1.40", category=DIAGNOSTIC)
@@ -443,12 +479,17 @@ class Feeder:
         s("select", "Button Pin", pins[1])
         s("select", "LED Pin", pins[2])
         s("text_sensor", "Pins In Use", "servo {}, button {}, LED {}".format(*self.pins_in_use))
-        s("binary_sensor", "Restart Needed", pins != self.pins_in_use or self.network_restart())
+        s("binary_sensor", "Restart Needed", pins != self.pins_in_use or self.network_restart() or bool(self.tls_pending))
+        if "text_sensor/HTTPS" in self.entities:
+            h = self.tls["https"]
+            s("text_sensor", "HTTPS", f"{h['source']} {h['name']} until {h['not_after']}")
+            s("text_sensor", "ACME", self.tls["acme"]["status"])
+            s("text_sensor", "MQTT TLS", self.tls["mqtt"]["status"])
         if "text_sensor/BLE Info" in self.entities:
             s("text_sensor", "BLE Info", "service=02dd1dd9-ba75-4bbc-bdea-306d21010001;protocol=2;auth=hmac-sha256;"
               f"time=fallback_only;stale_h=24;key={self.keys['ble']};"
               f"guard={int(self.get('switch', 'BLE Can Change Guard Limits'))};"
-              f"calibration={int(self.get('switch', 'BLE Can Change Calibration'))}")
+              f"calibration={int(self.get('switch', 'BLE Can Change Calibration'))};bonds={self.bonds}")
         if "switch/Calibration Mode" in self.entities:
             s("switch", "Calibration Mode", self.calibrating)
         if "select/Calibration Position" in self.entities:
@@ -567,7 +608,13 @@ class Feeder:
                 self.pins_in_use = self.effective_pins()
                 self.network_boot = (self.network["name_saved"], self.network["ap"])
                 self.network["name"] = self.network["name_saved"] or self.network["name_build"]
+                for part, values in self.tls_pending.items():
+                    self.tls[part].update(values)
+                self.tls_pending = {}
                 self.started = time.monotonic()
+            elif name == "Forget BLE Bonds":
+                self.log("W", "precision_feeder_ble", f"Bluetooth bonds forgotten from the web app: {self.bonds} of {self.bonds}")
+                self.bonds = 0
             elif name == "Declare Tray Position":
                 self.position, self.unknown = int(self.get("number", "Declared Tray Position")), False
         elif domain == "switch" and action in ("turn_on", "turn_off", "toggle"):
@@ -646,6 +693,16 @@ class Feeder:
                 # The device parses it (tz_rules.h); the mock only keeps it, and shows the clock as before.
                 self.set("text", "Timezone", value.strip())
                 self.log("I", "precision_feeder", f"Timezone set to {value.strip() or 'the build' + chr(39) + 's'}")
+            elif name in ("ACME Directory", "ACME Name"):
+                self.set("text", name, value)
+                acme = self.tls["acme"]
+                acme["directory"] = self.get("text", "ACME Directory")
+                acme["name"] = self.get("text", "ACME Name") or self.tls["https"]["name"]
+                acme["status"] = "off" if not acme["directory"] else "waiting for a CA certificate in the trust " \
+                    "store" if not self.tls["ca"]["set"] else f"certificate for {acme['name']} until 2026-10-25 " \
+                    "09:12 UTC, renewed after 2026-10-24 17:12 UTC"
+            elif name in ("MQTT Broker", "MQTT Username", "MQTT Password", "MQTT Topic Prefix"):
+                self.set("text", name, value)
             elif name == "Add One-shot Feed" and value:
                 try:
                     t = time.mktime(time.strptime(value, "%Y-%m-%d %H:%M"))
@@ -674,15 +731,18 @@ class Feeder:
 
 
 def protected_entities() -> list[str]:
-    """The settings guard's list, read from packages/web_server.yaml (the device's own list)."""
-    names, inside = [], False
-    for line in (ROOT / "packages/web_server.yaml").read_text().splitlines():
-        if line.strip() == "protected_entities:":
-            inside = True
-        elif inside and line.strip().startswith("- "):
-            names.append(line.strip()[2:])
-        elif inside and line.strip() and not line.strip().startswith("#"):
-            inside = False
+    """The settings guard's list: every package's protected_entities, which the device joins (a full build has them
+    all; web_server.yaml holds most)."""
+    names = []
+    for package in sorted((ROOT / "packages").glob("*.yaml")):
+        inside = False
+        for line in package.read_text().splitlines():
+            if line.strip() == "protected_entities:":
+                inside = True
+            elif inside and line.strip().startswith("- "):
+                names.append(line.strip()[2:])
+            elif inside and line.strip() and not line.strip().startswith("#"):
+                inside = False
     return names
 
 
@@ -712,6 +772,15 @@ class SettingsPassword:
             return None
         mask = hmac.new(current, nonce + b"new key", hashlib.sha256).digest() if current else bytes(32)
         return bytes(a ^ b for a, b in zip(bytes.fromhex(key_hex), mask))
+
+    def unmask_blob(self, nonce: bytes, masked: bytes) -> bytes:
+        """A long secret (FeederCore::password_unmask_blob): HMAC blocks with a 4-byte counter, none without a password."""
+        out = bytearray()
+        for at in range(0, len(masked), 32):
+            mask = hmac.new(self.key, nonce + b"new secret blob" + (at // 32).to_bytes(4, "big"),
+                            hashlib.sha256).digest() if self.key else bytes(32)
+            out += bytes(a ^ b for a, b in zip(masked[at:at + 32], mask))
+        return bytes(out)
 
     def unmask_text(self, nonce: bytes, masked_hex: str) -> str:
         """A secret text sent masked (FeederCore::password_unmask_text): two HMAC blocks, none without a password."""
@@ -801,6 +870,9 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                     body = {"scan": feeder.network["wifi"], "scanning": scanning,
                             "networks": [{"ssid": n.encode().hex(), "rssi": r, "secured": s} for n, r, s in feeder.wifi_found]}
                 return self._send(200, json.dumps(body).encode(), "application/json")
+            if path == "/feeder/tls" and "text_sensor/HTTPS" in feeder.entities:
+                with feeder.lock:
+                    return self._send(200, json.dumps(feeder.tls).encode(), "application/json")
             if path == "/feeder/ble" and hasattr(feeder, "ble_activity"):
                 with feeder.lock:
                     body = json.dumps({"entries": feeder.ble_activity}).encode()
@@ -818,6 +890,10 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 return
             path, parts, params = self._parts()
             length = int(self.headers.get("Content-Length") or 0)
+            if path.startswith("/feeder/tls/") and "text_sensor/HTTPS" in feeder.entities:
+                body = self.rfile.read(length) if length else b""
+                with feeder.lock:
+                    return self._send(*self._tls(path, body, params, self.headers.get("X-Feeder-Auth")))
             if length:
                 params.update({k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()})
             header = self.headers.get("X-Feeder-Auth")
@@ -911,6 +987,51 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 feeder.log("W", "precision_feeder", "Wi-Fi network set from the web app: joining it now")
             return 200, b"{}", "application/json"
 
+        def _tls(self, path: str, body: bytes, params: dict, header: str | None) -> tuple:
+            """POST /feeder/tls/...: signed over the path and the body's SHA-256, as precision_feeder_tls.cpp checks
+            them. The mock only looks for the PEM blocks; the device parses and checks them with mbedTLS."""
+            js = "application/json"
+            sha = hashlib.sha256(body).hexdigest()
+            if params.get("sha256") != sha:
+                return 400, b'{"error":"sha256"}', js
+            nonce = bytes.fromhex(header[:32]) if header else bytes(16)
+            if not password.check(header, f"{path}\n{sha}"):
+                return 403, b'{"error":"refused","wait":0}', js
+            text = body.decode("latin-1")
+            what = path[len("/feeder/tls/"):]
+            if what == "ca":
+                if text and "-----BEGIN CERTIFICATE-----" not in text:
+                    return 422, b'{"error":"certificate"}', js
+                feeder.tls_pending["ca"] = {"set": bool(text), "subject": "CN=Example Root CA" if text else ""}
+                feeder.log("I", "precision_feeder_tls", "Trust store " + ("set: CN=Example Root CA" if text else "cleared"))
+            elif what == "identity":
+                if text:
+                    key_hex, _, chain = text.partition("\n")
+                    try:
+                        key = password.unmask_blob(nonce, bytes.fromhex(key_hex)).decode("latin-1")
+                    except ValueError:
+                        return 400, b'{"error":"request"}', js
+                    if "-----BEGIN CERTIFICATE-----" not in chain:
+                        return 422, b'{"error":"certificate"}', js
+                    if "PRIVATE KEY-----" not in key:
+                        return 422, b'{"error":"key"}', js
+                feeder.tls_pending["https"] = {"source": "uploaded" if text else "self-signed",
+                                               "not_after": "2027-10-23" if text else "2036-01-01"}
+                feeder.log("I", "precision_feeder_tls", "HTTPS certificate " + ("uploaded" if text else "cleared (self-signed)")
+                           + "; used after a restart")
+            elif what == "self-signed":
+                feeder.tls_pending["https"] = {"source": "self-signed"}
+            elif what == "acme/renew":
+                if not feeder.tls["acme"]["directory"]:
+                    return 409, b'{"error":"acme off"}', js
+                feeder.log("I", "precision_feeder_tls", "ACME: renewing now")
+            elif what == "mqtt-pin/forget":
+                feeder.tls["mqtt"]["pin"] = ""
+            else:
+                return 404, b"{}", js
+            feeder.refresh()
+            return 200, b'{"restart":true}' if what in ("ca", "identity", "self-signed") else b"{}", js
+
         def _events(self):
             q: queue.Queue = queue.Queue()
             self.send_response(200)
@@ -974,6 +1095,7 @@ def main():
     ap.add_argument("--no-diagnostics", action="store_true", help="as a build without the diagnostics package")
     ap.add_argument("--no-network", action="store_true", help="as a build without the network_info package")
     ap.add_argument("--no-ble", action="store_true", help="as a build without the ble_gatt package")
+    ap.add_argument("--no-tls", action="store_true", help="as a build without tls.yaml, mqtt_tls.yaml and acme.yaml")
     ap.add_argument("--unknown", action="store_true", help="start with the tray position unknown")
     ap.add_argument("--dual", action="store_true", help="a firmware with both drives: Drive, and the board and pins")
     ap.add_argument("--mechanism", choices=["servo", "n20"], default="servo",
