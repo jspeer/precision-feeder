@@ -9,10 +9,6 @@ with support for a servo fan tray and a gear-motor-driven disc. Both use the sam
 **[Install a published release](https://jspeer.github.io/precision-feeder/)** ·
 **[First-time setup](docs/INSTALL.md)** · **[Daily use](docs/USING.md)** · **[Build from source](docs/BUILDING.md)**
 
-> **Validation status:** the current audit fixes have passed host tests and compilation; physical testing is
-> pending. Tested behavior and outstanding checks are recorded in [BENCH.md](docs/BENCH.md) and
-> [DESIGN.md](DESIGN.md#14-open-items). Neither mechanism has months of unattended daily use behind it.
-
 *Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Designed and written with the assistance
 of an AI (Anthropic's Claude), directed and tested on real hardware by a human. The code and documentation may
 contain mistakes; test your own feeder before relying on it.*

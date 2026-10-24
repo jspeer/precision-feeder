@@ -1,7 +1,7 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **source version 2.4.6, not tagged; 2.4.5 disc-rig smoke tests passed, broader audit verification remains open** (section 15).
-The latest tagged version recorded here is 2.3.1; 2.4.4 was tested on the disc rig (docs/BENCH.md). This is the current design;
+Status: **release version 2.4.6; 2.4.5 disc-rig smoke tests passed, broader audit verification remains open** (section 15).
+The current release is 2.4.6; 2.4.4 was tested on the disc rig (docs/BENCH.md). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
@@ -1792,10 +1792,10 @@ precision-feeder/
     verify refusal while the access point is up. Other audit checks remain: the masked MQTT password and the
     upgrade of 2.4.4's saved certificates.
 
-## 15. Implementation status (v2.4.5)
+## 15. Implementation status (v2.4.6)
 
 The current source implements the behavior in sections 3 to 10, subject to the limits and open items in section 14.
-It is not tagged. The current source passed host checks, both prebuilt builds and disc-rig BLE, motion, guard and
+The current source passed host checks, both prebuilt builds and disc-rig BLE, motion, guard and
 HTTPS smoke tests (docs/BENCH.md). This does not close the broader audit and endurance checks in section 14.
 
 | Area | Current state |
