@@ -21,11 +21,12 @@
 # - Both switches are web app only and need the settings password when one is set.
 # - The trust store (one CA certificate, for MQTT over TLS and to check an uploaded certificate) and the uploads are
 #   at /feeder/tls (DESIGN.md section 9.7).
-# - Each HTTPS session takes about 15 KB of heap while open; at most `max_sessions` at once.
+# - Each HTTPS session takes about 20 KB of heap while open; at most `max_sessions` at once (3: more left too little
+#   heap on the bench with BLE, docs/BENCH.md).
 
 precision_feeder_tls:
   id: feeder_tls
-  # max_sessions: 4      # HTTPS sessions at once (1 to 6); a connection beyond waits for a free one
+  # max_sessions: 3      # HTTPS sessions at once (1 to 6); a connection beyond waits for a free one
   # idle_timeout: 20s    # an idle session gives its slot back (12 s to 5 min)
 
 precision_feeder:

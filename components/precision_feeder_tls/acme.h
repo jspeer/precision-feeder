@@ -261,7 +261,8 @@ inline uint32_t retry_delay_s(uint32_t failures) {
 /// The certificate ACME last issued, as far as renewal cares.
 struct Issued {
   bool have{false};
-  bool same{false};  // issued for the name and the directory set now
+  bool same_name{false};  // issued for the name in use now
+  bool same_dir{false};   // and by the directory set now
   int64_t not_before{0}, not_after{0};
 };
 
@@ -274,15 +275,17 @@ inline int64_t renew_at(const Issued &c) { return c.not_before + (c.not_after - 
 inline bool due(int64_t now, bool clock_valid, const Issued &c, int64_t next_try) {
   if (!clock_valid || now < next_try)
     return false;
-  if (!c.have || !c.same)
+  if (!c.have || !c.same_name || !c.same_dir)
     return true;
   return now >= renew_at(c);
 }
 
-/// Whether an issued certificate may be served: within its dates. Without a valid clock it is used as it is (the
-/// feeder cannot tell, and a restart before the clock is set must not drop a good certificate).
+/// Whether an issued certificate may be served: for the name in use, within its dates. One from a directory set
+/// before stays until the new one delivers or it expires, as after any failed renewal (a typo in the directory must
+/// not cost a working certificate). Without a valid clock it is used as it is (the feeder cannot tell, and a restart
+/// before the clock is set must not drop a good certificate).
 inline bool servable(int64_t now, bool clock_valid, const Issued &c) {
-  if (!c.have || !c.same)
+  if (!c.have || !c.same_name)
     return false;
   return !clock_valid || (now >= c.not_before && now < c.not_after);
 }
@@ -360,11 +363,12 @@ inline std::string protected_header(const std::string &nonce, const std::string 
 
 enum class Method : uint8_t { GET, HEAD, POST };
 
-/// One answer of the server. `ok` false: no answer at all (name not found, TLS refused, timeout).
+/// One answer of the server. `ok` false: no answer at all (name not found, TLS refused, timeout), and `why` says
+/// which when the device can tell.
 struct Answer {
   bool ok{false};
   int status{0};
-  std::string body, nonce, location;
+  std::string body, nonce, location, why;
 };
 
 /// The device's side: an HTTPS client checked against the trust store, and the account key.
@@ -421,7 +425,7 @@ class Client {
   /// The server's own words about a failed request ("detail" of its problem document), else its status.
   static std::string problem(const Answer &a) {
     if (!a.ok)
-      return "no answer";
+      return a.why.empty() ? "no answer" : a.why;
     const std::string detail = json::get(a.body, "detail");
     return detail.empty() ? "HTTP " + std::to_string(a.status) : detail.substr(0, 120);
   }

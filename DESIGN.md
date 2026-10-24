@@ -661,7 +661,9 @@ error (insufficient resources), never dropped silently; the client retries, and 
 The advertising is the Bluedroid build's: the flags and the 128-bit service UUID, the name (with the MAC suffix
 rules of `esp32_ble`) and the transmit power in the scan response; one client at a time. NimBLE is trimmed to one
 link (small buffer pools, no BLE 5 extras, no scanning, two controller activities): its defaults cost as much heap
-as Bluedroid (docs/BENCH.md). The package cannot share a build with `esp32_ble` or anything built on it; the build
+as Bluedroid (docs/BENCH.md). The controller keeps its central role (`CONFIG_BT_CTRL_BLE_MASTER`): without it the
+ESP32-S3's controller refuses every advertising start with HCI error 0x12, so the feeder was never seen (found on the
+bench with 2.4.3, fixed in 2.4.4, D42). The package cannot share a build with `esp32_ble` or anything built on it; the build
 refuses the combination. BLE is a build option: HA-only builds leave the package out and pay nothing.
 `bluetooth_proxy` must not be enabled on this device. All records fit the default
 20-byte payload, so no MTU negotiation is needed. UUID base:
@@ -911,12 +913,16 @@ binaries, HTTPS in the examples. The decisions are plain C++ in `tls_policy.h` (
 client in `acme.h` (`tests/test_acme.cpp`); `precision_feeder_tls.cpp` is the device's side. Measurements and the options
 weighed: docs/plans/https-tls.md.
 
-- **HTTPS is a relay (D37).** A task listens on port 443; each connection gets its own task (6 KB stack, about 15 KB
+- **HTTPS is a relay (D37).** A task listens on port 443; each connection gets its own task (6 KB stack, about 20 KB
   of heap while open), does the TLS handshake with esp-tls (TLS 1.2, session tickets, ECDHE with P-256) and copies
   plain bytes to and from ESPHome's web server on 127.0.0.1:80. Every handler (the app, `/events`, the settings guard,
-  the signed firmware upload) works unchanged over both. At most `max_sessions` (4, 1 to 6) at once; a connection
-  beyond waits in the backlog. A session idle both ways for `idle_timeout` (20 s, 12 s to 5 min) is closed (an open
-  page's event stream sends something every 10 s). mbedTLS buffers: 16 KB in, 4 KB out, allocated while needed.
+  the signed firmware upload) works unchanged over both. At most `max_sessions` (3, 1 to 6; 4 until 2.4.4, D42) at
+  once; a connection beyond waits in the backlog (3). A session idle both ways for `idle_timeout` (20 s, 12 s to
+  5 min) is closed (an open page's event stream sends something every 10 s). mbedTLS buffers: 16 KB in, 4 KB out,
+  allocated while needed. Every TLS task runs on core 0, never on core 1 where ESPHome's loop runs the feeder. The
+  relay closes the browser's socket itself (`esp_tls_server_session_delete` frees only the TLS state), gives its
+  connection to port 80 at most 5 s, and no write blocks longer than the idle timeout; lwIP's TCP connections are
+  raised to 16 + 3 per session + 3 (all three found on the bench, D42).
 - **The identity.** At its first start (in the first loop pass, so the name saved on the device is in force) the
   feeder makes a self-signed certificate: P-256, `CN=<name>.local, O=Precision Feeder`, SAN `<name>.local`, valid
   2025 to 2049 (the feeder has no clock at its first boot), a random positive serial. It is kept in NVS (namespace
@@ -943,8 +949,11 @@ weighed: docs/plans/https-tls.md.
   checks every 30 s whether it is due: only with a valid clock; at once with no certificate, or one for another name
   or directory; else two thirds into its lifetime (16 h into step-ca's default 24 h). A failure keeps the current
   certificate and waits 5 min, 15 min, 1 h, then 3 h between tries; a certificate past its end gives way to the
-  uploaded one, else the self-signed one, without a restart (and never a reboot). Clearing the directory goes back the
-  same way. Status: the ACME text sensor and `GET /feeder/tls`'s `acme`; `POST /feeder/tls/acme/renew` (signed, empty
+  uploaded one, else the self-signed one, without a restart (and never a reboot). A certificate for the name in use
+  stays served after the directory changes, until the new directory delivers or it expires, so a mistyped directory
+  costs nothing that works (2.4.4, D42); one for another name is never served. Clearing the directory (ACME off) goes
+  back at once. A server that does not answer is reported as "not reachable", "name not found" or "its certificate
+  does not check against the trust store" where esp-tls can tell (2.4.4). Status: the ACME text sensor and `GET /feeder/tls`'s `acme`; `POST /feeder/tls/acme/renew` (signed, empty
   body) asks again now. Flash: about 47 KB (the HTTP client and its parser most of it; its WebSocket transport is
   turned off).
 - **Port 80 (D38).** Home Assistant's ESPHome integration builds the device's link itself, always
@@ -1499,6 +1508,12 @@ precision-feeder/
     Maintenance as the NimBLE plan's B4 had it: it is about who may connect, like the key. It is a protected button
     entity (`Forget BLE Bonds`), not a new endpoint. The web app's size budget goes to 71 KB gzipped (from 67 KB):
     these cards are about 4 KB, and the full image has about 280 KB of flash to spare.
+  - D42: the bench run of 2.4.3 (2026-10-23, the disc rig; owner: "do the fixes", as 2.4.4). The NimBLE controller
+    keeps its central role (BLE_MASTER), which the trim had removed: without it the feeder never advertised (about
+    11 KB of flash and 5 KB of heap back). HTTPS allows 3 sessions at once instead of 4 (E8 and D37 said 4 with
+    NimBLE trimmed): measured on the real build, 3 held open left 50 KB of heap at the lowest and ten requests at once
+    25 KB; 4 went down to 31 KB. The relay's socket leak, its connection to port 80 without a time limit and its
+    tasks on either core were bugs, fixed. An ACME certificate survives a change of directory (above).
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1713,20 +1728,27 @@ precision-feeder/
     (full ones only with `request_wifi_scan_results()`; read across tasks under `ScanResultsLock`). Recheck on every
     ESPHome upgrade.
 
-27. HTTPS and MQTT over TLS on hardware (section 9.7, firmware 2.4.1). Built and compiled only. To check on the bench:
-    free heap with 4 HTTPS sessions open (and with BLE connected), the self-signed certificate's first making time,
-    the event stream through the relay, the signed firmware upload over HTTPS, the redirect from Home Assistant's
-    "Visit" link, HTTPS Only with the captive portal, an uploaded chain from a private CA, MQTT checked against a CA
-    (port 8883) and pinned on first contact (a self-signed broker; a leaf-only broker refused), and that MQTT never
-    connects in plain text with TLS on. ACME (2.4.2) against step-ca on the LAN: the first certificate, a renewal
-    while a page is open (the new certificate served without a restart), a failure (CA unreachable) keeping the
-    current certificate, expiry falling back to the self-signed one, the heap while the HTTP client runs beside 4
-    HTTPS sessions, and that a 24 h certificate's renewal every 16 h stays quiet. The web app's pages for them (2.4.3)
-    were checked against tools/mock_device.py only: an upload of a real chain and key (with and without a settings
-    password), the CA bundle, Renew now, Forget for the MQTT pin, and Forget BLE Bonds with a client that paired
-    (that the bond count changes and a bonded client is disconnected) are to check on the bench.
+27. HTTPS and MQTT over TLS on hardware (section 9.7, firmware 2.4.1). Checked on the disc rig with 2.4.3 and 2.4.4
+    (docs/BENCH.md, "Firmware 2.4.3 and 2.4.4 on the disc rig"): the upgrade from 2.3.0, the self-signed certificate,
+    sessions and heap (3 open, 4 asked for, ten requests at once, 200 handshakes, resumption), the signed firmware
+    upload over HTTPS, the redirect (Home Assistant's "Visit" link, by the owner), HTTPS Only, uploaded EC and RSA
+    chains from a private CA with and without a settings password and their refusals, the CA bundle, MQTT over TLS
+    against a CA, pinned on first contact, a changed broker certificate, a leaf-only broker and a plain port, and ACME
+    against the owner's step-ca (first certificate, Renew now with a page open, a dead or untrusted directory). Still
+    open: BLE on NimBLE end to end (the selftest, connect cycles, a retry storm, heap with a client connected; the
+    bench Mac still holds the Bluedroid pairing) and Forget BLE Bonds with a client that paired; HTTPS Only while the
+    access point is up; an ACME certificate expiring by itself and the 16 h renewal staying quiet (the soak, with MQTT
+    over TLS and BLE together).
 
-## 15. Implementation status (v2.4.3)
+## 15. Implementation status (v2.4.4)
+
+2.4.4 carries the fixes from the bench run of 2.4.3 on the disc rig (D42; docs/BENCH.md): BLE advertises again (the
+controller keeps its central role), the HTTPS relay no longer leaks a socket per session (about 20 sessions froze
+every TCP port), its tasks stay off the feeder's core, it allows 3 sessions instead of 4, an ACME certificate survives
+a change of directory, and uploads over the size limits answer "too large". Host tests for the new rules
+(`tests/test_tls.cpp`, `tests/test_acme.cpp`); on the rig, every HTTPS, certificate, MQTT over TLS and ACME check in
+open item 27 except those still listed there. The full image is 1,558,531 bytes (84.9% of the app slot; 2.4.3:
+1,546,295), static RAM 155,139 bytes; no-ble 1,378,423. Not tagged.
 
 2.4.3 (the configuration page, D41; section 9.7, section 10) is built and compiled in every example and both prebuilt
 configs. The page was checked against tools/mock_device.py (which now serves `/feeder/tls`, the TLS, ACME and MQTT

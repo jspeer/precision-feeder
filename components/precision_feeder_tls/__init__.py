@@ -36,9 +36,9 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(PrecisionFeederTls),
         cv.GenerateID(CONF_FEEDER): cv.use_id(precision_feeder.PrecisionFeeder),
-        # HTTPS sessions at once. Each takes about 15 KB of heap on top of the plain connection it relays (docs/BENCH.md);
-        # 4 leave 65 KB or more free with BLE on NimBLE. A connection beyond waits for a free session.
-        cv.Optional(CONF_MAX_SESSIONS, default=4): cv.int_range(min=1, max=6),
+        # HTTPS sessions at once. Each takes about 20 KB of heap while open (docs/BENCH.md, 2.4.4 on the board with BLE
+        # on NimBLE: three held open left 50 KB at the lowest, ten requests at once 25 KB). A connection beyond waits.
+        cv.Optional(CONF_MAX_SESSIONS, default=3): cv.int_range(min=1, max=6),
         # A session with no traffic either way for this long is closed, so idle browser connections give their slot
         # back. An open page's event stream sends something every 10 s, so it stays.
         cv.Optional(CONF_IDLE_TIMEOUT, default="20s"): cv.All(
@@ -74,6 +74,10 @@ async def to_code(config):
     cg.add(var.set_idle_timeout_s(config[CONF_IDLE_TIMEOUT].total_seconds))
     cg.add(var.set_port(config[CONF_PORT]))
     cg.add_define("USE_PRECISION_FEEDER_TLS")
+    # Each session holds three TCP connections (the browser's, ours to port 80 and the web server's end of it), and
+    # up to three more wait at the cap: 12 of ESP-IDF's default 16, before port 80's own clients, Home Assistant and
+    # MQTT. lwIP takes them from the heap only when used, so the room costs nothing until then.
+    add_idf_sdkconfig_option("CONFIG_LWIP_MAX_ACTIVE_TCP", 16 + 3 * config[CONF_MAX_SESSIONS] + 3)
     if config[CONF_ACME]:
         cg.add_define("USE_PRECISION_FEEDER_ACME")
         esp32.request_http_client()

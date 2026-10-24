@@ -132,7 +132,7 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
   one (`wifi: manual_ip:`); the prebuilt firmware cannot join such a network. Dual-stack and IPv4-only networks are
   fine.
 - **A few browsers at a time.** The feeder's web server has only a handful of connections; with more than about four
-  pages open they take turns and reconnect. Over HTTPS at most four connections are open at once. A page left in the background gives its connection back after 30 seconds
+  pages open they take turns and reconnect. Over HTTPS at most three connections are open at once; a fourth waits its turn. A page left in the background gives its connection back after 30 seconds
   and takes it again when you return.
 - **BLE trusts anyone with the key, and does not prove itself to the client.** Writes need the key; answers are not
   signed, so a client should pair (an encrypted link) if it must trust what it reads. Details:

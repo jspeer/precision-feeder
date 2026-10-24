@@ -1,6 +1,7 @@
 # Plan: BLE on NimBLE instead of Bluedroid (experiment)
 
-Status: **built as firmware 2.4.0** (not tagged; not yet on hardware), on branch `experiment/https-tls`, from main
+Status: **built as firmware 2.4.0**, advertising fixed in 2.4.4 (D42: the controller trim had stopped it; not tagged; M4,
+the bench, still to do), on branch `experiment/https-tls`, from main
 at 2.3.1. It follows proposal E9 of [https-tls.md](https-tls.md), which left the NimBLE port to its own plan. The
 owner decided (2026-10-23, DESIGN.md decisions D33 to D35): NimBLE first, before TLS; non-breaking, so
 `ble_gatt.yaml` itself moves to NimBLE and there is no Bluedroid overlap release (replaces B1); no phones, the clients

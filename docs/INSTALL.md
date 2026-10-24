@@ -21,12 +21,12 @@ add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 | Variant | What it has | App slot used (of 1.8 MB) | RAM used at boot |
 |---|---|---|---|
-| `full` | everything, including the BLE control plane for a PLC or a script | 84.3% (1,546,295 bytes) | 43.9% |
-| `no-ble` | Wi-Fi, the web app, HTTPS, Home Assistant and MQTT; no Bluetooth | 75.1% (1,377,351 bytes) | 39.8% |
+| `full` | everything, including the BLE control plane for a PLC or a script | 84.9% (1,558,531 bytes) | 45.4% |
+| `no-ble` | Wi-Fi, the web app, HTTPS, Home Assistant and MQTT; no Bluetooth | 75.1% (1,378,423 bytes) | 39.8% |
 
 Both carry both drives (the servo tray, which they start with, and the direct-drive disc: choose it in Configuration,
 Drive), MQTT (off until you set a broker in Configuration, MQTT), and HTTPS with MQTT over TLS and ACME
-([HTTPS.md](HTTPS.md)). Measured for 2.4.3 with ESPHome 2026.10.0 on the 4 MB layout (static RAM; 2.1.0 used 88.5%
+([HTTPS.md](HTTPS.md)). Measured for 2.4.4 with ESPHome 2026.10.0 on the 4 MB layout (static RAM; 2.1.0 used 88.5%
 and 70.4%: 2.4.0 moved Bluetooth to the smaller NimBLE, and 2.4.1 added HTTPS). Both images run on larger flash too. Each comes as
 `precision-feeder-<variant>-<version>.factory.bin` (the first flash, written from address 0: bootloader, partition
 table and app) and `.ota.bin` (updates through the web app). You can switch variants later by uploading the other
@@ -82,8 +82,9 @@ plain HTTP; once the feeder is on your network, opening it sends you to `https:/
   own topics ([MQTT.md](MQTT.md)). Use a broker with accounts ([SECURITY.md](SECURITY.md)).
 - **Bluetooth** (`full`): the feeder refuses every BLE client until a key is made in the web app (Configuration,
   Keys; shown once). Give that key to your PLC bridge or the Python client. The BLE name is `Feeder-<6 hex digits>`.
-  Since 2.4.0 the Bluetooth stack is NimBLE: a client that had paired with 2.3 or earlier pairs again (pairing only
-  encrypts the link; the key is unchanged).
+  Since 2.4.0 the Bluetooth stack is NimBLE: a client that had paired with 2.3 or earlier must delete that old
+  pairing on its side before it can connect again (macOS refuses with "Peer removed pairing information"); pairing
+  only encrypts the link, and the key is unchanged.
 
 ## HTTPS
 

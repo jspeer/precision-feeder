@@ -6,8 +6,8 @@ prebuilt firmware and the examples); ACME needs the `acme` package (in the prebu
 `mqtt_tls` package (in the prebuilt firmware). How it works and why: [DESIGN.md](../DESIGN.md) section 9.7.
 
 *Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
-(Anthropic's Claude); reviewed by a human, but it may still contain mistakes. Not yet tested on hardware: see
-DESIGN.md section 14, item 27.*
+(Anthropic's Claude); reviewed by a human, but it may still contain mistakes. Tested on a bench feeder with
+firmware 2.4.4 (docs/BENCH.md); what is still untested is in DESIGN.md section 14, item 27.*
 
 ## Opening the app over HTTPS
 
@@ -146,11 +146,12 @@ does not connect. Details: [MQTT.md](MQTT.md).
 | The browser still warns with my certificate | The certificate is not in use yet (restart after the upload), the name you opened is not in its Subject Alternative Names, or the device you browse from does not trust your CA (install the root there). Compare the fingerprint in the card with the browser's. |
 | "The uploaded certificate is not used" | It no longer checks: it expired, or the trust store now holds a CA it does not chain to. Upload a new one, or fix the trust store, then restart. |
 | The upload is refused | The key does not match the certificate, the key is encrypted, the files are too large, or the chain does not verify against the trust store. |
-| ACME says it has no trust store | Upload your CA's root to the trust store first. |
+| ACME says it has no trust store, or "its certificate does not check against the trust store" | Upload your CA's root to the trust store (the root, not the intermediate). |
+| ACME says "not reachable" or "name not found" | The feeder cannot reach the directory URL: check the host name, the port, and a firewall between the feeder and the CA. |
 | ACME fails at the challenge | The ACME server cannot resolve `<name>.local` or reach the feeder's port 80: check mDNS on the CA's host and the firewall. Make sure the ACME name is the one the CA can resolve. |
 | ACME does nothing | It waits for the clock (Diagnostics, Clock), and for a directory URL. |
 | MQTT does not connect with TLS on | The trust store has no CA (with "CA certificate"), the broker's name is not in its certificate, the port is the plain one, or the pin cannot be made: the MQTT TLS status says which. Settings apply after a restart. |
-| Pages are slow to open over HTTPS | A new connection takes about half a second to set up; at most four are open at once, and a fifth waits. A page in the background lets go of its connection after 30 seconds. |
+| Pages are slow to open over HTTPS | A new connection takes about half a second to set up; at most three are open at once, and a fourth waits. A page in the background lets go of its connection after 30 seconds. |
 | Locked out with HTTPS only on | Open `https://` instead of `http://`. If HTTPS itself fails, port 80 opens again for the first seconds after a start and whenever HTTPS is not running; the access point (Forget network, or out of Wi-Fi range) also brings plain HTTP back. |
 
 ## Limits
@@ -158,7 +159,7 @@ does not connect. Details: [MQTT.md](MQTT.md).
 - **The keys are in flash in the clear** (no flash encryption): anyone holding the board can read the HTTPS key. See
   [SECURITY.md](SECURITY.md).
 - **TLS 1.2 only**, with ECDHE and AES-GCM: every current browser supports it.
-- **At most four HTTPS connections at once** (a YAML build can set 1 to 6, `max_sessions`); each takes about 15 KB of
+- **At most three HTTPS connections at once** (a YAML build can set 1 to 6, `max_sessions`); each takes about 20 KB of
   memory while open.
 - **http-01 only.** No DNS challenge (it would keep DNS credentials on the feeder), no wildcard names.
 - **No client certificates** for MQTT (mutual TLS).

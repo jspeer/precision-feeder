@@ -68,6 +68,8 @@ class Fake : public Io {
   int bad_nonces{0};                // the next n signed requests get badNonce
   int processing_polls{1};          // polls of the order before the certificate is issued
   bool directory_down{false};
+  std::string unreachable;  // non-empty: no answer at all, for this reason ("" reason: the device cannot tell)
+  bool silent{false};
   bool offer_http01{true};
   bool csr_fails{false};
 
@@ -102,6 +104,10 @@ class Fake : public Io {
 
   Answer request(Method method, const std::string &url, const std::string &body) override {
     Answer a;
+    if (silent || !unreachable.empty()) {
+      a.why = unreachable;
+      return a;
+    }
     a.ok = true;
     a.nonce = "nonce" + std::to_string(++nonce_counter_);
     Seen s{method, url, "", ""};
@@ -335,7 +341,7 @@ int main() {
     CHECK(due(t0, true, c, 0), "no certificate: at once");
     CHECK(!due(t0, true, c, t0 + 1), "but not before the retry time");
     c.have = true;
-    c.same = true;
+    c.same_name = c.same_dir = true;
     c.not_before = t0;
     c.not_after = t0 + 24 * 3600;  // step-ca's default
     CHECK(renew_at(c) == t0 + 16 * 3600, "renewal two thirds in: 16 h of 24");
@@ -343,16 +349,20 @@ int main() {
     CHECK(due(t0 + 16 * 3600, true, c, 0), "from then");
     c.not_after = t0 + 90LL * 86400;
     CHECK(renew_at(c) == t0 + 60LL * 86400, "60 days of 90");
-    c.same = false;
-    CHECK(due(t0, true, c, 0), "a certificate for another name or directory: at once");
-    c.same = true;
+    c.same_dir = false;
+    CHECK(due(t0, true, c, 0), "a certificate from another directory: asked for at once");
+    CHECK(servable(t0 + 10, true, c), "but served until the new directory delivers");
+    c.same_name = false;
+    CHECK(due(t0, true, c, 0), "a certificate for another name: at once");
+    c.same_name = c.same_dir = true;
     CHECK(servable(t0 + 10, true, c), "within its dates");
     CHECK(!servable(t0 + 90LL * 86400, true, c), "not once expired");
     CHECK(!servable(t0 - 10, true, c), "not before it starts");
     CHECK(servable(0, false, c), "without a clock it is served as it is");
-    c.same = false;
+    c.same_name = false;
     CHECK(!servable(t0 + 10, true, c), "never for another name");
   }
+
 
   // ---- ES256 signatures: DER to r || s ----
   {
@@ -468,6 +478,16 @@ int main() {
     const Result r = client.run(DIR, NAME);
     CHECK(!r.ok && r.error == "directory: Service Unavailable", "the directory down");
     CHECK(fake.seen.size() == 1, "nothing else asked");
+  }
+  {
+    Fake fake;
+    fake.silent = true;
+    Client client(fake);
+    CHECK(client.run(DIR, NAME).error == "directory: no answer", "no answer, the cause unknown");
+    fake.silent = false;
+    fake.unreachable = "its certificate does not check against the trust store";
+    CHECK(client.run(DIR, NAME).error == "directory: its certificate does not check against the trust store",
+          "no answer, and why when the device can tell");
   }
   {
     Fake fake;

@@ -189,7 +189,8 @@ not change.
   it is not access control by itself; the key is. Pairing is optional: a client
   that does not pair works the same. Since firmware 2.4.0 the feeder's Bluetooth
   stack is NimBLE instead of Bluedroid; the protocol did not change, but a client
-  that had paired with 2.3.x pairs again. Since 2.4.3 the web app can forget every
+  that had paired with 2.3.x must delete its old pairing first (macOS refuses the
+  connection with "Peer removed pairing information" until then). Since 2.4.3 the web app can forget every
   pairing (Configuration, Keys); a bonded client that is connected is disconnected.
 - **Does not protect:** the feeder does not prove its own identity to the
   client, and answers and notifications are not signed. Someone with radio

@@ -253,6 +253,7 @@ void PrecisionFeederBle::advertise_() {
   adv.uuids128 = &service_uuid;
   adv.num_uuids128 = 1;
   adv.uuids128_is_complete = 1;
+  const char *step = "advertising data";
   int rc = ble_gap_adv_set_fields(&adv);
   ble_hs_adv_fields rsp{};
   rsp.name = reinterpret_cast<const uint8_t *>(this->device_name_);
@@ -260,17 +261,21 @@ void PrecisionFeederBle::advertise_() {
   rsp.name_is_complete = 1;
   rsp.tx_pwr_lvl_is_present = 1;
   rsp.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
-  if (rc == 0)
+  if (rc == 0) {
+    step = "scan response";
     rc = ble_gap_adv_rsp_set_fields(&rsp);
+  }
   ble_gap_adv_params params{};
   params.conn_mode = BLE_GAP_CONN_MODE_UND;
   params.disc_mode = BLE_GAP_DISC_MODE_GEN;
   params.itvl_min = 0x20;  // 20 to 40 ms, as ESPHome's advertising
   params.itvl_max = 0x40;
-  if (rc == 0)
+  if (rc == 0) {
+    step = "start";
     rc = ble_gap_adv_start(this->own_addr_type_, nullptr, BLE_HS_FOREVER, &params, gap_trampoline, this);
+  }
   if (rc != 0)
-    ESP_LOGW(TAG, "Advertising did not start (%d)", rc);
+    ESP_LOGW(TAG, "Advertising did not start: %s, error %d", step, rc);
 }
 
 int PrecisionFeederBle::on_gap_event(ble_gap_event *event) {

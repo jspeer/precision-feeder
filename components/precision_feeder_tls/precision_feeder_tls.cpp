@@ -8,7 +8,9 @@
 // reviewed by a human, but it may still contain mistakes.
 #include "precision_feeder_tls.h"
 
+#include <cerrno>
 #include <cstring>
+#include <fcntl.h>
 #include <ctime>
 #include <strings.h>
 #include <functional>
@@ -61,6 +63,17 @@ static constexpr uint32_t PIN_RETRY_MS = 60000;
 static const char *const PLACEHOLDER_CA = "none";  // not a certificate: a TLS client given it can never connect
 
 // ---- small helpers -------------------------------------------------------------------------------------------
+
+// Every task here (a handshake is about half a second of CPU) runs on core 0, beside Wi-Fi and BLE, never on core 1,
+// where ESPHome's loop (priority 1) runs the feeder: unpinned, a relay at priority 5 stalled the loop for up to 0.6 s
+// on the bench (docs/BENCH.md, 2.4.4).
+static bool start_task(TaskFunction_t fn, const char *name, uint32_t stack, void *arg, UBaseType_t priority) {
+#if CONFIG_FREERTOS_UNICORE
+  return xTaskCreate(fn, name, stack, arg, priority, nullptr) == pdPASS;
+#else
+  return xTaskCreatePinnedToCore(fn, name, stack, arg, priority, nullptr, 0) == pdPASS;
+#endif
+}
 
 static int rng(void *, unsigned char *buf, size_t len) {
   esp_fill_random(buf, len);
@@ -321,7 +334,7 @@ bool PrecisionFeederTls::run_big_(std::function<bool()> &&work) {
   auto *job = new BigJob();
   job->work = std::move(work);
   job->done = xSemaphoreCreateBinary();
-  if (job->done == nullptr || xTaskCreate(big_task, "tls_work", BIG_STACK, job, 2, nullptr) != pdPASS) {
+  if (job->done == nullptr || !start_task(big_task, "tls_work", BIG_STACK, job, 2)) {
     if (job->done != nullptr)
       vSemaphoreDelete(job->done);
     delete job;
@@ -434,7 +447,7 @@ void PrecisionFeederTls::loop() {
   if (!this->started_) {
     // The first pass: every component is set up, so the device's name is the one it will keep.
     this->started_ = true;
-    if (xTaskCreate(identity_entry, "tls_start", BIG_STACK, this, 2, nullptr) != pdPASS)
+    if (!start_task(identity_entry, "tls_start", BIG_STACK, this, 2))
       ESP_LOGE(TAG, "HTTPS did not start (no memory for its task)");
   }
 #ifdef USE_PRECISION_FEEDER_ACME
@@ -459,7 +472,7 @@ void PrecisionFeederTls::loop() {
   if (this->pin_wanted_ && !this->pin_running_ && millis() >= this->pin_retry_at_) {
     this->pin_retry_at_ = millis() + PIN_RETRY_MS;
     this->pin_running_ = true;
-    if (xTaskCreate(pin_entry, "tls_pin", BIG_STACK, this, 2, nullptr) != pdPASS)
+    if (!start_task(pin_entry, "tls_pin", BIG_STACK, this, 2))
       this->pin_running_ = false;
   }
 #endif
@@ -593,7 +606,7 @@ void PrecisionFeederTls::listen_task_() {
     }
     auto *args = new RelayArgs{this, c};
     this->sessions_++;
-    if (xTaskCreate(relay_entry, "tls_relay", RELAY_STACK, args, 5, nullptr) != pdPASS) {
+    if (!start_task(relay_entry, "tls_relay", RELAY_STACK, args, 5)) {
       delete args;
       close(c);
       this->sessions_--;
@@ -602,21 +615,49 @@ void PrecisionFeederTls::listen_task_() {
   }
 }
 
+// The relay's connection to ESPHome's server on 127.0.0.1:80, given at most 5 s: a blocking connect waits out
+// lwIP's SYN retries (minutes) when the server cannot take it, holding the session's slot all that time.
+bool PrecisionFeederTls::connect_local_(int fd) {
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(80);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  const int flags = fcntl(fd, F_GETFL, 0);
+  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  int rc = connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+  if (rc != 0 && errno == EINPROGRESS) {
+    fd_set wr;
+    FD_ZERO(&wr);
+    FD_SET(fd, &wr);
+    timeval limit{5, 0};
+    int err = 0;
+    socklen_t len = sizeof(err);
+    rc = ::select(fd + 1, nullptr, &wr, nullptr, &limit) == 1 &&
+                 getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0
+             ? 0
+             : -1;
+  }
+  fcntl(fd, F_SETFL, flags);
+  return rc == 0;
+}
+
 void PrecisionFeederTls::relay_task_(int client) {
   std::shared_ptr<TlsIdentity> identity = this->identity_();  // kept for the whole session
   esp_tls_t *tls = esp_tls_init();
   int backend = -1;
   timeval handshake_timeout{10, 0};
   setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &handshake_timeout, sizeof(handshake_timeout));
+  setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &handshake_timeout, sizeof(handshake_timeout));
   if (tls != nullptr && identity != nullptr && esp_tls_server_session_create(&identity->cfg, client, tls) == 0) {
     timeval none{0, 0};
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof(none));
+    // Nothing here may block for good: a write that cannot go on for the idle timeout ends the session.
+    timeval stalled{static_cast<long>(this->idle_timeout_s_), 0};
+    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &stalled, sizeof(stalled));
     backend = ::socket(AF_INET, SOCK_STREAM, 0);
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(80);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (backend >= 0 && connect(backend, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0) {
+    if (backend >= 0)
+      setsockopt(backend, SOL_SOCKET, SO_SNDTIMEO, &stalled, sizeof(stalled));
+    if (backend >= 0 && connect_local_(backend)) {
       char buf[1024];
       bool open = true;
       while (open) {
@@ -653,10 +694,11 @@ void PrecisionFeederTls::relay_task_(int client) {
   }
   if (backend >= 0)
     close(backend);
+  // esp_tls_server_session_delete frees the TLS state only: unlike esp_tls_conn_destroy it never closes the socket,
+  // and one leaked per session ran lwIP out of sockets on the bench (docs/BENCH.md).
   if (tls != nullptr)
-    esp_tls_server_session_delete(tls);  // closes the client's socket
-  else
-    close(client);
+    esp_tls_server_session_delete(tls);
+  close(client);
   this->sessions_--;
 }
 
@@ -775,7 +817,7 @@ std::string PrecisionFeederTls::status_json() {
 #ifdef USE_PRECISION_FEEDER_ACME
   j += ",\"acme\":{\"directory\":\"" + json_escape(this->acme_dir_) + "\",\"name\":\"" +
        json_escape(this->acme_name_in_use_()) + "\",\"status\":\"" + json_escape(acme_status) + "\",\"until\":\"" +
-       (this->issued_now_().same ? this->issued_until_ : std::string()) + "\",\"error\":\"" +
+       (this->issued_now_().same_name ? this->issued_until_ : std::string()) + "\",\"error\":\"" +
        json_escape(this->acme_error_) + "\"}";
 #endif
   return j + "}";
@@ -860,6 +902,10 @@ void PrecisionFeederTls::handle_request(AsyncWebServerRequest *request, const st
 
   if (url == "/feeder/tls/ca") {
     CertFacts facts;
+    if (body.size() > tls::MAX_PEM) {
+      request->send(400, "application/json", "{\"error\":\"too large\"}");
+      return;
+    }
     if (!body.empty() && !this->run_big_([&]() { return check_ca(body, facts); })) {
       request->send(422, "application/json", "{\"error\":\"certificate\"}");
       return;
@@ -882,6 +928,10 @@ void PrecisionFeederTls::handle_request(AsyncWebServerRequest *request, const st
   if (url == "/feeder/tls/identity") {
     std::string cert, key;
     if (!body.empty()) {
+      if (tls::identity_body_too_large(body)) {
+        request->send(400, "application/json", "{\"error\":\"too large\"}");
+        return;
+      }
       std::string key_hex;
       std::vector<uint8_t> masked;
       if (!tls::split_identity_body(body, key_hex, cert) || !from_hex_text(key_hex, masked) ||
@@ -1009,10 +1059,23 @@ class AcmeIo : public tls::acme::Io {
     }
     const esp_err_t err = esp_http_client_perform(c);
     a.status = esp_http_client_get_status_code(c);
+    int tls_code = 0, tls_flags = 0;
+    const esp_err_t tls_err = esp_http_client_get_and_clear_last_tls_error(c, &tls_code, &tls_flags);
     esp_http_client_cleanup(c);
     a.ok = err == ESP_OK;
+    if (!a.ok) {
+      // Say what went wrong where the device can tell: an untrusted server reads differently from one not there.
+      const int code = tls_code < 0 ? -tls_code : tls_code;  // esp-tls hands mbedTLS's code back either way
+      if (tls_flags != 0 || code == -MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)
+        a.why = "its certificate does not check against the trust store";
+      else if (tls_err == ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME)
+        a.why = "name not found";
+      else if (tls_err == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST || tls_err == ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT)
+        a.why = "not reachable";
+    }
     if (!a.ok)
-      ESP_LOGW(TAG, "ACME: %s %s", url.c_str(), esp_err_to_name(err));
+      ESP_LOGW(TAG, "ACME: %s %s (TLS %s, mbedTLS -0x%04x, flags 0x%x)", url.c_str(), esp_err_to_name(err),
+               esp_err_to_name(tls_err), static_cast<unsigned>(tls_code < 0 ? -tls_code : tls_code), tls_flags);
     return a;
   }
 
@@ -1132,8 +1195,9 @@ std::string PrecisionFeederTls::acme_name_in_use_() {
 
 tls::acme::Issued PrecisionFeederTls::issued_now_() {
   tls::acme::Issued c = this->issued_;
-  c.same = c.have && !this->acme_dir_.empty() && this->issued_dir_ == this->acme_dir_ &&
-           this->issued_name_ == this->acme_name_in_use_();
+  // ACME off (no directory): nothing it issued is in use.
+  c.same_name = c.have && !this->acme_dir_.empty() && this->issued_name_ == this->acme_name_in_use_();
+  c.same_dir = c.same_name && this->issued_dir_ == this->acme_dir_;
   return c;
 }
 
@@ -1192,9 +1256,11 @@ std::string PrecisionFeederTls::acme_text() {
   if (this->acme_running_)
     return "asking for a certificate for " + this->acme_name_in_use_();
   const tls::acme::Issued c = this->issued_now_();
-  std::string t = c.same ? "certificate for " + this->issued_name_ + " until " + utc_text(c.not_after) +
-                               ", renewed from " + utc_text(tls::acme::renew_at(c))
-                         : std::string("no certificate yet");
+  std::string t = !c.same_name ? std::string("no certificate yet")
+                  : !c.same_dir  ? "certificate for " + this->issued_name_ + " until " + utc_text(c.not_after) +
+                                      " from the directory set before"
+                                : "certificate for " + this->issued_name_ + " until " + utc_text(c.not_after) +
+                                      ", renewed from " + utc_text(tls::acme::renew_at(c));
   if (!this->acme_error_.empty()) {
     t += "; failed: " + this->acme_error_;
     if (this->acme_next_try_ > now)
@@ -1251,7 +1317,7 @@ void PrecisionFeederTls::acme_check_() {
   if (entry == nullptr)
     return;
   this->acme_running_ = true;
-  if (xTaskCreate(entry, "tls_acme", BIG_STACK, this, 2, nullptr) != pdPASS)
+  if (!start_task(entry, "tls_acme", BIG_STACK, this, 2))
     this->acme_running_ = false;
 }
 

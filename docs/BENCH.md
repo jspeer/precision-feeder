@@ -835,3 +835,75 @@ Lowest free heap during the load (KB, several runs where repeated):
 - One NimBLE run with a BLE client connected was disturbed by another HTTPS client (relay tasks the load did not
   open), so there is no clean "NimBLE, BLE connected" figure. Not run: MQTT over TLS, PSRAM for TLS, pairing from
   iOS or Android.
+
+## Firmware 2.4.3 and 2.4.4 on the disc rig (2026-10-23)
+
+Open item 27 (DESIGN.md section 14), on the disc rig (ESP32-S3, `precision-feeder-disc`, the servo-less direct-drive
+build), with the owner's go-ahead. The whole 4 MB flash was read first. The release `full` image of 2.4.3, then bench
+images: `firmware/full.yaml` plus a scratch heap probe (`GET /lab/heap`: free internal heap, its lowest point every
+20 ms; not in the repo), rebuilt as each fix went in. 2.4.4 is 2.4.3 with those fixes (DESIGN.md D42). The load ran
+from the Mac over Wi-Fi with Python; a "session" holds `/events` for 20 s, as an open page does.
+
+**The upgrade from 2.3.0** (the release image, the web app's signed upload over plain HTTP, 13 s, back in 22 s): all
+135 entities kept their values; the new ones came up at their defaults. HTTPS was listening at once with a self-signed
+certificate for `precision-feeder-disc.local` (until 2049). The signed upload of the next image over HTTPS also took
+13 s. A restart is back with HTTPS in about 11 to 20 s.
+
+**Found and fixed (2.4.4):**
+
+| What | Seen | Cause | Fix |
+|---|---|---|---|
+| BLE invisible | no scanner saw the feeder; the log said "Advertising did not start (530)" | HCI error 0x12 on every advertising start: the controller trim turned off its central role (`CONFIG_BT_CTRL_BLE_MASTER`), and the ESP32-S3's controller then refuses to advertise at all. M0's "NimBLE trimmed" image was never scanned for, so it went unnoticed | the central role stays on (about 11 KB of flash, 5 KB of heap); the log now names the step that failed. Found by bisecting the trim, one option at a time |
+| Every TCP port dead after about 20 HTTPS sessions | ports 80, 443 and 6053 stopped accepting; ping still answered; `httpd_accept_conn: error in accept (23)`; no recovery in 4 minutes | `esp_tls_server_session_delete` frees the TLS state but, unlike `esp_tls_conn_destroy`, never closes the socket: one leaked per session until lwIP's 29 were gone | the relay closes the socket itself |
+| The feeder's loop stalled under HTTPS load | `interval took 649 ms`, `precision_feeder took 236 ms` | relay tasks at priority 5 on either core preempt ESPHome's loop (priority 1, core 1) for a handshake's 0.5 s of CPU | every TLS task runs on core 0; afterwards one 51 ms warning in a full load run, and the disc's motor-loop gap unchanged (54 ms) |
+| 4 sessions too tight | lowest free heap 31 KB with 4 held, 22 to 25 KB with ten requests at once | a session costs about 20 KB here (M0's scratch relay: 15); the real build has 19 KB less free at idle than M0's "NimBLE trimmed" | `max_sessions` 3 by default. Also: the relay's connection to port 80 is given at most 5 s and no write blocks longer than the idle timeout; lwIP's TCP connections go from 16 to 28 |
+| An ACME certificate dropped on a directory change | changing the directory served the self-signed certificate at once, before the new directory had even failed | the certificate had to match the directory set now to be served | one for the name in use stays until the new directory delivers or it expires |
+| Vague errors | an untrusted ACME server read "directory: no answer"; an oversize upload "request" | | "its certificate does not check against the trust store", "not reachable", "name not found"; "too large" (the web app's word for it) |
+
+**HTTPS with the fixes** (lowest free heap in KB; idle about 122 KB with the probe, BLE on, no client):
+
+| Load | Lowest in the phase | Lowest at any instant | Result |
+|---|---|---|---|
+| 1 session | 101 | 101 | handshake 0.4 s |
+| 3 sessions | 54 | 51 | all answered |
+| 4 sessions (cap 3) | 51 | 43 | the fourth waits its turn (22 s), then answered |
+| 10 requests at once | 31 to 35 | 25 | all 10 answered |
+| 100 handshakes in a row, twice | 88 | | all answered, 0.4 to 0.8 s; no leak (117 KB after, steady) |
+| resumption | | | resumed, 0.1 s |
+
+An RSA-2048 certificate works too (ECDHE-RSA), at about 0.8 s a handshake and about 8 KB lower heap points.
+
+**Port 80 and HTTPS Only:** `/` and `/index.html` answer 302 to `https://precision-feeder-disc.local/`; the owner
+checked Home Assistant's "Visit" link lands there. With HTTPS Only on, everything else on port 80 answers 403
+`{"error":"https"}`; nothing answered 200 on port 80 during a restart. Not tried: the access point's exemption.
+
+**Uploads** (scratch CA: root, intermediate, leaves; signed and, with a settings password, masked): an EC chain with
+its intermediate, served after a restart and verified by curl against the root alone, the card's fingerprint matching
+OpenSSL's; an RSA-2048 chain with a PKCS#8 key; refused with the reason: a key that does not match, an encrypted key, a
+certificate that does not parse, a chain over 6 KB, a chain that does not lead to the trust store, and an unsigned
+upload with a password set (403). A trust store bundle of root and intermediate. Remove and a new self-signed
+certificate (new fingerprint after the restart).
+
+**MQTT over TLS** (Mosquitto on the Mac, three TLS listeners and a plain one): with TLS on and the plain port set, the
+broker logged "appears to be using TLS to connect to a non-TLS listener", never a plain CONNECT. Against the CA (an IP
+name in the broker's certificate): connected, the schedule's topics published. The same CA with a certificate for
+another name: refused. Pin on first contact against a self-signed broker: pinned (the fingerprint OpenSSL shows) and
+connected; a different certificate on the same broker afterwards: refused; Forget, then a restart: the new one pinned.
+A leaf sent without its CA: "not pinned yet: the broker sends no CA certificate to pin; upload its CA instead". The
+feeder's MQTT settings were put back afterwards.
+
+**ACME against the owner's step-ca** (the firmware's client this time, not M0's scratch one): with the trust store
+holding another CA, refused; with the step-ca root, a certificate 30 s after Renew now (24 h, renewal planned 16 h in),
+served at once with its intermediate and verified by curl against the root alone. Renew now with a session open: that
+session kept the old certificate and its events for 90 s; new connections got the new one. A dead directory: the
+certificate in use stayed (2.4.4), "not reachable". Not seen: a certificate expiring by itself, a renewal at 16 h.
+
+**Feeding went on:** profile A's 18:00 event fed its portion on time in the middle of the run, between image swaps
+and HTTPS load. At the end the rig was given the 2.4.4 release image, and the ACME directory, the trust store and the
+settings password were cleared again; the Bluetooth key made for the run stays for the BLE tests.
+
+**Not done here:** BLE end to end. The feeder advertises again (found by its service UUID as `Feeder-b00604`), but the
+bench Mac refused to connect, "Peer removed pairing information": it still holds its pairing with 2.3.0's Bluedroid,
+which NimBLE does not have (expected, docs/PROTOCOL.md). Also open: Forget BLE Bonds with a paired client, and the
+soak. The built-in browser could not open the feeder's address; the owner had the app open over HTTPS in their own
+browser throughout.

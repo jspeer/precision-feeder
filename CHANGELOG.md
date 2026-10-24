@@ -6,6 +6,28 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.4: Fixes from the first bench run of 2.4 (2026-10-23, not tagged)
+
+**Upgrade note:** nothing to do. A Bluetooth client that paired with 2.3 or earlier must delete that pairing on its
+side first (macOS: "Peer removed pairing information").
+
+Found running 2.4.3 on the disc rig ([docs/BENCH.md](docs/BENCH.md); DESIGN.md D42):
+
+- **Bluetooth was invisible in 2.4.0 to 2.4.3.** The trimmed NimBLE controller refused to advertise (HCI error 0x12),
+  so no client could find the feeder. The controller keeps its central role now; it advertises again. About 11 KB of
+  flash and 5 KB of heap.
+- **HTTPS could freeze the network side of the feeder.** Each HTTPS connection leaked a socket, so after about 20 of
+  them no port answered (the web app, Home Assistant, HTTPS) until a restart (the feeder itself kept running). Fixed.
+- **HTTPS no longer stalls the feeder's own loop** (up to 0.6 s per connection set up): its work runs on the other
+  core.
+- **At most 3 HTTPS connections at once** (was 4): the fourth left too little memory beside Bluetooth. A connection
+  beyond waits its turn. A YAML build can still set 1 to 6 (`max_sessions`). The relay's own connection inside the
+  feeder has a time limit, and nothing it writes can block for good.
+- **ACME:** changing the directory no longer drops a working certificate; it stays until the new directory delivers
+  or it expires. A failed request says why where it can: "not reachable", "name not found", or "its certificate does
+  not check against the trust store".
+- **Uploads over the size limits** answer "too large", as the web app expects (they said "request").
+
 ## 2.4.3: The configuration page for certificates (2026-10-23, not tagged)
 
 **Upgrade note:** nothing to do.

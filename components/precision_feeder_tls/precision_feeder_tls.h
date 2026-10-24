@@ -98,6 +98,7 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   void identity_task_();
   void listen_task_();
   void relay_task_(int client);
+  bool connect_local_(int fd);
   void pin_task_();
 #ifdef USE_PRECISION_FEEDER_ACME
   void acme_task_();
@@ -120,7 +121,7 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   bool run_big_(std::function<bool()> &&work);
 
   PrecisionFeeder *feeder_{nullptr};
-  uint8_t max_sessions_{4};
+  uint8_t max_sessions_{3};
   uint32_t idle_timeout_s_{20};
   uint16_t port_{443};
   std::atomic<bool> redirect_{true};

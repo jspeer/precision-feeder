@@ -14,7 +14,7 @@
 substitutions:
   name: precision-feeder
   friendly_name: Precision Feeder
-  fw_version: "2.4.3"
+  fw_version: "2.4.4"
   # Which build this is, shown as Firmware Variant: "full" or "no-ble" for the prebuilt binaries (firmware/), "yaml"
   # for a build from your own YAML. The web app's update check (Firmware page) offers the matching prebuilt image only
   # to a prebuilt binary; a YAML build is updated with ESPHome. Leave it.

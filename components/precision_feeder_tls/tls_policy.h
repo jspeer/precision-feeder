@@ -139,6 +139,15 @@ inline bool split_identity_body(const std::string &body, std::string &key_hex, s
   return !chain_pem.empty() && chain_pem.size() <= MAX_PEM;
 }
 
+/// Whether an identity body is over the limits (the key line or the chain), so the answer can say "too large" rather
+/// than "malformed". A body within them may still be malformed: split_identity_body decides that.
+inline bool identity_body_too_large(const std::string &body) {
+  const size_t eol = body.find('\n');
+  const size_t key_line = eol == std::string::npos ? body.size() : eol;
+  const size_t chain = eol == std::string::npos ? 0 : body.size() - eol - 1;
+  return key_line > 2 * MAX_KEY_TEXT + 1 || chain > MAX_PEM;  // + 1: a CR before the line end
+}
+
 /// How many PEM blocks of this label ("CERTIFICATE") the text holds, complete with their END line.
 inline size_t count_pem(const std::string &text, const char *label) {
   const std::string begin = std::string("-----BEGIN ") + label + "-----";

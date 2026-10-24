@@ -74,11 +74,12 @@ NIMBLE_SDKCONFIG = {
     "CONFIG_BT_NIMBLE_SVC_DIS_FIRMWARE_REVISION": True,
     "CONFIG_BT_NIMBLE_SVC_DIS_IEEE": False,
     "CONFIG_BT_NIMBLE_SVC_DIS_UDI": False,
-    # The controller: one link, two activities (advertising and the connection), no scanning.
+    # The controller: one link, two activities (advertising and the connection), no scanning. The central role
+    # (BLE_MASTER) stays on: without it the ESP32-S3's controller refuses to advertise at all (HCI error 0x12,
+    # found on the bench, 2.4.4; docs/BENCH.md).
     "CONFIG_BT_CTRL_BLE_MAX_ACT": 2,
     "CONFIG_BT_CTRL_BLE_SCAN_DUPL": False,
     "CONFIG_BT_CTRL_DTM_ENABLE": False,
-    "CONFIG_BT_CTRL_BLE_MASTER": False,
     "CONFIG_BT_CTRL_BLE_SCAN": False,
 }
 # NimBLE's example services, none used.

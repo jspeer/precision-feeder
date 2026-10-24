@@ -105,6 +105,11 @@ int main() {
     CHECK(!split_identity_body("abcd", key, chain), "one line");
     CHECK(!split_identity_body(std::string(2 * MAX_KEY_TEXT + 2, 'a') + "\nPEM", key, chain), "key too long");
     CHECK(!split_identity_body("ab\n" + std::string(MAX_PEM + 1, 'x'), key, chain), "chain too long");
+    CHECK(identity_body_too_large("ab\n" + std::string(MAX_PEM + 1, 'x')), "too large: the chain");
+    CHECK(identity_body_too_large(std::string(2 * MAX_KEY_TEXT + 2, 'a') + "\nPEM"), "too large: the key line");
+    CHECK(!identity_body_too_large(std::string(2 * MAX_KEY_TEXT, 'a') + "\r\n" + std::string(MAX_PEM, 'x')),
+          "at the limits, with a CRLF");
+    CHECK(!identity_body_too_large("zz\nPEM"), "malformed is not too large");
   }
   {
     const std::string two = "-----BEGIN CERTIFICATE-----\na\n-----END CERTIFICATE-----\n"

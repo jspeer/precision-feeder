@@ -999,6 +999,10 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                 return 403, b'{"error":"refused","wait":0}', js
             text = body.decode("latin-1")
             what = path[len("/feeder/tls/"):]
+            # The device's limits (tls_policy.h): a chain or CA bundle of 6144 bytes, a key line of 2 x 2048 hex digits.
+            key_line, _, rest = text.partition("\n")
+            if (what == "ca" and len(text) > 6144) or (what == "identity" and (len(key_line) > 4097 or len(rest) > 6144)):
+                return 400, b'{"error":"too large"}', js
             if what == "ca":
                 if text and "-----BEGIN CERTIFICATE-----" not in text:
                     return 422, b'{"error":"certificate"}', js
