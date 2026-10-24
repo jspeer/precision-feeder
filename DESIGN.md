@@ -192,6 +192,8 @@ and keeps everything else itself:
 - Adding one: AGENTS.md, "Adding a mechanism", and [docs/MECHANISMS.md](docs/MECHANISMS.md). The first other
   mechanism is the direct-drive disc (section 3.3; [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md),
   stage 2), carried beside the servo in one firmware (section 3.4).
+- Adapter registration uses `offer_drive()` for the mechanism and driver, and `offer_motor_pins()` separately for
+  motor pins; `offer_drive()` takes no pin arguments.
 
 ### 3.0.1 The servo fan tray
 

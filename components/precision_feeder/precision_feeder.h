@@ -58,11 +58,6 @@ template<typename E> void publish_text(E *e, const std::string &v) {
     return;
   e->publish_state(v);
 }
-template<typename E> void publish_bool(E *e, bool v) {
-  if (e->has_state() && e->state == v)
-    return;
-  e->publish_state(v);
-}
 template<typename E> void publish_option(E *e, const std::string &v) {
   if (e->has_state() && e->current_option() == v)
     return;
@@ -86,8 +81,8 @@ class PrecisionFeeder : public Component, public FeederCore {
   void set_servo_driver(Component *driver) { this->servo_driver_ = driver; }
   /// A mechanism component offers itself (before setup). `with_servo` false: it is this build's mechanism. True (the
   /// build has the servo's output too): a second drive, chosen on the device (D17), and the build's default if
-  /// `build_default` (else the servo is). `pins`: the GPIOs it drives.
-  void offer_drive(Mechanism *mechanism, Component *driver, const uint8_t *pins, uint8_t n, bool with_servo,
+  /// `build_default` (else the servo is). Motor pins are registered separately with offer_motor_pins().
+  void offer_drive(Mechanism *mechanism, Component *driver, bool with_servo,
                    bool build_default = true);
   /// At boot, before the drivers start (PinLoader): use the saved drive; the others are never set up.
   void apply_drive();

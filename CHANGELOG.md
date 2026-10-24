@@ -33,6 +33,9 @@ own rules; the logged design decisions stand.
   drive integration, capacity-dependent BLE ranges and positioning completion, and the current source/bench status.
   Added the build-check workflow; no firmware behaviour changed.
 
+- **Source cleanup:** removed unused drive-registration pin arguments and the unused boolean publishing helper;
+  corrected BLE comments about runtime timezone configuration. No firmware behaviour or protocol change.
+
 ## 2.4.4: Fixes from the first bench run of 2.4 (2026-10-23, not tagged)
 
 **Upgrade note:** nothing to do. A Bluetooth client that paired with 2.3 or earlier must delete that pairing on its

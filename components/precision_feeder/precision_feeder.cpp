@@ -379,10 +379,7 @@ void PrecisionFeeder::hal_save_motor_pins(const MotorPins &pins) {
   global_preferences->sync();
 }
 
-void PrecisionFeeder::offer_drive(Mechanism *mechanism, Component *driver, const uint8_t *pins, uint8_t n,
-                                  bool with_servo, bool build_default) {
-  (void) pins;  // its pins are offered with offer_motor_pins(): reserved while it is the drive (D19)
-  (void) n;
+void PrecisionFeeder::offer_drive(Mechanism *mechanism, Component *driver, bool with_servo, bool build_default) {
   if (!with_servo) {
     this->set_mechanism(mechanism);  // the only mechanism
     return;

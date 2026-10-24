@@ -45,7 +45,8 @@ Take the servo as the pattern: `components/precision_feeder/mechanism_servo.{h,c
 4. **Its package**, `packages/mechanism_<name>.yaml`: `tray_capacity` (its capacity), its pins as substitutions with
    comments, its outputs, its tuning and calibration entities (config category, listed in the settings password's
    protected entities). Its adapter offers the drive before setup with
-   `offer_drive()`, as `components/precision_feeder_n20/n20_driver.cpp` does. A driver that owns its pins implements
+   `offer_drive(mechanism, driver, with_servo, build_default)`, as `components/precision_feeder_n20/n20_driver.cpp`
+   does; motor pins are offered separately with `offer_motor_pins()`. A driver that owns its pins implements
    `MotorPinUser` and calls `offer_motor_pins()`: saved pins are validated and applied before setup, and reserved
    from the button and LED while that drive is in use.
 5. **Add it beside the servo** in the build's YAML. Keep `core.yaml`'s servo package and offer the other mechanism

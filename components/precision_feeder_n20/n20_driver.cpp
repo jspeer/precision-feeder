@@ -77,7 +77,7 @@ void N20Driver::attach(PrecisionFeeder *feeder, bool with_servo, bool build_defa
   // The YAML's pins are the build's; ones saved on the device win (D19). With the servo in the build too, this is a
   // second drive, chosen on the device; its pins are reserved only while it is the drive.
   const uint8_t pins[] = {this->in1_, this->in2_, this->stby_, this->enc_a_, this->enc_b_};
-  feeder->offer_drive(&this->mech_, this, pins, sizeof(pins), with_servo, build_default);
+  feeder->offer_drive(&this->mech_, this, with_servo, build_default);
   feeder->offer_motor_pins(this, pins, sizeof(pins), PIN_NAMES);
 }
 

@@ -257,8 +257,8 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       if (n != 6)
         return invalid;
       const uint32_t epoch = get_u32(args);
-      // args[4..5] is the sender's UTC offset in minutes. The device's timezone is fixed at build time
-      // (DESIGN.md section 6), so it is accepted for forward compatibility and not used.
+      // args[4..5] is the sender's UTC offset in minutes, retained for protocol compatibility and not used.
+      // The device's timezone comes from the build, Home Assistant or its Timezone entity (docs/PROTOCOL.md).
       const uint8_t decision =
           decide_ble_time(this->time_policy_, epoch, f.network_time_age_ms(), this->network_stale_ms_);
       if (decision != RES_OK) {
@@ -307,7 +307,7 @@ BleEngine::Answer BleEngine::execute_(uint8_t opcode, const uint8_t *args, size_
       f.declare_position(args[0]);
       return {RES_OK, f.remaining()};
 
-    case OP_SET_TIMEZONE:  // reserved: the timezone is set at build time
+    case OP_SET_TIMEZONE:  // reserved; use the Timezone entity to change the device's timezone
     default:
       return {RES_UNSUPPORTED, 0};
   }
