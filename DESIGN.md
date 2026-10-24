@@ -6,6 +6,11 @@ history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
 
+**Reading this document:** the user guides describe current operation. This is the engineering reference: sections
+13 and 14 retain dated decisions, investigations and verification gaps, including superseded approaches. Those
+records explain constraints and must not be read as instructions for configuring the current firmware.
+[Development plans](docs/plans/README.md) are historical proposals, not additional supported features.
+
 ## 0. Disclosure and licence
 
 - **AI disclosure (draft text for README, source headers, protocol doc):**
@@ -394,7 +399,7 @@ Every feed request, whatever its source, goes through one gate:
 |---|---|---|
 | Minimum gap between feeds | 60 s | the reference also paused 1 min after each feed |
 | Rolling 24 h cap | 4 portions | configurable 1 to the mechanism's capacity (6 for the servo). It counts the feed history, which keeps 64 feeds (`HISTORY_SIZE`, the largest capacity; 8 before 2.1.2, which let a disc's 9th feed in 24 h go uncounted: Codex review). The count it uses can be edited by hand for debugging and recovery: in the web app only (Maintenance), behind the settings password (decision 2026-10-14, moved from Home Assistant in 2.2.0, D25) |
-| Max portions per command | 1 | configurable 1 to the capacity ("drop all" is opt-in) |
+| Max portions per command | 1 | manual/remote requests only; configurable 1 to the capacity ("drop all" is opt-in) |
 | Tray state | must be `LOADED` | empty or unknown rejects |
 | Calibration lockout | on | |
 | Hold or reload pause active | scheduled feeds only | manual feeds still allowed |
@@ -402,6 +407,16 @@ Every feed request, whatever its source, goes through one gate:
 | Duplicate sequence number | replay stored result | BLE idempotency, section 8.6 |
 
 Each rejection returns a result code (section 8.4) and is logged.
+
+Requests within the load's capacity are clamped to the portions remaining; an empty load still refuses. A manual
+request above the mechanism's capacity is refused, while a scheduled event saved for a larger drive is clamped to
+the current capacity. Scheduled events do not use the manual per-command limit, but still use the daily cap.
+
+With no valid clock, feeds made during this boot count toward the daily cap using uptime. When the clock becomes
+valid they are stamped with the current epoch. After a reboot, feeds saved without an epoch are dropped because
+their age is unknowable; feeds with an epoch count again once the clock is valid. Until then, pre-reboot history
+does not count. An interrupted feed with a known timestamp remains counted. The minimum gap uses uptime within a
+boot and the saved feed timestamp when available after a restart.
 
 An event with N portions makes N separate steps, with a configurable gap
 between steps (default a few seconds), each with its own wiggle.
@@ -1775,113 +1790,41 @@ precision-feeder/
 
 ## 15. Implementation status (v2.4.5)
 
-2.4.5 carries the fixes from the audits checked against 2.4.4 (D43): ESPHome's `/update` refused in every build, the
-MQTT password masked, BLE link events that always get through and reads closed from a disconnect, TLS identities
-saved as one record each, MQTT kept off when turned off during a pin, and a receive timeout on HTTPS sessions.
-The full image is 1,561,067 bytes (85.1% of the app slot; 2.4.4: 1,558,531), static RAM 155,187 bytes; no-ble
-1,380,551. Not tagged, and not on hardware (open item 27).
+The current source implements the behavior in sections 3 to 10, subject to the limits and open items in section 14.
+It is not tagged. The current audit fixes are host-tested and compiled but have not been tested on hardware.
 
-2.4.4 carries the fixes from the bench run of 2.4.3 on the disc rig (D42; docs/BENCH.md): BLE advertises again (the
-controller keeps its central role), the HTTPS relay no longer leaks a socket per session (about 20 sessions froze
-every TCP port), its tasks stay off the feeder's core, it allows 3 sessions instead of 4, an ACME certificate survives
-a change of directory, and uploads over the size limits answer "too large". Host tests for the new rules
-(`tests/test_tls.cpp`, `tests/test_acme.cpp`); on the rig, every HTTPS, certificate, MQTT over TLS and ACME check in
-open item 27 except those still listed there. The full image is 1,558,531 bytes (84.9% of the app slot; 2.4.3:
-1,546,295), static RAM 155,139 bytes; no-ble 1,378,423. Not tagged.
+| Area | Current state |
+|---|---|
+| Feeding and schedules | Shared guard, persist-before-motion, profiles, solar anchors, one-shots, hold and missed-event skipping |
+| Mechanisms | Servo fan tray and direct-drive disc, chosen on the device; only the selected driver starts |
+| Configuration | Built-in web app, setup wizard, runtime pins/network/time/keys, settings password and checked firmware upload |
+| Integrations | Home Assistant's everyday set; MQTT with schedule topics and read-only guard limits; authenticated BLE on NimBLE |
+| Transport security | HTTPS with self-signed/uploaded/ACME certificates; CA trust store and MQTT TLS with CA verification or pinning |
+| Current audit fixes | ESPHome `/update` blocked, masked MQTT password, BLE disconnect/read closure and reliable link events, atomic TLS identity records, MQTT disable during pinning, HTTPS receive timeout |
+| Deliberate omissions | No web factory reset, profile names, external RTC/sensors, food-drop detection or disc per-slot offsets |
 
-2.4.3 (the configuration page, D41; section 9.7, section 10) is built and compiled in every example and both prebuilt
-configs. The page was checked against tools/mock_device.py (which now serves `/feeder/tls`, the TLS, ACME and MQTT
-entities and Forget BLE Bonds): uploads with and without a settings password, the trust store, ACME's settings and
-Renew now, Forget pairings, a phone-width layout; the key's mask is tested against the device's vector
-(`tests/test_web.mjs`). The full image is 1,546,295 bytes (84.3% of the app slot; 2.4.2: 1,540,671), static RAM
-149,867 bytes; no-ble 1,377,351. Not tagged. Subsequently bench-tested with the 2.4.4 fixes (open item 27). The guides were revised for the
-whole of 2.4 in the same version (the docs revision planned as 2.4.4): docs/HTTPS.md is new (opening the app over
-HTTPS, an uploaded certificate, ACME with step-ca, port 80, the trust store, MQTT over TLS), and the README,
-INSTALL.md (the variants' sizes, HTTPS, recovery), USING.md, SECURITY.md, WEB_UI.md, BUILDING.md and MQTT.md
-follow 2.4.
+Recorded prebuilt measurements with ESPHome 2026.10.0, using the 1.8 MB app slot on a 4 MB board:
 
-2.4.2 (ACME, D40; section 9.7) is built and compiled in every example and both prebuilt configs, with host tests for
-the client against a fake ACME server (`tests/test_acme.cpp`: the exchange, badNonce, a failed challenge, a reused
-authorization, a certificate that never comes, renewal times). The full image is 1,540,671 bytes (84.0% of the
-app slot; 2.4.1: 1,493,615), static RAM 149,779 bytes (2.4.1: 148,779). Not tagged. The initial ACME experiment used a scratch client; the firmware's client was subsequently tested
-against step-ca with the 2.4.4 fixes (open item 27 and docs/BENCH.md).
+| Image | App bytes | App slot used | Static RAM |
+|---|---|---|---|
+| Full | 1,561,067 | 85.1% | 155,187 bytes |
+| No BLE | 1,380,551 | 75.2% | See the build output for the matching configuration |
 
-2.4.1 (HTTPS, the trust store and MQTT over TLS, D36 to D39; section 9.7) is built and compiled in every example and
-both prebuilt configs, with host tests for its decisions (`tests/test_tls.cpp`) and for the masked key upload. The full image is
-1,493,615 bytes (81.4% of the app slot; 2.4.0: 1,452,343), static RAM 148,779 bytes (2.4.0: 146,931). Not
-tagged. HTTPS, uploaded chains, the redirect and MQTT against a CA and by pinning were subsequently bench-tested
-with the 2.4.4 fixes; that run reduced the default to 3 sessions (open item 27 and docs/BENCH.md).
+These are recorded build measurements, not a promise about free runtime heap or the size of a later build. HTTPS
+sessions and other active interfaces add dynamic demand.
 
-2.4.0 (BLE on NimBLE, D33 to D35; section 8) is built and compiled, with host tests for the hand-off between
-NimBLE's task and the main loop and for the GATT table; not tagged. It did not advertise on hardware (fixed in
-2.4.4, D42); with 2.4.4 the Python client's selftest, 100 connect cycles, a retry storm and the heap with a client
-connected passed on the disc rig (docs/BENCH.md, open item 27).
+Hardware coverage is recorded in [docs/BENCH.md](docs/BENCH.md). The servo's baseline feeding and power-loss behavior,
+and the disc's motion, drive switching and integrations have bench evidence. HTTPS, MQTT TLS, ACME and NimBLE have
+been exercised on the disc rig. Outstanding checks include the current audit fixes, extended daily operation,
+selected servo recovery scenarios, disc faults and long-run motion, certificate renewal/expiry and some client or
+network combinations. Consult section 14 for exact outstanding checks; a successful build is not a hardware result.
 
-2.3.1 fixes a Codex review of 2.3.0 (decisions log): logic only, checked with host tests, the mock device and both
-release builds; not on hardware (nothing in it needs the bench).
+Saved core data consists of versioned Settings, Calibration, State, Device, Tuning and MotorPins records. MQTT and
+TLS keep their own records. Older saved layouts are migrated, not discarded; their definitions remain required for
+upgrades. Time itself is never restored from flash.
 
-2.3.0 (loose ends, D28 to D32): protected settings read-only over MQTT, clearing the BLE key, forgetting the Wi-Fi
-network, and picking it from a scan. On the disc rig (docs/BENCH.md): the upgrade from 2.2.0 kept every value, and a
-scan while connected kept the link. Not yet on hardware: forgetting the network and clearing the BLE key (host tests
-and the mock device only).
-
-
-2.2.0 (who can change what, section 10.2; MQTT's own topics, section 9.6) carries 2.1.2, below. Its release images ran
-on both rigs: the servo's upgrade from 2.1.1 kept every value, and Home Assistant removed the hidden entities by
-itself (docs/BENCH.md).
-
-2.1.2 fixes the findings of two Codex reviews of 2.1.1 (decisions log; CHANGELOG.md), each with a host test that
-reproduces it, and builds with ESPHome 2026.10.0 (ESP-IDF 5.5.6). Not yet on hardware: the new positioning intents
-and the disc's feedback bound need the bench (open items 22 and 23).
-
-2.1.0 (the mechanism interface, the direct-drive disc, both drives in one firmware, MQTT; sections 3.0, 3.3, 3.4,
-9.6). The servo's behaviour is checked against a trace recorded from 2.0.2 (every servo command, release and saved
-tray state, with its time), and the disc's motion against the owner's bench sketch on a simulated motor. On the bench
-(docs/BENCH.md): the servo upgrade from 2.0.2, the disc's first run, the two-drive firmware switching on both rigs,
-BLE and MQTT on the disc, all with test builds of 2.1.0. Still to do: open items 22 and 23.
-
-Everything in sections 3 to 10 is built, except what section 14 defers: profile names (item 8) and a factory reset
-(item 21). On a bench build (Waveshare
-ESP32-S3-Zero, MG90S) it has been calibrated and tested on hardware: feeding,
-power cuts, schedules on NTP, Home Assistant and BLE time, every BLE command,
-the button, Needs Food and the over-cap warning; for 2.0, the upgrades from 1.1
-(to a YAML build and to a prebuilt binary), a fresh install from the install page,
-the setup wizard, firmware uploads and their refusals, the update check's outcomes,
-IPv4-only and dual-stack networks, the keys and the BOOT reset
-([docs/BENCH.md](docs/BENCH.md); what is still unchecked is in section 14).
-Host tests (`tests/`, `tools/`) cover the core logic with a simulated clock, the
-calendar and sun maths, the timezone parser, the settings password, the firmware
-upload, the BLE protocol and its cryptography, the web app's parsers and the Python
-client. Version history: [CHANGELOG.md](CHANGELOG.md).
-
-Compiled with ESPHome 2026.9.1 / ESP-IDF 5.5.5 (the prebuilt binaries, 2.1.0, both drives and MQTT): 70.4% of the
-1.8 MB app partition without BLE, 88.5% with it (section 9.5; 2.0.2: 61.1% and 79.1%).
-
-Deviations from the first draft of this design, all deliberate:
-- A feed with more portions than remain is clamped to what remains (design said
-  reject); empty still rejects.
-- The per-command portion limit applies to manual/remote sources only; scheduled
-  events are limited by the daily cap.
-- Feeds made before the clock is set count toward the daily cap using uptime,
-  then are re-stamped when the clock arrives; the cap memory for such feeds is
-  dropped on reboot.
-- After a reboot, until the clock is set again, feeds saved before the reboot
-  are not counted toward the daily cap (their age is unknown); they count again
-  once the clock is back (decision 2026-10-14). A feed interrupted by the power
-  cut still counts once the clock is known.
-- The minimum gap uses uptime when available, otherwise the saved epoch.
-- Polar days use a 06:00 / 18:00 fallback instead of skipping (section 5.2).
-
-Saved core data: six records, each with its own preference key and version
-(`feeder_core.h`): Settings (schedule, guard, location), Calibration (pulse range and offsets), State (tray and
-history), Device (section 9.2), Tuning (written only for a mechanism with a tuning table, never the servo), and
-MotorPins (the disc's motor pins). MQTT and TLS keep their own records too (sections 9.6 and 9.7). The tray
-state is version 3 since 2.1.2 (64 feeds of history, key `precision_feeder.state.v3`); a version 2 record under the
-old key is migrated at boot with everything kept, an unfinished move included. A layout change gets a new key and a
-migration from the old layout; saved data is never simply discarded.
-
-Not yet exercised: a real daylight-saving changeover (event times use wall-clock
-conversion through the platform's timezone rules); a BLE client that pairs.
+Version-by-version implementation history is in [CHANGELOG.md](CHANGELOG.md), detailed bench evidence in
+[docs/BENCH.md](docs/BENCH.md), and design rationale in section 13.
 
 ## 16. Bench results
 

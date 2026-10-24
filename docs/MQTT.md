@@ -4,7 +4,7 @@
 Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 
 With the `mqtt` package (in the prebuilt firmware, off until set up), the feeder talks to your MQTT broker. Set it up
-in the web app: Configuration, MQTT (broker, port, username, password, topic prefix). Firmware 2.2.0 and later.
+in the web app: Configuration, MQTT (broker, port, username, password, topic prefix).
 
 ## What MQTT reaches
 
@@ -12,7 +12,7 @@ in the web app: Configuration, MQTT (broker, port, username, password, topic pre
 |---|---|
 | Everyday control and status | yes: the entities Home Assistant sees (below), with Home Assistant discovery |
 | The schedule and one-shot feeds | yes: their own topics (below) |
-| The feed guard's limits | read only: published, never changed over MQTT (since 2.3.0; change them in the web app) |
+| The feed guard's limits | read only: published, never changed over MQTT (change them in the web app) |
 | Calibration, pins, drive, keys, network, firmware, the 24 h count | never: the web app (and the YAML) only |
 
 The broker's login is MQTT's only protection: anyone your broker lets publish to these topics can use them. Give the
@@ -50,7 +50,7 @@ from MQTT, the web app, BLE or the schedule) and a **`/set`** topic to change it
 | `policy/min_gap_s` | seconds | (read only) |
 | `policy/portion_gap_s` | seconds | (read only) |
 | `policy/max_portions_cmd` | a number | (read only) |
-| `policy/writable` | always `OFF` | (read only; 2.2.0 had a switch that made the limits writable, removed in 2.3.0) |
+| `policy/writable` | always `OFF` | (read only; clients can use this to discover that policy writes are unavailable) |
 
 Commands without a state:
 
@@ -61,6 +61,7 @@ Commands without a state:
 | `schedule/<P>/restart_cycle` | anything: the every-N-days cycle starts today (needs the clock) |
 
 After every command the feeder publishes:
+
 - the value's state topic, **also when the value was refused**, so you always read what is in force;
 - `<prefix>/feeder/result` (not retained): `<topic>: ok`, or the reason, as the web app's Last Result words it
   (`invalid argument`, `not allowed`, `clock not set`, ...).
@@ -80,14 +81,14 @@ mosquitto_sub -h broker.lan -u feeder -P '...' -t 'precision-feeder-a1b2c3/feede
   is harmless (the same feed is not added twice), but a retained `restart_cycle` would restart the cycle each time.
 - **One value at a time.** ESPHome's MQTT client queues incoming messages and drops some when its queue is full: send
   a burst with small pauses and check the state topics.
-- **TLS** (2.4.1, the `mqtt_tls` package, in the prebuilt firmware): turn on MQTT TLS in the web app and use the
+- **TLS** (the `mqtt_tls` package, in the prebuilt firmware): turn on MQTT TLS in the web app and use the
   broker's TLS port (usually 8883). MQTT TLS Check picks how the broker is checked: against a CA certificate you
   upload to the feeder's trust store (the broker's name is checked too), or "Pin on first contact": the feeder keeps
   the certificate the broker shows the first time (a self-signed one, or the CA at the top of its chain) and checks
   against it from then on. A broker that sends only its own certificate, signed by a CA it does not send, cannot be
   pinned: upload the CA instead. With TLS on, MQTT never connects in plain text: without a CA (or before the pin) it
   does not start. These settings apply after a restart. They, the trust store and the pin's Forget are in the web
-  app's Configuration (MQTT, and HTTPS and certificates; 2.4.3); setting them up: [HTTPS.md](HTTPS.md#mqtt-over-tls).
+  app's Configuration (MQTT, and HTTPS and certificates); setting them up: [HTTPS.md](HTTPS.md#mqtt-over-tls).
 - **Settings of the MQTT connection itself** (broker, port, login, prefix) are web app only. Once MQTT has connected
   after a restart, a change to them is used after the next restart (Restart Needed), because ESPHome builds its MQTT
   client once per boot. Turning MQTT off takes effect at once.

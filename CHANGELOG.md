@@ -8,6 +8,10 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 ## 2.4.5: Fixes from the audits (2026-10-24, not tagged)
 
+- **Documentation rework:** current features and task-based setup/use guides replace release-by-release narration.
+  The README tells the owner's feeder and AI-assisted development story. Protocol layouts and upgrade cautions
+  are retained, and plans, decisions and bench evidence remain available as history. No firmware behavior changed.
+
 **Upgrade note:** nothing to do. HTTPS certificates saved by 2.4.1 to 2.4.4 are read as before and moved to the new
 records the next time they are saved. The web app must be 2.4.5's to change the MQTT password (an older page's plain
 write is refused).
@@ -32,7 +36,6 @@ own rules; the logged design decisions stand.
 - **Documentation review:** corrected Home Assistant visibility, schedule editing and calibration instructions,
   drive integration, capacity-dependent BLE ranges and positioning completion, and the current source/bench status.
   Added the build-check workflow; no firmware behaviour changed.
-
 - **Source cleanup:** removed unused drive-registration pin arguments and the unused boolean publishing helper;
   corrected BLE comments about runtime timezone configuration. No firmware behaviour or protocol change.
 

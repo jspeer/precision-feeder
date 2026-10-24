@@ -1,6 +1,6 @@
 # Precision Feeder BLE protocol
 
-Protocol version **2** (firmware 0.4.0 and later). This document is
+Protocol version **2**, as implemented by the current source. This document is
 authoritative; the firmware (`components/precision_feeder_ble/protocol.h` and
 `crypto.h`) and the reference client (`tools/precision_feeder_ble.py`) are
 checked against the same byte vectors.
@@ -24,21 +24,16 @@ characteristics. One client at a time.
 - The feeder's schedule and guard always run on the device. BLE can *edit* the
   schedule and *request* feeds; it is never required for feeding to continue.
 - Every feed request, from any source, passes the same guard on the device
-  (minimum gap, daily cap, tray state, hold). BLE cannot bypass it.
+  (minimum gap, daily cap and tray state). BLE cannot bypass it.
 - **Every write is authenticated** (see [Authentication](#authentication)). A
   client that does not know the key can read Info and Auth and nothing else.
 
-### Changes from protocol 1
+### Client compatibility
 
-- New **Auth** characteristic (`000A`) and **AUTH** command (`0x0D`).
-- Every write (Command, Profile, Config, Calibration) now ends with an 8-byte
-  **tag**. Profile, Config and Calibration writes now **start with a sequence
-  number**, and their answers carry it (protocol 1 answered them with `seq 0`).
-- New result **16 NOT_AUTHORIZED**, and capability bit 6.
-- Before AUTH, Status, Profile, Config, Calibration and Response read as zeros,
-  and nothing is notified.
-- Record formats, opcodes, arguments, result codes 0 to 15 and the Status layout
-  are unchanged.
+Read Info before sending commands. Use the advertised position count and capability bits rather than assuming a
+six-portion servo tray. Refuse an unknown protocol version; show unknown result or detail codes as a refusal.
+Protocol history is in [CHANGELOG.md](../CHANGELOG.md). Upgrade-related Bluetooth bonding recovery is covered in
+[INSTALL.md](INSTALL.md#upgrading-an-existing-feeder).
 
 ## UUIDs
 
@@ -67,18 +62,18 @@ Currently `02 | caps | 07 | 03 | 04` for the servo tray. Capability bits: 0 sola
 6 writes must be authenticated.
 
 `positions` is the number of tray positions, 0 to `positions - 1`: the portions per load plus one (7 for the servo
-tray, so 6 portions). Since firmware 2.1.0 a feeder can have another mechanism (another motor and tray); it reports
+tray, so 6 portions). A feeder with another mechanism (another motor and tray) reports
 its own `positions`, and the ranges that depend on it follow: SET_POSITION, event portions, Config keys 5 and 6 go up
 to `positions - 1`. Bits 3 (calibration) and 5 (pulse range) are set only when the mechanism is the servo, whose
 seven slots the Calibration characteristic is indexed by; without them, Calibration writes and queries answer
-INVALID_ARG and Config keys 10 and 11 UNSUPPORTED. Nothing in the packet layouts changed, so this is still protocol 2. **If your client sees a protocol version it does
+INVALID_ARG and Config keys 10 and 11 UNSUPPORTED. **If your client sees a protocol version it does
 not know, do not send commands.**
 
 ## Authentication
 
 The feeder and the client share a secret **key**: 32 random bytes, base64 as made by
 `openssl rand -base64 32`. The same base64 text goes into the client. On the feeder
-it is either `ble_key` in its `secrets.yaml`, or (firmware 2.0.0) a key generated or
+it is either `ble_key` in its `secrets.yaml`, or a key generated or
 entered in its web app and saved on the device, which wins. The prebuilt firmware has
 no `ble_key`: make one in the web app (Configuration, Keys). With no key at all, AUTH
 is always refused with detail 6; an all-zero key is never accepted.
@@ -109,13 +104,12 @@ After a failed AUTH the nonce changes (read Auth again), and AUTH is refused for
 one second. A disconnect ends the session; the next connection starts again at
 step 1. A failed AUTH on an authenticated connection ends its session too, and
 Status, Profile, Config, Calibration and Response read as zeros again until the
-next successful AUTH (firmware 2.1.2; before, they kept their last values).
+next successful AUTH.
 
 A valid AUTH on a connection that is already authenticated (a retry after a lost
 answer, or a replay of the same bytes) is answered OK and **changes nothing**: the
 session key, the last accepted sequence number and the retry cache stay as they
-are. (Firmware 0.4.0 to 0.4.1 reset the sequence number here, which could let a
-write already executed in the session run a second time; fixed in 0.5.0.)
+are.
 
 ### 3. Sign every write
 
@@ -129,9 +123,9 @@ tag = HMAC-SHA256(session, channel || seq || body...)[0..7]
 - `channel` is the low byte of the characteristic's UUID: `03` Command,
   `06` Profile, `07` Config, `08` Calibration. A write signed for one
   characteristic is refused by another.
-- For Command, `body` is `opcode, arguments...` as in protocol 1.
-- For Profile, Config and Calibration, `body` is the record or query exactly as
-  in protocol 1 (sections below). Their answers carry this `seq`.
+- For Command, `body` is `opcode, arguments...`.
+- For Profile, Config and Calibration, `body` is the record or query described
+  below. Their answers carry this `seq`.
 - **`seq` runs 1 to 255 and wraps to 1 (never 0). Each new write must use a
   sequence number after the last accepted one** (AUTH's counts), at most 127
   ahead. Commands and records share one counter: simply use the next number for
@@ -155,13 +149,13 @@ as stale. Match answers on `seq` and opcode.
 | 3 | AUTH refused: wrong proof (wrong key, or an old nonce). The nonce has changed |
 | 4 | AUTH refused: within a second of a failed AUTH |
 | 5 | too short to carry a sequence number and tag |
-| 6 | AUTH refused: no key is set on the feeder (firmware 2.0.0) |
-| 7 | authenticated, but the feeder's owner has turned this setting off for BLE (firmware 2.0.0; see below) |
+| 6 | AUTH refused: no key is set on the feeder |
+| 7 | authenticated, but the feeder's owner has turned this setting off for BLE (see below) |
 
 **Clients must accept detail values they do not know** (show the number, treat the
-write as refused). New values may be added within protocol 2; 6 and 7 were.
+write as refused). New values may be added within protocol 2.
 
-### BLE permissions (firmware 2.0.0)
+### BLE permissions
 
 Two settings on the feeder, both on by default, decide what an authenticated client
 may change. Turned off (in the feeder's web app, Configuration, Keys), these writes are
@@ -187,11 +181,8 @@ not change.
   bonds; the oldest makes room). A client that pairs gets an encrypted link, which
   also hides what is read. With no screen or keypad, pairing is "Just Works", so
   it is not access control by itself; the key is. Pairing is optional: a client
-  that does not pair works the same. Since firmware 2.4.0 the feeder's Bluetooth
-  stack is NimBLE instead of Bluedroid; the protocol did not change, but a client
-  that had paired with 2.3.x must delete its old pairing first (macOS refuses the
-  connection with "Peer removed pairing information" until then). Since 2.4.3 the web app can forget every
-  pairing (Configuration, Keys); a bonded client that is connected is disconnected.
+  that does not pair works the same. The web app can forget every pairing (Configuration, Keys); a bonded client
+  that is connected is disconnected. For bonds made by older firmware, see the installation guide's upgrade notes.
 - **Does not protect:** the feeder does not prove its own identity to the
   client, and answers and notifications are not signed. Someone with radio
   equipment who can impersonate the feeder could feed a client false status.
@@ -200,7 +191,7 @@ not change.
   status as informational.
 - **Keep the key secret.** Anyone with it has full control (still within the feed
   guard, and the two permissions above). To change it, generate a new one in the
-  feeder's web app (firmware 2.0.0; a connected client must authenticate again), or
+  feeder's web app (a connected client must authenticate again), or
   update `secrets.yaml` and reflash, then update every client.
 
 ## Command (write) and Response (notify)
@@ -238,7 +229,7 @@ UNKNOWN state and the device's Faults report the storage failure. TRAY_RELOAD on
 | Code | Name | Meaning |
 |---|---|---|
 | 0 | OK | done |
-| 1 | BUSY | the tray is moving (a feed, or a reload or SET_POSITION until the tray has settled, since firmware 2.1.2) |
+| 1 | BUSY | the tray is moving (a feed, or a reload or SET_POSITION until the tray has settled) |
 | 2 | TOO_SOON | inside the minimum gap after the last feed |
 | 3 | DAILY_CAP | would exceed the rolling 24 h portion cap |
 | 4 | EMPTY | no portions remain |
@@ -254,7 +245,7 @@ UNKNOWN state and the device's Faults report the storage failure. TRAY_RELOAD on
 | 14 | UNSUPPORTED | unknown or reserved opcode |
 | 15 | NOT_CALIBRATING | JOG needs calibration mode |
 | 16 | NOT_AUTHORIZED | see [NOT_AUTHORIZED details](#not_authorized-details) |
-| 17 | STORAGE_FAILED | the feeder could not save what must be on flash before the tray moves (a feed's intent), so it did not move (firmware 2.1.2). Clients must treat any code they do not know as a refusal |
+| 17 | STORAGE_FAILED | the feeder could not save what must be on flash before the tray moves (a feed's intent), so it did not move. Clients must treat any code they do not know as a refusal |
 
 ### Setting the clock
 
@@ -288,7 +279,7 @@ notifications, until AUTH succeeds. 20 bytes:
 | 3 | active profile (0 to 2) | u8 |
 | 4 | flags | u16 |
 | 6 | last feed epoch (0 = never or clock was unset) | u32 |
-| 10 | last feed source: 0 schedule, 1 ESPHome (a feed button pressed in Home Assistant or the web UI; called "home assistant" before firmware 0.3.4), 2 ble, 3 button, 4 one-shot | u8 |
+| 10 | last feed source: 0 schedule, 1 ESPHome (a feed button pressed in Home Assistant or the web UI), 2 ble, 3 button, 4 one-shot | u8 |
 | 11 | portions fed today | u8 |
 | 12 | next scheduled feed epoch (0 = none) | u32 |
 | 16 | runway in days (255 = more than 30) | u8 |
@@ -322,8 +313,7 @@ immediately; they are answered on Response with this `seq`, opcode `0x80`,
 - Event `01, profile, event, flags, offset i16, portions, days` (8 bytes).
   `flags` bit 0 enabled, bits 1 to 2 anchor (0 clock, 1 sunrise, 2 sunset).
   `offset` is minutes after midnight (0 to 1439) for a clock event, or signed
-  minutes from the sun (-720 to +720). `portions` 1 to `positions - 1` (6 on the servo; firmware 2.1.0 and 2.1.1
-  still refused more than 6); `days` is a weekday
+  minutes from the sun (-720 to +720). `portions` 1 to `positions - 1` (6 on the servo); `days` is a weekday
   mask like `fast_mask`.
 - Query `02, profile, event` (3 bytes; event `FF` means the header): selects which
   record the next **read** returns, in the formats above (no seq, no tag).
@@ -370,11 +360,10 @@ one-shot feed that the device has to wait for (busy, too soon, on hold) is retri
 quietly during its one-minute window and reported once: when it is fed, or with
 the last refusal when the window closes.
 
-## Diagnostics on the device (firmware 1.1.0)
+## Diagnostics on the device
 
-Nothing on the air changes: no new characteristic, opcode or field, and the
-protocol stays at version 2. The device keeps local diagnostics about BLE for its
-web app: counters since boot, the current session (connected,
+These diagnostics are local to the web interface, separate from the GATT service. For its web app, the device
+keeps counters since boot, the current session (connected,
 authenticated, the last two bytes of the client's address, the MTU), and an
 activity log of the last 32 connections and writes with their answers. Reads and
 Status notifications are only counted, so a client that polls does not fill the
@@ -384,7 +373,8 @@ log. They never contain the key, a nonce or a tag. Formats: DESIGN.md section 7
 
 ## Example bytes
 
-Unsigned bodies (as in protocol 1; add the seq and tag as described above):
+Command bytes before the tag, unsigned record bodies and read/notification examples (add sequence numbers and
+tags to writes as described above):
 
 | What | Bytes |
 |---|---|

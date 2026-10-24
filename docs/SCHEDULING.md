@@ -1,12 +1,12 @@
 # Scheduling
 
-Set up the on-board schedule in the built-in web app's **Schedule** page. Since 2.2.0 Home Assistant can switch
+Set up the on-board schedule in the built-in web app's **Schedule** page. Home Assistant can switch
 Scheduler and Active Profile, but cannot edit profiles, events or one-shot feeds. MQTT's own topics and BLE can
 also edit profiles ([MQTT.md](MQTT.md), [PROTOCOL.md](PROTOCOL.md)). The schedule runs on the feeder itself: once
 set, feeding carries on with no Home Assistant and no network, as long as the clock is set.
 
-*Written with the assistance of an AI (Anthropic's Claude); check it against your
-own feeder.*
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
+(Anthropic's Claude); check it against your own feeder.*
 
 ## The idea in one minute
 
@@ -48,30 +48,31 @@ Schedule page for normal editing.
   any 24 hours, and it also applies to the schedule (see the rules below).
 - The **Scheduler** switch must be on for profiles to run.
 
-## Raw editor controls, step by step
+## Examples
 
-1. **Edit Profile**: pick the profile to work on (A, B or C).
-2. **Profile Every N Days**: 1 for every day, 2 for every second day, and so on
-   (up to 14).
-3. **Profile Fast Days**: weekdays with no feeding, for example `sun`, or `none`.
-4. For each meal, pick an event with **Edit Event** (1 to 4), then, in this order:
-   1. **Event Anchor**: `clock`, `sunrise` or `sunset`. Choose this *first*:
-      changing the anchor resets the time (to 12:00 for clock, to +00:00 for
-      sunrise and sunset).
-   2. **Event Time**: `08:30` for a clock event; `+01:30` or `-00:45` for a
-      sun event (see the field reference).
-   3. **Event Days**: `all`, `weekdays`, `mon,wed,fri`, ...
-   4. **Event Portions**: 1 to the mechanism's capacity (6 on the servo).
-   5. **Event Enabled**: switch it on last. The event is live from now on.
-5. Switch off any event you do not want (all four start switched off, at 08:00,
-   12:00, 18:00 and 20:00 with 1 portion every day).
-6. Read **Edited Profile** to check it, for example
-   `A: 08:00 x1, 18:00 x1; fast: sun [not active]`.
-7. When it is right, set **Active Profile** to it. **Next Feed**, **Runway**
-   and **Tray Empty On** now follow this profile.
+These examples use the servo tray's 6 portions; plan around how often you will refill.
 
-If a field does not accept what you typed, it goes back to its old value and the
-feeder's log says why (for example `Event time '25:00' not understood`).
+**A: two meals a day, no feeding on Sundays.**
+Every N Days 1, Fast Days `sun`.
+Event 1: clock, `08:00`, `all`, 1 portion, on.
+Event 2: clock, `18:00`, `all`, 1 portion, on.
+Events 3 and 4: off.
+Edited Profile: `A: 08:00 x1, 18:00 x1; fast: sun`. Two portions a feeding day:
+a full tray lasts three feeding days.
+
+**B: holiday, one meal every second day.**
+Every N Days 2, Fast Days `none`, then press "Restart Cycle Today" if the first
+meal should be today.
+Event 1: clock, `18:00`, `all`, 1 portion, on. Others off.
+`B: 18:00 x1; every 2 days`. A full tray lasts six meals: day 1, 3, 5, 7, 9
+and 11, so about 11 days.
+Before you leave: Tray Reload, fill the tray, set Active Profile to B.
+
+**C: half an hour before sunset.**
+Set Latitude and Longitude first. Every N Days 1, Fast Days `none`.
+Event 1: anchor `sunset` (choose it first), time `-00:30`, `all`, 1 portion, on.
+Others off. `C: sunset-00:30 x1`. The time follows the sunset through the year
+(and daylight saving, if your timezone has it).
 
 ## Field reference
 
@@ -153,35 +154,34 @@ example "notify me when Needs Food turns on". It stays off while the tray
 position is unknown (Faults reports that instead). Over BLE the same signal is
 Status flag bit 12.
 
-## Examples
-
-These examples use the servo tray's 6 portions; plan around how often you will refill.
-
-**A: two meals a day, no feeding on Sundays.**
-Every N Days 1, Fast Days `sun`.
-Event 1: clock, `08:00`, `all`, 1 portion, on.
-Event 2: clock, `18:00`, `all`, 1 portion, on.
-Events 3 and 4: off.
-Edited Profile: `A: 08:00 x1, 18:00 x1; fast: sun`. Two portions a feeding day:
-a full tray lasts three feeding days.
-
-**B: holiday, one meal every second day.**
-Every N Days 2, Fast Days `none`, then press "Restart Cycle Today" if the first
-meal should be today.
-Event 1: clock, `18:00`, `all`, 1 portion, on. Others off.
-`B: 18:00 x1; every 2 days`. A full tray lasts six meals: day 1, 3, 5, 7, 9
-and 11, so about 11 days.
-Before you leave: Tray Reload, fill the tray, set Active Profile to B.
-
-**C: half an hour before sunset.**
-Set Latitude and Longitude first. Every N Days 1, Fast Days `none`.
-Event 1: anchor `sunset` (choose it first), time `-00:30`, `all`, 1 portion, on.
-Others off. `C: sunset-00:30 x1`. The time follows the sunset through the year
-(and daylight saving, if your timezone has it).
-
 ## Over BLE
 
 A controller can read and write the same profiles through the Profile
 characteristic ([PROTOCOL.md](PROTOCOL.md)). There, profiles are 0 to 2 and events
 0 to 3 (the web app shows A to C and 1 to 4), and days are a bit mask with bit
 0 = Sunday.
+
+## Raw editor controls, step by step
+
+1. **Edit Profile**: pick the profile to work on (A, B or C).
+2. **Profile Every N Days**: 1 for every day, 2 for every second day, and so on
+   (up to 14).
+3. **Profile Fast Days**: weekdays with no feeding, for example `sun`, or `none`.
+4. For each meal, pick an event with **Edit Event** (1 to 4), then, in this order:
+   1. **Event Anchor**: `clock`, `sunrise` or `sunset`. Choose this *first*:
+      changing the anchor resets the time (to 12:00 for clock, to +00:00 for
+      sunrise and sunset).
+   2. **Event Time**: `08:30` for a clock event; `+01:30` or `-00:45` for a
+      sun event (see the field reference).
+   3. **Event Days**: `all`, `weekdays`, `mon,wed,fri`, ...
+   4. **Event Portions**: 1 to the mechanism's capacity (6 on the servo).
+   5. **Event Enabled**: switch it on last. The event is live from now on.
+5. Switch off any event you do not want (all four start switched off, at 08:00,
+   12:00, 18:00 and 20:00 with 1 portion every day).
+6. Read **Edited Profile** to check it, for example
+   `A: 08:00 x1, 18:00 x1; fast: sun [not active]`.
+7. When it is right, set **Active Profile** to it. **Next Feed**, **Runway**
+   and **Tray Empty On** now follow this profile.
+
+If a field does not accept what you typed, it goes back to its old value and the
+feeder's log says why (for example `Event time '25:00' not understood`).

@@ -1,5 +1,9 @@
 # Plan: BLE on NimBLE instead of Bluedroid (experiment)
 
+> **Historical development plan.** This records proposals and milestones, including superseded approaches.
+> Use the [current guides](../../README.md#find-the-right-guide) for setup and operation, and
+> [DESIGN.md](../../DESIGN.md) for current behavior and decisions.
+
 Status: **built as firmware 2.4.0**, advertising fixed in 2.4.4 (D42: the controller trim had stopped it; not tagged; M4,
 the bench, passed with 2.4.4 on the disc rig, docs/BENCH.md), on branch `experiment/https-tls`, from main
 at 2.3.1. It follows proposal E9 of [https-tls.md](https-tls.md), which left the NimBLE port to its own plan. The

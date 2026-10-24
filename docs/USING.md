@@ -23,7 +23,7 @@ and do not appear in Home Assistant:
 | Refill | **Tray Reload**, then fill the tray. Scheduled feeding pauses for the **Reload Pause** (default 10 minutes) while you load. On the direct-drive disc Tray Reload moves nothing: fill every slot except the one over the chute (food there falls straight out), then press it. |
 | Pause the schedule | **Hold Duration** (hours; 0 = until cancelled) + **Hold Scheduled Feeding**; **Cancel Hold** ends it. Manual feeds still work. |
 | Switch plans | **Active Profile** |
-| Feed once at a set time (web app, Schedule) | **One-shot Portions** + **Add One-shot Feed** (`2026-10-20 18:00`) |
+| Feed once at a set time (web app, Schedule) | Choose a date and time in the one-shot card, plus the portions |
 | After a power cut mid-feed (web app, Maintenance) | look at the tray, set **Declared Tray Position**, press **Declare Tray Position**; or press **Tray Reload** |
 | Stop a feed in progress | **Stop** (the position becomes unknown, as above) |
 
@@ -48,6 +48,20 @@ empty; magenta position unknown; blue moving; white calibration mode; dim cyan h
 **The button** (if fitted): a short press feeds one portion, or reloads the tray when it is empty or its position is
 unknown. Hold it 3 seconds to turn calibration mode on or off.
 
+## Recovering an unknown position
+
+An interrupted move or motor fault leaves the position unknown. Feeding stays blocked; a restart does not clear it.
+Use **Maintenance** after checking the actual mechanism:
+
+- **Servo:** declare the slot that really lines up with the outlet, or press Tray Reload to return to the closed
+  position, then refill.
+- **Disc:** use calibration mode to nudge an empty slot over the hole, leave calibration mode, and declare the
+  portions fed since the last reload. If you cannot establish that count, refill every slot except the one over the
+  chute and press Tray Reload.
+
+Declaring position tells the feeder what you observed; it does not detect food or prove alignment. Follow
+[CALIBRATION.md](CALIBRATION.md) if the slots do not line up.
+
 ## Settings
 
 Saved on the feeder and kept across updates. Use the web app for configuration; Home Assistant exposes only the
@@ -64,7 +78,7 @@ everyday controls and status ([SECURITY.md](SECURITY.md#who-can-do-what)).
 | Refill Interval (for the runway warning) | 3 days | Configuration |
 | Latitude, Longitude | not set | Configuration, setup wizard |
 | Time zone | the build's (UTC in the prebuilt firmware) | Configuration, setup wizard |
-| NTP servers (up to three) | the build's (public pool) | Configuration, setup wizard (2.0.2) |
+| NTP servers (up to three) | the build's (public pool) | Configuration, setup wizard |
 | Servo pulse range, calibration offsets | 544 to 2400 µs, 0° | Maintenance (protected) |
 | Drive (servo or direct-drive disc), with the disc's package | the build's (the servo in the prebuilt firmware) | Configuration (protected; after a restart, then reload) |
 | Board and pins, the disc's motor pins | the build's | Configuration (protected; after a restart) |
@@ -91,6 +105,8 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
 - **Every feed passes the same guard**, whatever asked for it. The daily cap counts every portion in the last 24
   hours. (For debugging and recovery, the count it uses can be edited in the web app, Maintenance, behind the settings
   password: "Portions Counted (24 h)", logged.)
+- **The per-command limit applies to manual requests.** Scheduled events still obey the daily cap. A request that
+  passes the guard but asks for more than remains feeds only what is left; an empty tray refuses.
 - **No catching up.** Events feed only in the minute they are due.
 - **Each event feeds at most once a day**, also across reboots and time zone changes.
 - **Power cut mid-feed → position unknown → feeding stops** until you confirm the tray position.
@@ -99,6 +115,11 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
   update, a crash) the chip keeps good time, shown as "kept across restart".
 - **No automatic reboots.** Losing Wi-Fi or Home Assistant does not reboot it. A firmware update restarts it once,
   after waiting for the tray to stop.
+
+**Daily cap when the clock is missing:** manual feeds made during this boot are counted using uptime. After a
+reboot, older timestamped feeds cannot be aged until a clock source returns, so they temporarily do not count.
+History recorded without a valid timestamp cannot be aged after a reboot and is dropped. Do not use repeated
+restarts as a way to manage the feeding allowance; the cap does not have a battery-backed clock.
 
 ## Troubleshooting
 
@@ -111,7 +132,7 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
 | Servo buzzes or strains at one end | The pulse range is too wide for your servo; narrow **Servo Min/Max Pulse**. |
 | Tray position "unknown" | Power was cut or Stop pressed during a move (a feed, a reload or a declared position), or the disc was calibrated. Declare the position or press Tray Reload. |
 | The board restarts when it feeds | The servo's supply sags: check the capacitor across the servo's power (found on the bench with it off). The move is then cut short, so the position is unknown. |
-| Faults: "saving to flash failed" | The feeder could not save before a move, so it did not move (2.1.2). Restart it; if it persists, the flash may be failing. |
+| Faults: "saving to flash failed" | The feeder could not save before a move, so it did not move. Restart it; if it persists, the flash may be failing. |
 | The clock is not set | No NTP answer: check the network, or set **NTP Servers** to one your network can reach. **Time Source** and the clock's age (Diagnostics) show when it last synced. |
 | Wrong times (an hour off) | The time zone: the web app's (Configuration), otherwise the build's, or Home Assistant's with the `time_homeassistant` package unless the build pins one. |
 | Home Assistant does not find it | Another network segment: add the ESPHome integration by IP with the API key (port 6053). |
@@ -141,4 +162,4 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
 - **BLE trusts anyone with the key, and does not prove itself to the client.** Writes need the key; answers are not
   signed, so a client should pair (an encrypted link) if it must trust what it reads. Details:
   [PROTOCOL.md](PROTOCOL.md), Authentication.
-- **No factory reset in the web app yet:** wiping a feeder is an erase-and-flash from the install page.
+- **No factory reset in the web app:** wiping a feeder is an erase-and-flash from the install page.

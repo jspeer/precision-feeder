@@ -1,13 +1,15 @@
 # HTTPS and certificates
 
 How to open the web app over HTTPS, get rid of the browser's warning with a certificate of your own or one from your
-ACME server, and use the trust store for MQTT over TLS. Firmware 2.4.1 and later, with the `tls` package (in the
-prebuilt firmware and the examples); ACME needs the `acme` package (in the prebuilt firmware), MQTT over TLS the
+ACME server, and use the trust store for MQTT over TLS. HTTPS needs the `tls` package (in the prebuilt firmware
+and the examples); ACME needs the `acme` package (in the prebuilt firmware), MQTT over TLS the
 `mqtt_tls` package (in the prebuilt firmware). How it works and why: [DESIGN.md](../DESIGN.md) section 9.7.
 
 *Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
-(Anthropic's Claude); reviewed by a human, but it may still contain mistakes. Tested on a bench feeder with
-firmware 2.4.4 (docs/BENCH.md); what is still untested is in DESIGN.md section 14, item 27.*
+(Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
+
+Hardware results are recorded in [BENCH.md](BENCH.md); outstanding verification is in
+[DESIGN.md](../DESIGN.md#14-open-items), item 27.
 
 ## Opening the app over HTTPS
 
@@ -33,14 +35,15 @@ used, why. The feeder picks, in this order:
 
 1. **From ACME**, while ACME is set up and its certificate is valid.
 2. **Uploaded**, while it still checks (below).
-3. **Self-signed**, made on the feeder at its first start. Always there, so HTTPS never stops working because of a
-   certificate.
+3. **Self-signed**, made on the feeder at its first start; the fallback when no acceptable uploaded or ACME
+   certificate is available. Browsers warn because they do not automatically trust it.
 
 ## Your own certificate
 
 For a CA you already run (a home lab CA, step-ca without ACME, a company CA).
 
 What the feeder takes:
+
 - the certificate first, then any intermediates, as PEM (`-----BEGIN CERTIFICATE-----`), at most 6 KB in all;
 - its private key as PEM, **not encrypted**: an EC P-256 key (recommended: smaller and faster) or RSA 2048;
 - the feeder's name in the certificate's Subject Alternative Names (`DNS:<name>.local`, and the IP address if you
@@ -74,12 +77,14 @@ certificate by itself, two thirds into its lifetime. Public ACME services such a
 on your LAN or issue for a `.local` name, so they do not work here.
 
 What the ACME server needs:
+
 - an ACME provisioner (step-ca: `step ca provisioner add acme --type ACME`, then restart step-ca);
 - to resolve the feeder's name (`<name>.local` is mDNS: the CA's host must run an mDNS resolver, such as Avahi on
   Linux), and to reach its port 80 (a firewall between your IoT network and the CA must let it through);
 - if it has a name policy, to allow `*.local`.
 
 On the feeder:
+
 1. **Trust store:** upload your CA's root certificate (step-ca: `$(step path)/certs/root_ca.crt`), then restart. The
    feeder checks the ACME server against it, and without it ACME does not run: it never talks to a server it has not
    checked.
@@ -158,7 +163,7 @@ does not connect. Details: [MQTT.md](MQTT.md).
 
 - **The keys are in flash in the clear** (no flash encryption): anyone holding the board can read the HTTPS key. See
   [SECURITY.md](SECURITY.md).
-- **TLS 1.2 only**, with ECDHE and AES-GCM: every current browser supports it.
+- **TLS 1.2 only**, with ECDHE and AES-GCM; the browser or client must support these.
 - **At most three HTTPS connections at once** (a YAML build can set 1 to 6, `max_sessions`); each takes about 20 KB of
   memory while open.
 - **http-01 only.** No DNS challenge (it would keep DNS credentials on the feeder), no wildcard names.

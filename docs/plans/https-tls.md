@@ -1,5 +1,9 @@
 # Plan: HTTPS, MQTT over TLS and certificates (experiment)
 
+> **Historical development plan.** This records proposals and milestones, including superseded approaches.
+> Use the [current guides](../../README.md#find-the-right-guide) for setup and operation, and
+> [DESIGN.md](../../DESIGN.md) for current behavior and decisions.
+
 Status: **HTTPS, the trust store and MQTT over TLS built in firmware 2.4.1, ACME in 2.4.2** (DESIGN.md section 9.7,
 D36 to D40; compiled, not yet on hardware), the web app's page and the guides (docs/HTTPS.md) in 2.4.3 (D41), the fixes from the first bench run in 2.4.4 (D42;
 M6 done except the soak, docs/BENCH.md). Branch `experiment/https-tls`, from main at

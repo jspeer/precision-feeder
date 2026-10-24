@@ -1,155 +1,107 @@
-# Calibration
+# Calibrate the tray or disc
 
-This guide is for the servo fan tray, and below for the direct-drive disc. A feeder with another mechanism (another
-motor and tray, [MECHANISMS.md](MECHANISMS.md)) has its own section here or on its branch.
+Calibrate with **no food in the mechanism**. Open **Maintenance → Calibration** in the web app and follow the section
+for your drive. A settings password, when set, is required. Calibration blocks feeds; finish it before loading.
+Home Assistant does not expose calibration or position-recovery controls.
 
-The tray is moved by a servo to absolute angles: 7 positions, 25 degrees apart, so the servo turns 150 degrees from
-position 0 to position 6. (`sweep_degrees`, 175, is the span of the seven slots' 25-degree widths, not the servo's
-travel: DESIGN.md section 3.0.1.) Mechanical tolerances mean each position needs a small correction.
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
+(Anthropic's Claude); verify against your own build.*
 
-*Written with the assistance of an AI (Anthropic's Claude); verify against your
-own build.*
+## Choose the mechanism
 
-**In the built-in web app**, Maintenance has the same steps as a walkthrough (the setup
-wizard's last step points there): start calibration, pick a slot, nudge its offset by 0.1
-or 1 degree, go to the next slot, then finish and save. The servo pulse range is under
-"Servo pulse range (advanced)" there. Changing the calibration needs the settings password
-when one is set. The steps below use the firmware entity names, available in the web app
-(including Diagnostics). Since 2.2.0 calibration and position recovery are internal entities, hidden from Home Assistant.
+Prebuilt firmware starts as a servo feeder. For the disc, select **Configuration → Drive → Direct-drive disc**,
+check the motor pins and restart. Saved drive and pin changes apply after a restart.
 
-## First-time setup
+- [Servo fan tray](#servo-fan-tray): pulse range first, then the seven slot offsets.
+- [Direct-drive disc](#the-direct-drive-disc): direction, zero, ticks per turn and a shared slot trim.
 
-1. Wire the servo (signal to the servo pin, GPIO1 on the S3-Zero by default; 5 V; GND) and
-   power the board.
-2. Turn the tray fully **clockwise** to its end stop and fit it so slot 0, the
-   closed slot, lines up with the alignment mark on the base. This matches the
-   original firmware's instructions.
-3. Flash the firmware. At boot the servo moves to the saved position (position 0 on a new
-   feeder, which assumes a freshly loaded tray) and then goes limp after a second.
+## Servo fan tray
 
-## Fine-tuning each position
+There are seven positions, 25° apart: position 0 is closed; positions 1–6 hold food. The servo moves 150° between
+the first and last positions. The YAML value `sweep_degrees: 175` describes seven slot widths, not that travel.
 
-Do this in two stages: first the servo's scale (pulse range), then the per-slot
-offsets. The offsets are limited to ±15 degrees, enough for small corrections but
-not for a servo that turns a different amount per microsecond than assumed.
+### First-time setup
 
-### 1. Pulse range
+1. Check the wiring and motor supply: servo signal to the selected pin (GPIO1 by default), power to a suitable
+   5 V supply and a shared ground. Do not power the servo from the board's 3.3 V regulator.
+2. Follow the print's mounting geometry: the clockwise end corresponds to the closed slot and its alignment mark.
+   Seat the horn so small calibration corrections can line up slot 0 without straining the servo.
+3. The firmware commands the saved position at boot (position 0 on a fresh feeder), then releases the servo after
+   the detach delay. Keep the tray empty during setup.
 
-1. Turn **Calibration Mode** on and pick **Calibration Position** `0`.
-2. Adjust **Servo Min Pulse** (µs) until the closed slot lines up with the mark.
-   The servo moves again after every change.
-3. Pick position `6` and adjust **Servo Max Pulse** until slot 6 lines up with the
-   opening. A bigger value makes every step longer. Changing it moves slot 0 a
-   little too, so go back to position 0 and repeat once or twice.
-4. Check positions `1` to `5`. If they are all close, go on to the offsets.
+### Fine-tuning each position
 
-Rough rule: if the offsets you would need grow by *d* degrees per slot, multiply
-the span (max − min) by (25 + *d*) / 25.
+Start calibration in Maintenance. The walkthrough selects a position and nudges its offset by 0.1° or 1°.
+Use **Servo pulse range (advanced)** to correct the overall travel before applying individual offsets.
 
-**MG90S:** its datasheet gives 500 to 2500 µs for 0 to 180 degrees (neutral
-1500 µs, ±3 degrees), so start the range there rather than at the defaults. The
-first bench build ended at 637 to 2675 µs: the same scale within 2%, shifted by
-where the horn sits on its spline. Increasing pulse turns it counter-clockwise,
-so slot 0 is at the clockwise end, as the setup above expects.
+#### 1. Pulse range
 
-The build's `min_pulse` / `max_pulse` (544 / 2400 µs) are only the starting values for a new
-device. Once you change the range here it is saved and used from then on (a
-reflash does not reset it). The limits are 300 to 1500 µs for the minimum, 1500
-to 3000 µs for the maximum, and at least 500 µs between them. The firmware never
-commands more than about 155 degrees, so a large maximum does not by itself push
-the servo into its end stop; still, listen for buzzing at position 6.
+1. Turn **Calibration Mode** on and select **Calibration Position 0**.
+2. Adjust **Servo Min Pulse** until the closed slot lines up with the mark. Each change moves the servo again.
+3. Select **position 6** and adjust **Servo Max Pulse** until slot 6 lines up with the outlet. Increasing the span
+   makes each step longer. Recheck position 0, then position 6, until both align.
+4. Check positions 1–5. If the error grows steadily with each slot, correct the pulse range before using offsets.
 
-### 2. Per-slot offsets
+The default range is 544–2400 µs. It is a starting value, not a calibration for every MG90S or SG92R. Servo units
+and horn placement differ; do not copy another feeder's final values. Listen for buzzing or strain and narrow the
+range if necessary. The allowed minimum is 300–1500 µs, the maximum 1500–3000 µs, with at least 500 µs between them.
+Saved calibration overrides the YAML's starting range and survives an update without erasing.
 
-Hobby servos have a deadband (3 degrees on the MG90S): within it the servo does
-not correct, so where it stops depends a little on the direction it came from.
-Feeds always arrive at a slot from the lower position (the wiggle ends with a
-forward move), so check each position after arriving from position 0's side:
-select the position below it first, then the position itself.
+A useful scale check: if the additional correction grows by *d* degrees per slot, the required pulse span is roughly
+its current span multiplied by (25 + *d*) / 25. Recheck physical alignment after any change.
 
-1. Turn **Calibration Mode** on. Feeds are refused while it is on, and the LED is
-   white.
-2. Pick **Calibration Position** `0`. The servo moves there. Adjust
-   **Calibration Offset** (in degrees, 0.1 steps) until the closed slot lines up
-   with the mark.
-3. Pick positions `1` to `6` in turn and adjust until each open slot lines up
-   with the opening in the base.
-4. Turn **Calibration Mode** off. Offsets are saved and the tray returns to its
-   current position.
+#### 2. Per-slot offsets
 
-If your servo moves the wrong way for your mounting, set `servo_invert: "true"`.
-The default pulse range, 544 to 2400 µs, is what the original firmware drove its
-TowerPro SG92R with. An MG90S fits the same mount but may turn a different amount
-per microsecond: on the first bench build it needed about 3.5 degrees more per
-step, which is what the pulse range stage above is for.
+1. With Calibration Mode on, select position 0 and adjust **Calibration Offset** until it aligns.
+2. Select positions 1–6 and adjust each until its opening lines up with the base.
+3. Check each position after approaching it from the lower position: select the previous slot, then the one being
+   checked. Servo deadband and backlash can make the approach direction matter; feeding ends with a forward move.
+4. Turn Calibration Mode off. Offsets are saved and the servo returns to its current tracked position.
 
-Position 0 is commanded to 2.5 degrees, and the firmware never goes below 0, so a
-negative offset at slot 0 can only take off 2.5 degrees. Mount the servo horn so
-that slot 0 needs a positive correction (or a higher Servo Min Pulse).
+Offsets are limited to ±15°. Position 0 starts at 2.5°, and commands cannot go below 0°, so its negative correction
+is limited by that boundary. Re-seat the horn or adjust Min Pulse if needed. A reversed servo mounting can use
+`servo_invert: "true"` in a YAML build.
 
-## Loading and the tray position
+### Loading and the tray position
 
-Press **Tray Reload** before filling the tray. That returns the tray to
-position 0, marks all 6 portions as available, and pauses scheduled feeding for
-the *Reload Pause* (10 minutes by default) so you can finish loading the tray.
+Press **Tray Reload before filling**. Wait for the tray to reach its closed position, then fill the six open slots.
+The reload pause (10 minutes by default) skips scheduled meals while you load; it does not block manual feeds.
 
-If power is lost during a feed, or you press **Stop** mid-feed, the position is
-**unknown** (LED magenta) and feeding is blocked. Look at the tray, set
-**Declared Tray Position** to where it really is, and press **Declare Tray
-Position**; or reload the tray. On a build with the push button, a short press
-reloads the tray in this state (it moves to the closed slot), then load it.
+After an interrupted move or Stop, the position becomes unknown. Inspect the tray and use Maintenance to declare
+the observed position, or reload and refill. A short press of the optional button also reloads when position is
+unknown. Do not declare a position just to clear the warning without checking it.
 
-## What the bench build showed
-
-From the first calibrated feeder ([BENCH.md](BENCH.md), 2026-10-14):
-
-- The default 544 to 2400 µs range does not fit an MG90S: it ended at 637 to 2675 µs, with
-  offsets of at most +3.3 degrees. Calibrate the range per servo.
-- The horn had to be re-seated once so that slot 0 needs a positive correction.
-- No servo twitch at power-up, so the 10 kΩ pull-down was not needed there.
-- The tray stays put once the servo is released (checked with an empty tray; recheck with
-  food in it). Still to watch in daily use: whether the servo strains at position 6.
+Bench measurements and observations are in [BENCH.md](BENCH.md). Calibration must be checked on your own print and
+servo, including whether the loaded tray stays aligned after the servo releases.
 
 ## The direct-drive disc
 
-A disc of open slots turned directly by a gear motor with an encoder (DESIGN.md section 3.3). The servo steps above do
-not apply: there are no slot offsets and no pulse range. Instead the firmware measures how many encoder ticks one turn
-of the disc takes, and checks every slot.
+The disc uses encoder ticks, not servo angles or per-slot offsets. Its calibration measures ticks per turn and
+checks the slot grid. Empty it first: calibration turns every opening over the chute.
 
-**Choose the drive first** if the firmware starts as a servo feeder (the prebuilt firmware does): Configuration,
-Drive, Direct-drive disc, then Restart. Its pins are under the same card.
+In **Maintenance → Calibration**, turn Calibration mode on and follow **Next step**:
 
-**Empty the disc first.** The calibration turns it, and every open slot passes over the hole.
+1. **Slots and direction.** Set **Disc slots** to the actual count (3–60; 15 by default), then press **Start** for a
+   short forward push. Answer Yes or No to the direction question. The firmware also checks the encoder count and
+   sets Reverse Motor or Reverse Encoder as needed; press Start again if requested. With no counts, check the
+   encoder's C1, C2 and 3.3 V wiring.
+2. **Zero.** Centre an empty slot over the hole with **Nudge 0.1°** and **Nudge 1°**. Nudges go forward to take up
+   gearbox play consistently. **Overshot** backs up about 5° and comes forward 4°, then lets you nudge forward again.
+   Press **Zero** when centred.
+3. **Run turns.** Run one full turn, or set Calibration Turns to three for a longer measurement. Nudge the original
+   slot back to the centre and press **Measured**. The measured count becomes Ticks Per Turn. A measurement more
+   than 20% off is refused; check for a slipped disc and zero again.
+4. **Check every slot.** **Next slot** moves as a feed does, including the wiggle. If aligned, continue with Next
+   slot or Yes. Otherwise nudge to the centre, using Overshot if needed, and press **Trim here**. That correction
+   shifts the entire slot grid; continue checking the rest. Different errors at different slots cannot be corrected
+   by this shared trim: per-slot disc offsets are not supported.
+5. Turn Calibration mode off. Movement has made the food position unknown. Fill every slot **except the one over
+   the chute**, then press **Tray reload** to mark a full load. Reloading the disc does not move it.
 
-In the web app: **Maintenance → Calibration**. Turn **Calibration
-mode** on (feeding is refused until you turn it off), then follow **Next step**: it says which step you are on and
-which button to press.
+Motion and Wiggle tuning starts at Drive Power 100%, Braking Distance 160 ticks and Wiggle 2° × 4. Keep those values
+unless the mechanism needs tuning. Slots, ticks per turn, trim and directions can only be changed in calibration
+mode. The mechanical check is alignment by eye, including on a printed disc.
 
-1. **Slots and direction.** Check **Disc slots** matches your disc (15 on the bench print; 3 to 60). Change it here if
-   not: it can only be changed in calibration mode, because it moves every slot. Then press **Start**: the disc gives
-   a short push forward. Did it turn the way it should when it feeds? Press **Yes** or **No**. The firmware also
-   checks the encoder counted up while it turned; if the motor or the encoder is the wrong way round it sets Reverse
-   Motor or Reverse Encoder for you, and you press **Start** once more. If the encoder did not count at all, check
-   its C1, C2 and 3V3 wires.
-2. **Zero.** Centre one empty slot exactly over the hole with **Nudge 0.1°** and **Nudge 1°**. They only turn
-   forward, so the gearbox's play never comes into it; if a slot goes past the centre, press **Overshot**: it backs
-   up about 5° and comes forward 4°, and you nudge forward from there. Then press **Zero**.
-3. **Run turns.** The disc makes one full turn (or Calibration Turns: three is more accurate) and stops close to the
-   same slot. Nudge it until that slot is centred over the hole again, then press **Measured**. Ticks Per Turn is now
-   what it really took. A measurement more than 20% off is refused (a slipped disc, not a calibration): zero again.
-4. **Check every slot.** **Next slot** moves one slot exactly as a feed does, wiggle included. Look at the slot:
-   - centred over the hole: press **Next slot** (or **Yes**) for the next one;
-   - not centred: nudge it to the centre (or Overshot, then nudge, if it went past), then press **Trim here**. The
-     firmware works out how far you moved it and shifts **every** slot by that much (Slot Trim: + is further
-     forward, − further back). You never type the trim or work out its sign. Then carry on with **Next slot**.
-   - If the slots are off by different amounts rather than all the same way, the print is uneven; per-slot offsets
-     would be needed, and the firmware has none yet.
-5. Turn **Calibration mode** off. The disc has turned, so the feeder no longer knows which slots hold food: fill
-   every slot except the one over the hole and press **Tray reload**.
-
-The other tuning values (Maintenance → Motion and Wiggle) start at the bench's: Drive Power 100%, Braking Distance 160
-ticks, Wiggle 2° × 4. Leave them unless the disc overshoots, stalls or the food sticks.
-
-**After a power cut mid-feed** the position is unknown and feeding stops. Turn calibration mode on, nudge until a slot
-is centred over the hole, turn calibration mode off, then **Declare position** (portions fed since the last reload), or
-refill the disc and reload.
+After interrupted motion, use calibration mode to centre an empty slot, leave calibration mode, then declare the
+portions fed since the last reload. If you cannot establish which slots still hold food, refill and reload instead.
+See [position recovery](USING.md#recovering-an-unknown-position).

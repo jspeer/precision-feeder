@@ -1,126 +1,108 @@
 # The web app
 
-The feeder carries its own web app (firmware 1.1.0 and later; this guide describes 2.4). It runs the whole feeder
-from any browser on your network, on a computer or a phone, with no Home Assistant, no
-internet and nothing to install. It is stored in the firmware, so nothing is loaded
-from the internet.
+Open the feeder in a browser to feed, schedule, configure and maintain it. The app lives in the firmware, works on
+phones and computers, and loads no assets from the internet. Home Assistant is optional.
 
-*Written with the assistance of an AI (Anthropic's Claude); check it against your own feeder.*
+*Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
+(Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
 ## Opening it
 
-- Browse to `https://<name>.local` or `http://<name>.local` (the prebuilt firmware: `precision-feeder-` and the end of
-  the board's MAC address, for example `precision-feeder-a1b2c3.local`; a YAML build: its
-  `name`), or to the feeder's IP address. IPv4 and IPv6 both work; Diagnostics lists the
-  addresses. A new feeder opens the setup wizard.
-- It is in the prebuilt firmware, and in a YAML build with the `web_server` package (on in
-  all three examples).
-- **Passwords:** none by default. A **settings password** (Configuration) protects the
-  safety limits, calibration, pins, keys, network and firmware ([SECURITY.md](SECURITY.md)).
-  A YAML build can also put the whole app behind a login ([BUILDING.md](BUILDING.md)).
-- **HTTPS** (2.4.1, the `tls` package, in the prebuilt firmware): the app is also at `https://<name>.local`, and
-  opening it on plain HTTP (Home Assistant's "Visit" link too) sends you there. The feeder's certificate is
-  self-signed: your browser warns the first time; accept it once for that feeder. Since 2.4.2 it can get a
-  trusted certificate from your own ACME server (step-ca, say) instead, or use one you upload (Configuration, HTTPS
-  and certificates, since 2.4.3). How: [HTTPS.md](HTTPS.md).
-- **Phones:** the tabs move to a bar at the bottom. Add the page to your home screen
-  for an app-like shortcut.
+Browse to `https://<name>.local` or the feeder's IP address. Prebuilt firmware uses `precision-feeder-<6 hex digits>`
+until renamed. HTTP redirects the app to HTTPS when enabled; the first visit warns about the self-signed certificate.
+See [HTTPS.md](HTTPS.md) for certificates and [INSTALL.md](INSTALL.md) for first-time setup.
+
+A phone puts the tabs along the bottom. You can add the page to its home screen as a shortcut. The app is included
+in prebuilt firmware and source builds with the `web_server` package; HTTPS also needs `tls`.
+
+## Start with the task
+
+| Task | Where |
+|---|---|
+| Feed, refill, pause or see what happens next | Dashboard |
+| Edit meal times, profiles or dated feeds | Schedule |
+| Set safety limits, time, network, drive, pins, passwords or integrations | Configuration |
+| Calibrate, recover position or adjust the diagnostic 24-hour count | Maintenance |
+| Inspect a BLE session or command activity | Bluetooth |
+| Inspect memory, clock, network, log or raw entities | Diagnostics |
+| Install an update | Diagnostics → Updates and firmware upload |
+| Run first-time setup again | Configuration → Device |
+
+## Dashboard
+
+The tray drawing follows the selected mechanism. It shows portions remaining, the next feed, projected food supply,
+today's feeds and recent results. **Feed now** asks for confirmation, then displays the device's answer. **Hold**
+pauses scheduled feeding; **Resume** cancels the hold. Manual feeding still passes through the guard.
+
+**Tray reload** gives instructions for the current mechanism: close the servo tray before filling, or fill the disc
+except for the slot over the chute before marking it reloaded. See [daily use](USING.md#everyday-use).
+
+The banner below the header shows the most urgent reported issue, such as lost connection, unknown position,
+calibration mode, empty tray, missing clock, insufficient food for the next meal or a hold.
+
+## Schedule
+
+View profiles A, B and C without changing which one runs. **Edit** sets an event's time or sun anchor, portions,
+weekdays and enabled state. Set cadence and fast days for the profile; **Make active** chooses the plan to run.
+One-shot feeds use the feeder's local time.
+
+Saving disables a live event before changing its fields and enables it last, then checks what the feeder reports.
+The editor is shared with other clients; avoid simultaneous edits from another browser, MQTT or BLE. A conflict
+message names what to check. Details and examples: [SCHEDULING.md](SCHEDULING.md).
+
+## Configuration
+
+| Section | Controls |
+|---|---|
+| Feeding | Guard limits, reload pause, refill interval and location, using the device's limits and units |
+| Time | Time zone by place or POSIX string, and up to three NTP servers; an empty value returns to the build's default |
+| Network | Name, nearby networks or manual Wi-Fi entry, Forget network where supported, and setup AP password |
+| Hardware | Drive, board preset and pins; only acceptable pins are listed, with None for an unfitted button or LED |
+| Settings password | Set, unlock, lock, change or remove; unlocking lasts for the loaded page |
+| Keys | Generate, enter or clear API/BLE keys where supported; BLE permissions and Forget pairings |
+| MQTT | Enabled state, broker, port, login, prefix, connection status; TLS checking and stored pin where supported |
+| HTTPS and certificates | Current certificate, fingerprint and expiry; upload/remove/regenerate, HTTP redirect, HTTPS only, trust store and ACME |
+| Device | Restart when needed and reopen the setup wizard |
+
+Changes save as you make them. Pins, drive, name and AP password need a restart. MQTT connection changes need one
+once its client has started; turning MQTT off takes effect immediately. Certificate uploads and trust-store changes
+need a restart; an ACME certificate is applied to new connections immediately. **Restart Needed** indicates pending
+changes; nothing restarts automatically just because a setting changed.
+
+Generated API and BLE keys are shown once. Passwords and private keys are never read back. A settings password
+protects the listed sensitive changes; it does not lock everyday feeding or schedule editing. The available actions
+depend on the build and on whether a key came from YAML. See [SECURITY.md](SECURITY.md), [MQTT.md](MQTT.md) and
+[HTTPS.md](HTTPS.md) before setting up those connections.
+
+## Maintenance
+
+Calibrate an empty mechanism with the guided steps. The servo has pulse range and per-slot offsets; the disc has a
+direction, zero, measured-turn and slot-trim walkthrough plus motion tuning. Follow [CALIBRATION.md](CALIBRATION.md).
+
+After interrupted motion, declare the observed tray position or reload. **Portions Counted (24 h)** changes the
+count used by the guard for debugging or recovery; it is protected and logged. It does not change the amount of food
+physically in the feeder.
+
+## Bluetooth
+
+BLE builds show the connected client, authentication state, counters and the last 32 connections and writes. Only
+the last two bytes of the client's address are shown. This page diagnoses the BLE interface; it does not connect
+your browser to the feeder over Bluetooth. The app itself uses Wi-Fi.
+
+## Diagnostics and firmware
+
+Diagnostics shows the system, clock, network addresses, memory, live log and raw entities. Use those controls when
+you need the exact firmware values; the normal pages provide the task-specific controls.
+
+**Updates and firmware upload** shows the installed version and variant, an optional release check and an upload
+control. The browser checks GitHub Pages for published releases. Use an `.ota.bin` and follow
+[the update instructions](INSTALL.md#updates).
 
 ## What you see depends on your build
 
-Each page and section appears only if your build has the package behind it.
-Without BLE there is no Bluetooth page; without the calibration package Maintenance
-keeps only tray reload and the 24 h count; without `diagnostics` or `network_info`
-those cards are missing. Nothing is configured in the app itself.
+Missing packages hide their pages or cards: no BLE means no Bluetooth page; omitted diagnostics or network packages
+remove those cards. The app follows what the device reports; settings are saved on the feeder, not in the browser.
 
-A banner under the header shows the most important problem, with what you can do:
-connection lost, tray position unknown (recover or reload), calibration on, tray
-empty, clock not set, the next feed needing more than remains, a hold, or anything
-else the feeder lists under Faults.
-
-## Pages
-
-- **Dashboard:**
-  - the tray as a dial of its slots (seven on the servo tray, the disc's own count on the disc), the next feed and how long the food lasts;
-  - **Feed now**: it asks first, shows whether the feeder is ready (the feed guard's
-    answer), and reports the feeder's own result ("too soon", "daily cap reached", ...);
-  - today's feeds with their state, status, recent feeds;
-  - Hold (a choice of durations) or Resume, and Tray reload with a short walkthrough.
-- **Schedule:**
-  - the three profiles side by side; looking at one never changes what runs, and
-    "Make active" does that;
-  - **Edit** on an event sets its time (clock, or before or after sunrise or sunset),
-    portions, days and on or off. Saving writes the fields in a safe order and checks
-    the result;
-  - cadence (every N days) and fast days per profile;
-  - one-shot feeds, in the feeder's own time.
-- **Configuration:**
-  - the feeding safety limits, reload pause, refill interval and location, each with
-    the feeder's own limits and units;
-  - the time zone, chosen by place or typed as a POSIX string (empty means the YAML's, or
-    Home Assistant's), and the NTP servers (2.0.2; up to three, empty means the build's);
-  - network: the name (used after a restart), joining another Wi-Fi network (at once; 2.3.0:
-    picked from the networks the feeder sees, or typed),
-    forgetting it (2.3.0, builds with no network in their YAML: it restarts into the access
-    point), and the fallback access point's password (used after a restart). Passwords are never shown
-    or sent back;
-  - drive, board and pins (with the `hardware` package): the drive (servo or direct-drive
-    disc, in a build with the disc's package), a board preset or each pin (the servo's
-    while the servo is the drive, the disc's five motor pins while the disc is), saved at
-    once and used after a restart (Restart is offered when one is waiting); only pins
-    the chip can spare are listed, and "none" for a button or LED that is not fitted;
-  - the settings password: set, unlock (for this page, until it is reloaded), lock,
-    change or remove. Locked, changes to the safety limits, the calibration, the
-    pins, the keys and the network are refused with a message saying so;
-  - keys: where the Home Assistant and Bluetooth keys come from (none, your YAML, or
-    saved on the feeder); generate one (made in the browser and shown once), enter
-    your own, or clear a key saved on the feeder (the Home Assistant key, and since 2.3.0 the Bluetooth key),
-    where the build allows it; and the two
-    switches for what Bluetooth may change. The feeder never sends a key back. Since 2.4.3, how many Bluetooth
-    clients have paired, and Forget pairings (they must pair again; clients that never paired, and the key, are
-    unchanged);
-  - MQTT (with the `mqtt` package, 2.1.0): on or off, the broker, port, username,
-    password and topic prefix, whether it is connected and the prefix in use; and (2.4.3, with the `mqtt_tls`
-    package) TLS, how the broker is checked (a CA certificate, or pinned on first contact), the TLS status and the
-    pinned certificate, with Forget. Saved at once; once MQTT has connected, changes are used after a restart.
-    The password is never shown or sent back, and since 2.4.5 it travels masked by the settings password;
-  - HTTPS and certificates (2.4.3, with the `tls` package): the certificate in use (self-signed, uploaded or from
-    ACME; its name, expiry and fingerprint), upload a certificate and key of your own (pasted or from files; the key
-    travels masked by the settings password), remove it or make a new self-signed one, Send port 80 to HTTPS and
-    HTTPS only, the trust store (your CA's root certificate: upload, replace, clear), and ACME (the directory, the
-    name, its status and Renew now). An upload is checked by the feeder and used after a restart, as is a change
-    to the trust store; ACME's certificate is used at once ([HTTPS.md](HTTPS.md)).
-- **Setup** (`#setup`, not a tab; 2.0.0): opened by itself on a new feeder, and from
-  Configuration (Device). Steps: welcome, network, time zone (by place) and location,
-  board and pins, keys, settings password, calibration. Each saves as it goes and can be
-  skipped; Finish (or skipping) tells the feeder setup is done. On a prebuilt binary whose
-  access point has no password yet, the network step strongly recommends setting one.
-- **Firmware** (`#firmware`, not a tab; 2.0.0): linked from Diagnostics. The installed version
-  and variant; the update check (your browser reads the latest release's manifest from GitHub
-  Pages when the page opens: up to date, an update with its release notes, or "Couldn't
-  check"; it can be turned off for that browser); and the upload: choose an `.ota.bin`, the
-  page names it from the release (or warns that it is not one), uploads it signed with the
-  settings password, and the feeder checks it again before restarting into it.
-- **Maintenance:**
-  - a calibration walkthrough (start, pick a slot, nudge it, next slot, finish and save)
-    and the servo pulse range; on the direct-drive disc, its step-by-step wizard (slots and
-    direction, zero, run turns, check every slot, trim) and its tuning;
-  - declaring the tray position after a power cut, or reloading;
-  - the 24 h count, for debugging.
-- **Bluetooth** (BLE builds): the connection, the client (only the last two bytes of
-  its address), counters, and the last 32 connections and writes.
-- **Diagnostics:** system, clock, network addresses, memory, the live log, and every
-  entity the feeder reports, each with a control. Anything no other page shows is here.
-  System links to the Firmware page.
-
-## Good to know
-
-- **The feeder decides.** The app asks, and shows what the feeder answers; every feed goes
-  through the same guard as the schedule, Home Assistant, BLE and the button.
-- **A few browsers at a time.** The web server has only a handful of connections; a page
-  in the background lets go of its connection after 30 seconds and takes it again when
-  you return.
-- **After a firmware update**, an open page offers to reload itself.
-- **Shared editor:** browser pages use one shared set of schedule editor entities. If another browser or an
-  MQTT or BLE client edits the same schedule at the same moment, the app may report a conflict after saving and
-  name what to check. Home Assistant cannot edit the schedule.
+A few open browsers can exhaust the device's connections. A background page releases its connection after 30
+seconds and reconnects when opened again. HTTPS allows three simultaneous sessions by default. After a firmware
+restart, an open page offers to reload so it uses the app bundled with the new firmware.

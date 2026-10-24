@@ -47,15 +47,18 @@
       <span slot="not-allowed" class="unsupported">Open this page over HTTPS to flash.</span>
     </esp-web-install-button>
     <h2 style="margin-top:16px">Without Bluetooth</h2>
-    <p>Wi-Fi, the web app and Home Assistant only. Smaller, and leaves more memory free.</p>
+    <p>The same features without the Bluetooth control plane. Leaves more memory free.</p>
     <esp-web-install-button manifest="install-no-ble.json"></esp-web-install-button>
   </section>
 
   <section>
     <h2>After installing</h2>
     <ul>
+      <li>Updating an existing feeder? Do not erase the board if you want to keep its settings and calibration.</li>
       <li>Open the feeder's address (the installer links to it) to run the setup wizard: name, time zone, board and
         pins, keys, then calibration.</li>
+      <li>For a direct-drive disc, choose that drive in Configuration and restart before calibrating. Both variants
+        start with the servo drive.</li>
       <li>No Wi-Fi yet? The feeder opens its own access point, <code>precision-feeder-xxxxxx-setup</code>, with no
         password. Join it and the setup page opens. Set an access point password in the wizard.</li>
       <li>Home Assistant finds the feeder and gives it its key when you adopt it.</li>

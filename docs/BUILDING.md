@@ -1,8 +1,8 @@
 # Building your own firmware from YAML
 
-The advanced path: build the firmware yourself with ESPHome, choosing exactly which features are compiled in. Most
-people should flash the prebuilt firmware instead ([INSTALL.md](INSTALL.md)); a YAML build has the same web app,
-settings and safety behaviour, plus whatever you change in your YAML.
+Build from source with ESPHome when you want a custom set of features. For prebuilt firmware without compiling,
+use [INSTALL.md](INSTALL.md). The packages expose the same core behavior and saved settings in both paths; a source
+build lets you choose which optional interfaces are compiled in.
 
 *Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
@@ -27,7 +27,7 @@ file lists the packages it wants, so a feature is switched on or off by one line
 | `time_homeassistant` | Home Assistant as a second clock source (keeps time when the internet is down but Home Assistant is up) | all three examples; harmless without Home Assistant. It also uses Home Assistant's time zone unless you pin yours (see its comment) |
 | `network_info` | the Wi-Fi network, IP addresses and signal strength | all three examples; leave it out to save a little flash |
 | `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | all three examples; leave it out if you never set Wi-Fi over USB |
-| `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 170 KB of flash and, at run time, about 60 KB of RAM (NimBLE, since 2.4.0). It cannot be combined with ESPHome's own Bluetooth components (`esp32_ble`, `bluetooth_proxy` and so on) |
+| `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 170 KB of flash and, at run time, about 60 KB of RAM (NimBLE). It cannot be combined with ESPHome's own Bluetooth components (`esp32_ble`, `bluetooth_proxy` and so on) |
 | `tls` | the web app over HTTPS at `https://<name>.local` (a self-signed certificate made on the feeder, or one you upload), the redirect from port 80, and the trust store; needs `web_server` | recommended (all three examples; [HTTPS.md](HTTPS.md)). Costs about 40 KB of flash and about 20 KB of RAM per open HTTPS session (at most 3) |
 | `mqtt_tls` | MQTT over TLS, checked against a CA certificate or pinned on first contact; needs `mqtt` and `tls` | if your broker offers TLS (usually port 8883) |
 | `acme` | the HTTPS certificate from your own ACME server (step-ca, say: http-01, renewed by itself), off until a directory is set; needs `tls` | if you run an ACME server on your LAN. Costs about 47 KB of flash |
@@ -138,7 +138,7 @@ calibration, location, hold) is set on the feeder and saved there: see [USING.md
 
 ## What Home Assistant sees, and a headless build
 
-Since 2.2.0 Home Assistant (and MQTT) sees only the everyday controls and status; every other entity is `internal` and
+Home Assistant (and MQTT) sees only the everyday controls and status; every other entity is `internal` and
 reached through the web app (`web_server` package, which sets `include_internal`). `tools/check_scopes.py` checks a
 build's resolved configuration for that (`esphome config my.yaml > resolved.yaml`, then run it on the file).
 

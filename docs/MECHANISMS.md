@@ -3,10 +3,10 @@
 *Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE). Written with the assistance of an AI
 (Anthropic's Claude); reviewed by a human, but it may still contain mistakes.*
 
-Since firmware 2.1.0 the feeder's logic (the feed guard, the schedule, the history, the tray position) does not know
+The feeder's logic (the feed guard, the schedule, the history, the tray position) does not know
 what motor it drives. That is a **mechanism**: a motor, its driver and the tray or disc it turns. The servo fan tray
-of the Precision Feeder Rev2 is the reference mechanism; `main` also carries the direct-drive disc. This guide is for building your
-own: another motor, another tray, another number of slots.
+of the Precision Feeder Rev2 is the reference mechanism; the firmware also carries the direct-drive disc. This
+guide is for contributors adding another motor, tray or slot geometry.
 
 The rules are in [AGENTS.md](../AGENTS.md), "Adding a mechanism", and the design in [DESIGN.md](../DESIGN.md)
 section 3.0. This page is the walkthrough and the checklist.
@@ -79,11 +79,10 @@ position is known again. A missed meal beats an overfeed.
 
 A mechanism for your own build lives on a branch, `variant/<name>`: not tagged, no prebuilt binaries, its own
 `fw_variant` (so the web app's update check never offers it main's firmware) and a version suffix
-(`2.1.0-<name>.1`). Rebase it onto main after each release; the mechanism interface keeps that small. With the owner's
+(`<base-version>-<name>.1`). Rebase it onto main after each release; the mechanism interface keeps that small. With the owner's
 decision it moves to main, where it becomes a second drive beside the servo, chosen on the device (DESIGN.md section
-3.4). The first one did: a direct-drive DC motor with an encoder turning a slotted disc, built on
-`variant/n20-direct-drive` and on main since 2.1.0 (`packages/mechanism_n20.yaml`;
-[docs/plans/drive-decoupling.md](plans/drive-decoupling.md), stage 2).
+3.4). The included direct-drive disc (`packages/mechanism_n20.yaml`) is an example of that integration. Its
+[development plan](plans/drive-decoupling.md) is historical; follow the current code and this checklist.
 
 ## Checklist
 

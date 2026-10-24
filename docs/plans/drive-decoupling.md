@@ -1,5 +1,9 @@
 # Plan: a feeder mechanism interface, then a direct-drive N20 variant
 
+> **Historical development plan.** This records proposals and milestones, including superseded approaches.
+> Use the [current guides](../../README.md#find-the-right-guide) for setup and operation, and
+> [DESIGN.md](../../DESIGN.md) for current behavior and decisions.
+
 Status: **done, in firmware 2.1.0 on main (2026-10-21).** Stage 1, stage 2 and the single binary (S2.0b, D17) were
 built on their branches, run on the bench (docs/BENCH.md) and merged together, with MQTT (DESIGN.md section 9.6, D20).
 The single binary defaults to the servo; the disc is a second drive chosen on the device (DESIGN.md section 3.4). What
