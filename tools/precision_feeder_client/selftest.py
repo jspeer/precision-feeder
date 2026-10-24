@@ -38,9 +38,14 @@ async def selftest(feeder: FeederClient) -> list[tuple[str, bool, str]]:
         values[name] = await feeder.read_config(key)
     check("every Config key readable", len(values) == len(CONFIG_KEYS), ", ".join(f"{k}={v}" for k, v in values.items()))
     r = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS["daily_cap"], values["daily_cap"]))
-    check("Config write (same value back) answered with its seq", r.ok and r.seq != 0, r.result_text)
-    r = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS["daily_cap"], 0))
-    check("out-of-range Config value refused", r.result == 8, r.result_text)
+    if r.result == 16 and r.detail == 7:
+        # The feeder's "BLE Can Change Guard Limits" is off (the default): guard limits are refused before they are
+        # checked, as they should be, so the two Config write checks cannot run.
+        check("Config writes refused: BLE may not change guard limits (skipped two checks)", True, "detail 7")
+    else:
+        check("Config write (same value back) answered with its seq", r.ok and r.seq != 0, r.result_text)
+        r = await feeder.write_record(CONFIG_UUID, config_set(CONFIG_KEYS["daily_cap"], 0))
+        check("out-of-range Config value refused", r.result == 8, r.result_text)
     header = await feeder.read_profile_header(status.active_profile)
     check("Profile header readable", 1 <= header["every_n"] <= 14, str(header))
     if info.has_calibration:

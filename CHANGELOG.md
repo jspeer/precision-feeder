@@ -27,6 +27,8 @@ Found running 2.4.3 on the disc rig ([docs/BENCH.md](docs/BENCH.md); DESIGN.md D
   or it expires. A failed request says why where it can: "not reachable", "name not found", or "its certificate does
   not check against the trust store".
 - **Uploads over the size limits** answer "too large", as the web app expects (they said "request").
+- **The Python client's `selftest`** reports the two Config write checks as skipped when the feeder does not let BLE
+  change guard limits (the default) instead of counting them as failures.
 
 ## 2.4.3: The configuration page for certificates (2026-10-23, not tagged)
 

@@ -1734,9 +1734,10 @@ precision-feeder/
     upload over HTTPS, the redirect (Home Assistant's "Visit" link, by the owner), HTTPS Only, uploaded EC and RSA
     chains from a private CA with and without a settings password and their refusals, the CA bundle, MQTT over TLS
     against a CA, pinned on first contact, a changed broker certificate, a leaf-only broker and a plain port, and ACME
-    against the owner's step-ca (first certificate, Renew now with a page open, a dead or untrusted directory). Still
-    open: BLE on NimBLE end to end (the selftest, connect cycles, a retry storm, heap with a client connected; the
-    bench Mac still holds the Bluedroid pairing) and Forget BLE Bonds with a client that paired; HTTPS Only while the
+    against the owner's step-ca (first certificate, Renew now with a page open, a dead or untrusted directory). BLE on
+    NimBLE with 2.4.4 (2026-10-24): the selftest, 100 connect cycles, a retry storm (a feed's exact bytes 50 times fed
+    one portion) and the heap with a client connected. Still open: Forget BLE Bonds with a client that bonds (macOS
+    does not, as no attribute asks for encryption); HTTPS Only while the
     access point is up; an ACME certificate expiring by itself and the 16 h renewal staying quiet (the soak, with MQTT
     over TLS and BLE together).
 
@@ -1775,9 +1776,9 @@ Assistant's link, browsers with the self-signed certificate, an uploaded chain, 
 and by pinning are to do, with the testing at the end of the 2.4 work (open item 27).
 
 2.4.0 (BLE on NimBLE, D33 to D35; section 8) is built and compiled, with host tests for the hand-off between
-NimBLE's task and the main loop and for the GATT table; not tagged, and not yet on hardware: the Python client's
-selftest on the bench, connect and disconnect cycles, a retry storm and the heap against docs/BENCH.md's M0 are to
-do, with the testing at the end of the TLS work.
+NimBLE's task and the main loop and for the GATT table; not tagged. It did not advertise on hardware (fixed in
+2.4.4, D42); with 2.4.4 the Python client's selftest, 100 connect cycles, a retry storm and the heap with a client
+connected passed on the disc rig (docs/BENCH.md, open item 27).
 
 2.3.1 fixes a Codex review of 2.3.0 (decisions log): logic only, checked with host tests, the mock device and both
 release builds; not on hardware (nothing in it needs the bench).

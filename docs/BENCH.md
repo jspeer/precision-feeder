@@ -902,8 +902,20 @@ certificate in use stayed (2.4.4), "not reachable". Not seen: a certificate expi
 and HTTPS load. At the end the rig was given the 2.4.4 release image, and the ACME directory, the trust store and the
 settings password were cleared again; the Bluetooth key made for the run stays for the BLE tests.
 
-**Not done here:** BLE end to end. The feeder advertises again (found by its service UUID as `Feeder-b00604`), but the
-bench Mac refused to connect, "Peer removed pairing information": it still holds its pairing with 2.3.0's Bluedroid,
-which NimBLE does not have (expected, docs/PROTOCOL.md). Also open: Forget BLE Bonds with a paired client, and the
-soak. The built-in browser could not open the feeder's address; the owner had the app open over HTTPS in their own
-browser throughout.
+**BLE end to end (2.4.4, 2026-10-24).** At first the bench Mac refused to connect, "Peer removed pairing
+information": it still held its pairing with 2.3.0's Bluedroid, which NimBLE does not have (expected,
+docs/PROTOCOL.md). Once the owner removed that pairing on the Mac, the Python client (bleak, macOS):
+
+| Check | Result |
+|---|---|
+| `selftest` | 13/13 with "BLE Can Change Guard Limits" on for the run; with it off (the default) the two Config write checks were answered NOT_AUTHORIZED detail 7, as they should be, and counted as failures: the selftest now reports them as skipped |
+| 100 cycles of connect, AUTH, Status, disconnect | 100/100, median 1.87 s, longest 2.80 s; MTU 256 |
+| one signed SET_PROFILE written 200 times | every answer the same (OK) |
+| 200 new commands back to back | all OK, 13.6 s |
+| one FEED of 1 portion, its exact bytes written 50 more times | the same answer each time; the tray went from 9 portions left to 8, one portion |
+| free heap (Free Heap sensor, every 10 s) | 122.9 to 123.4 KB through the cycles and the storm, largest block 64 KB; 123,352 bytes before, during and after a client held the link for 75 s (NimBLE takes its connection's memory at start) |
+
+The Mac did not pair (bonds=0 in BLE Info): macOS pairs only when an attribute asks for encryption, and the feeder's
+do not (access control is the protocol 2 key). So Forget BLE Bonds is still to check with a client that bonds. The
+built-in browser could not open the feeder's address; the owner had the app open over HTTPS in their own browser
+throughout. Afterwards the guard permission was off again; the Bluetooth key made for the run stays.
