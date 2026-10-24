@@ -7,7 +7,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-#ifdef USE_WEBSERVER
+#if defined(USE_WEBSERVER) || defined(USE_WEBSERVER_OTA)
 #include "esphome/components/web_server_base/web_server_base.h"
 #endif
 #ifdef USE_API
@@ -705,6 +705,10 @@ class SettingsGuard : public AsyncWebHandler {
       return true;
     if (url == "/feeder/wifi/scan")
       return this->feeder_->wifi_scan_built();
+#ifdef USE_TEXT
+    if (url == "/feeder/mqtt/password")
+      return this->feeder_->mqtt_password() != nullptr;
+#endif
 #ifdef USE_OTA
     if (url == "/feeder/firmware")
       return true;
@@ -757,6 +761,20 @@ class SettingsGuard : public AsyncWebHandler {
       this->set_network_(request, url);
       return true;
     }
+#ifdef USE_TEXT
+    if (url == "/feeder/mqtt/password") {
+      this->set_mqtt_password_(request);
+      return true;
+    }
+    // The MQTT password is written only masked, above (2.4.5): never as ?value= in the URL.
+    if (auto *secret = this->feeder_->mqtt_password(); secret != nullptr) {
+      const std::string plain = "/text/" + secret->get_name().str() + "/";
+      if (url.rfind(plain, 0) == 0) {
+        request->send(403, "application/json", "{\"error\":\"masked\"}");
+        return true;
+      }
+    }
+#endif
     if (url == "/feeder/auth/password") {
       this->change_password_(request);
       return true;
@@ -1140,6 +1158,30 @@ class SettingsGuard : public AsyncWebHandler {
     return true;
   }
 
+#ifdef USE_TEXT
+  /// POST /feeder/mqtt/password?password=<hex> (masked like the access point's; empty: none), signed over the path and
+  /// the parameter as sent (2.4.5). It sets the MQTT Password text, which the MQTT package applies as before.
+  void set_mqtt_password_(AsyncWebServerRequest *request) {
+    const std::string password_hex = request->arg("password");
+    if (!this->authorised_(request, "/feeder/mqtt/password\n" + password_hex))
+      return;
+    auto *password = new std::string;
+    text::Text *target = this->feeder_->mqtt_password();
+    if (!this->secret_arg_(request, password_hex, *password) ||
+        password->size() > static_cast<size_t>(target->traits.get_max_length())) {
+      delete password;
+      request->send(400, "application/json", "{\"error\":\"format\"}");
+      return;
+    }
+    this->feeder_->run_on_main_loop([target, password]() {
+      target->make_call().set_value(*password).perform();
+      std::fill(password->begin(), password->end(), '\0');
+      delete password;
+    });
+    request->send(200, "application/json", "{}");
+  }
+#endif
+
   /// POST /feeder/network/name?name=<text> (empty: the build's), /feeder/network/ap?password=<hex> (masked; empty:
   /// the build's), /feeder/network/wifi?ssid=<hex>&password=<hex> (the password masked) and /feeder/network/forget
   /// (2.3.0). Each is signed over the path and its parameters, as they are sent. The name and the access point's
@@ -1287,6 +1329,33 @@ bool PrecisionFeeder::is_protected(const std::string &entity) const {
   return false;
 }
 #endif
+
+#ifdef USE_WEBSERVER_OTA
+/// ESPHome's own upload, POST /update (2.4.5). The captive portal brings it into every build and takes an image while
+/// the access point is up, with no settings password. Browser uploads go only through /feeder/firmware (DESIGN.md
+/// section 9.5), so this claims the same requests ahead of ESPHome's handler and refuses them; their data is dropped.
+class UpdateBlocker : public AsyncWebHandler {
+ public:
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    if (request->method() != HTTP_POST)
+      return false;
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->url_to(url_buf) == "/update";  // the same match as ESPHome's handler
+  }
+  void handleRequest(AsyncWebServerRequest *request) override {
+    ESP_LOGW(TAG, "Refused an upload to /update: firmware goes through the web app (/feeder/firmware)");
+    request->send(403, "text/plain", "Firmware goes through the web app's Firmware page");
+  }
+};
+#endif
+
+void PrecisionFeeder::register_update_block() {
+#ifdef USE_WEBSERVER_OTA
+  // Emitted before App.setup(); ESPHome adds its upload handler in its own setup(), so this one is always ahead of it.
+  if (web_server_base::global_web_server_base != nullptr)
+    web_server_base::global_web_server_base->add_handler(new UpdateBlocker());  // lives as long as the device
+#endif
+}
 
 void PrecisionFeeder::hal_log(LogLevel level, const char *message) {
   switch (level) {

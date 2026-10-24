@@ -91,6 +91,8 @@ const api = {
   setAndConfirm(id, value, ms = 4000) {
     const e = store.get(id);
     if (!e) return Promise.reject(new Error('This build does not have that setting.'));
+    // Never read back, and sent only masked through its own route (2.4.5): nothing to confirm.
+    if (id === E.mqttPassword) return auth.setMqttPassword(value);
     let write, same;
     if (e.domain === 'number' || id.startsWith('number/')) {
       const step = parseFloat(e.step) || 1;

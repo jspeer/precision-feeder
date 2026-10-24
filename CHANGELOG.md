@@ -6,6 +6,29 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.5: Fixes from the audits (2026-10-24, not tagged)
+
+**Upgrade note:** nothing to do. HTTPS certificates saved by 2.4.1 to 2.4.4 are read as before and moved to the new
+records the next time they are saved. The web app must be 2.4.5's to change the MQTT password (an older page's plain
+write is refused).
+
+The earlier code and security reviews checked against 2.4.4 (DESIGN.md D43). Only what broke one of the project's
+own rules; the logged design decisions stand.
+
+- **ESPHome's own firmware upload (`/update`) is refused in every build.** While the access point was up, the
+  captive portal took a firmware image there with no settings password, although the docs said it was off.
+  Firmware goes only through the web app's signed upload, ESPHome's encrypted OTA or USB.
+- **The MQTT password travels masked** by the settings password, like the access point's password, instead of in
+  the request's address.
+- **Bluetooth:** a client that sent a burst of writes could leave its disconnect unnoticed, and the next client could
+  read the last one's values. A disconnect or connect now always gets through, and nothing protected is readable
+  between a disconnect and the feeder handling it.
+- **HTTPS certificates** (self-signed, uploaded, ACME) are each saved as one record, so a failed flash write can no
+  longer pair a new certificate with the old key (and lose a working ACME certificate).
+- **Turning MQTT off** while a pin on first contact is still under way keeps it off.
+- **HTTPS:** a client that sends part of a request and stops is cut off after the idle timeout, like one that stops
+  reading; three of them could shut HTTPS out until a restart.
+
 ## 2.4.4: Fixes from the first bench run of 2.4 (2026-10-23, not tagged)
 
 **Upgrade note:** nothing to do. A Bluetooth client that paired with 2.3 or earlier must delete that pairing on its

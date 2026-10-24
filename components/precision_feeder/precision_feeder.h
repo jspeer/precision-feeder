@@ -25,6 +25,9 @@
 
 #ifdef USE_WEBSERVER
 #include "esphome/components/web_server/web_server.h"
+#ifdef USE_TEXT
+#include "esphome/components/text/text.h"
+#endif
 #endif
 #if defined(USE_OTA_PASSWORD) && defined(USE_OTA_ENCRYPTION_PROVISIONED)
 #include "esphome/components/esphome/ota/ota_esphome.h"
@@ -174,6 +177,9 @@ class PrecisionFeeder : public Component, public FeederCore {
   /// is already valid (kept by the RTC across a soft reset); only a real SNTP synchronisation counts as NTP.
   void note_sntp_sync();
 
+  /// Refuse ESPHome's own upload (POST /update), which the captive portal brings into every build (2.4.5).
+  void register_update_block();
+
 #ifdef USE_WEBSERVER
   /// The settings password guards writes to these entities ("number/Daily Portion Cap") through the web server.
   void set_web_server(web_server::WebServer *web_server) { this->web_server_ = web_server; }
@@ -181,6 +187,11 @@ class PrecisionFeeder : public Component, public FeederCore {
   /// Put the settings guard in front of the web server's own handler. Called before any component starts, so it is
   /// registered first and sees every request before the web server does.
   void register_settings_guard();
+#ifdef USE_TEXT
+  /// The MQTT Password text: written only masked, through POST /feeder/mqtt/password (2.4.5).
+  void set_mqtt_password(text::Text *password) { this->mqtt_password_ = password; }
+  text::Text *mqtt_password() const { return this->mqtt_password_; }
+#endif
   bool is_protected(const std::string &entity) const;
   const std::vector<std::string> &protected_entities() const { return this->protected_; }
   web_server::WebServer *web_server() const { return this->web_server_; }
@@ -301,6 +312,9 @@ class PrecisionFeeder : public Component, public FeederCore {
 #ifdef USE_WEBSERVER
   web_server::WebServer *web_server_{nullptr};
   RequestFilter *request_filter_{nullptr};
+#ifdef USE_TEXT
+  text::Text *mqtt_password_{nullptr};
+#endif
   std::vector<std::string> protected_;
 #endif
 #ifdef USE_TIME_TIMEZONE

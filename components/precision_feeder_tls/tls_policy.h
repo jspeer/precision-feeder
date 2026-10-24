@@ -2,7 +2,7 @@
 //
 // What port 80 does with a request once HTTPS is up (pass it, redirect it, refuse it), how MQTT connects (plain,
 // checked against the CA, pinned, or blocked), which certificate of a broker's chain to pin, the serial number of a
-// certificate made on the device, and the upload format. The ESPHome and mbedTLS side is precision_feeder_tls.*;
+// certificate made on the device, the upload format, and how an identity is kept in flash. The ESPHome and mbedTLS side is precision_feeder_tls.*;
 // this file has no ESPHome or mbedTLS includes and is tested on a host (tests/test_tls.cpp).
 //
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace esphome {
 namespace precision_feeder {
@@ -161,6 +162,46 @@ inline size_t count_pem(const std::string &text, const char *label) {
     at = stop + end.size();
   }
   return n;
+}
+
+// ---- Saved identities ------------------------------------------------------------------------------------------
+
+/// Several values (a certificate chain, its key, the name...) as one NVS blob: each a 4-byte length, least
+/// significant byte first, then its bytes. ESP-IDF's NVS writes a blob's new version whole before it erases the old
+/// one, so a certificate and its key saved as one blob are never half replaced (2.4.5; 2.4.1 to 2.4.4 saved each
+/// under its own key, and a failure between two writes left a new certificate beside the old key).
+inline std::string pack_fields(const std::vector<std::string> &fields) {
+  std::string out;
+  for (const std::string &f : fields) {
+    const uint32_t n = static_cast<uint32_t>(f.size());
+    for (int i = 0; i < 4; i++)
+      out += static_cast<char>((n >> (8 * i)) & 0xFF);
+    out += f;
+  }
+  return out;
+}
+
+/// The values of a blob from pack_fields(). False (and `out` empty) unless it holds exactly `count` of them.
+inline bool unpack_fields(const std::string &blob, size_t count, std::vector<std::string> &out) {
+  out.clear();
+  size_t at = 0;
+  while (at < blob.size()) {
+    if (blob.size() - at < 4)
+      break;
+    uint32_t n = 0;
+    for (int i = 0; i < 4; i++)
+      n |= static_cast<uint32_t>(static_cast<uint8_t>(blob[at + i])) << (8 * i);
+    at += 4;
+    if (n > blob.size() - at)
+      break;
+    out.push_back(blob.substr(at, n));
+    at += n;
+  }
+  if (at != blob.size() || out.size() != count) {
+    out.clear();
+    return false;
+  }
+  return true;
 }
 
 }  // namespace tls

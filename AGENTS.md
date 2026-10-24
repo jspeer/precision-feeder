@@ -130,7 +130,7 @@ HMAC are `crypto.h`; what moves the tray is a mechanism, `mechanism.h`, the serv
 - BLE protocol behaviour belongs in `BleEngine` (`engine.*`), which must stay free of
   ESPHome includes; the radio is reached only through `BleTransport`. New protocol
   behaviour gets a test in `tests/test_ble_engine.cpp`. Since 2.4.0 the radio is NimBLE: its callbacks run on
-  NimBLE's task and only copy into `LinkQueue` or read `ValueStore` (`gatt_link.h`, tested in
+  NimBLE's task and only copy into `LinkQueue` or read `ValueStore` (a disconnect also closes it, 2.4.5) (`gatt_link.h`, tested in
   `tests/test_ble_link.cpp`); never call the engine or FeederCore from them.
 - Who sees what (2.2.0, docs/plans/2.2.0-scopes.md): Home Assistant and MQTT see only the slim set in
   `tools/check_scopes.py`; every other entity is `internal: true` (the web app still has it). A new entity is internal

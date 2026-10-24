@@ -86,6 +86,9 @@ class PrecisionFeederTls : public Component, public PrecisionFeeder::RequestFilt
   /// Whether turning MQTT on after boot may start the client now: false while TLS waits for a pin or a CA (the client
   /// holds a placeholder certificate then), so the change waits for a restart instead.
   bool mqtt_can_start() const { return this->mqtt_startable_; }
+  /// MQTT was turned off (mqtt.yaml): a first contact still under way may finish and keep its pin, but it no longer
+  /// starts MQTT, and no more are tried this boot (2.4.5; before, it turned MQTT back on). Main loop.
+  void cancel_mqtt_start() { this->pin_wanted_ = false; }
 #endif
   /// Forget the MQTT broker's pinned certificate: the next start pins again. Main loop.
   void forget_mqtt_pin();

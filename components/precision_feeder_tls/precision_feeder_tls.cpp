@@ -109,6 +109,46 @@ static bool nvs_put(const char *key, const std::string &value) {
   return err == ESP_OK;
 }
 
+// An identity's values are one blob (tls::pack_fields, 2.4.5), so a certificate and its key are never half replaced.
+// 2.4.1 to 2.4.4 kept each under its own key (`legacy`, in the same order): those are still read while the blob is
+// missing, and erased once it is saved.
+static const std::initializer_list<const char *> UP_LEGACY = {"up_cert", "up_key"};
+static const std::initializer_list<const char *> SS_LEGACY = {"ss_cert", "ss_key", "ss_name"};
+static const std::initializer_list<const char *> AC_LEGACY = {"ac_cert", "ac_key", "ac_name", "ac_dir"};
+
+/// The values saved under `key` (as many as `legacy` names); empty strings for none.
+static std::vector<std::string> nvs_get_fields(const char *key, std::initializer_list<const char *> legacy) {
+  std::vector<std::string> out;
+  std::string blob = nvs_get(key);
+  const bool ok = tls::unpack_fields(blob, legacy.size(), out);
+  std::fill(blob.begin(), blob.end(), '\0');
+  if (ok)
+    return out;
+  for (const char *k : legacy)
+    out.push_back(nvs_get(k));
+  return out;
+}
+
+/// Save the values under `key` as one blob, or erase them (`fields` empty). False if flash refused it: a save then
+/// leaves the previous values whole. Erasing removes the 2.4.4 keys first, so they cannot come back.
+static bool nvs_put_fields(const char *key, const std::vector<std::string> &fields,
+                           std::initializer_list<const char *> legacy) {
+  if (fields.empty()) {
+    bool ok = true;
+    for (const char *k : legacy)
+      ok = nvs_put(k, "") && ok;
+    return nvs_put(key, "") && ok;
+  }
+  std::string blob = tls::pack_fields(fields);
+  const bool ok = nvs_put(key, blob);
+  std::fill(blob.begin(), blob.end(), '\0');
+  if (ok) {
+    for (const char *k : legacy)
+      nvs_put(k, "");  // left behind only if this fails, and never read while the blob is there
+  }
+  return ok;
+}
+
 static std::string json_escape(const std::string &s) {
   std::string out;
   for (char c : s) {
@@ -362,14 +402,16 @@ void PrecisionFeederTls::setup() {
   this->feeder_->set_request_filter(this);
 #ifdef USE_PRECISION_FEEDER_ACME
   {
-    const CertFacts f = facts_of_pem(nvs_get("ac_cert"));
+    std::vector<std::string> ac = nvs_get_fields("ac_id", AC_LEGACY);
+    std::fill(ac[1].begin(), ac[1].end(), '\0');
+    const CertFacts f = facts_of_pem(ac[0]);
     if (f.ok) {
       this->issued_.have = true;
       this->issued_.not_before = f.from;
       this->issued_.not_after = f.until;
       this->issued_until_ = f.not_after;
-      this->issued_name_ = nvs_get("ac_name");
-      this->issued_dir_ = nvs_get("ac_dir");
+      this->issued_name_ = ac[2];
+      this->issued_dir_ = ac[3];
     }
   }
 #endif
@@ -497,8 +539,9 @@ std::shared_ptr<TlsIdentity> PrecisionFeederTls::pick_identity_() {
     acme_ok = tls::acme::servable(std::time(nullptr), clock_valid(), this->issued_now_());
   }
   if (acme_ok) {
-    identity->cert = nvs_get("ac_cert");
-    identity->key = nvs_get("ac_key");
+    std::vector<std::string> ac = nvs_get_fields("ac_id", AC_LEGACY);
+    identity->cert = std::move(ac[0]);
+    identity->key = std::move(ac[1]);
     std::string error;
     if (check_identity(identity->cert, identity->key, ca, error))
       identity->source = "ACME";
@@ -508,8 +551,9 @@ std::shared_ptr<TlsIdentity> PrecisionFeederTls::pick_identity_() {
 #endif
   // Then an uploaded identity if it still checks; else the self-signed one, made again when the name changed.
   if (identity->source.empty()) {
-    identity->cert = nvs_get("up_cert");
-    identity->key = nvs_get("up_key");
+    std::vector<std::string> up = nvs_get_fields("up_id", UP_LEGACY);
+    identity->cert = std::move(up[0]);
+    identity->key = std::move(up[1]);
     if (!identity->cert.empty()) {
       std::string error;
       if (check_identity(identity->cert, identity->key, ca, error)) {
@@ -522,17 +566,16 @@ std::shared_ptr<TlsIdentity> PrecisionFeederTls::pick_identity_() {
     }
   }
   if (identity->source.empty()) {
-    identity->cert = nvs_get("ss_cert");
-    identity->key = nvs_get("ss_key");
-    if (identity->cert.empty() || identity->key.empty() || nvs_get("ss_name") != name) {
+    std::vector<std::string> ss = nvs_get_fields("ss_id", SS_LEGACY);
+    identity->cert = std::move(ss[0]);
+    identity->key = std::move(ss[1]);
+    if (identity->cert.empty() || identity->key.empty() || ss[2] != name) {
       const uint32_t start = millis();
       if (!this->make_self_signed_(identity->cert, identity->key, name)) {
         ESP_LOGE(TAG, "Could not make a self-signed certificate");
         return nullptr;
       }
-      nvs_put("ss_cert", identity->cert);
-      nvs_put("ss_key", identity->key);
-      nvs_put("ss_name", name);
+      nvs_put_fields("ss_id", {identity->cert, identity->key, name}, SS_LEGACY);
       ESP_LOGI(TAG, "Made a self-signed certificate for %s (%u ms)", name.c_str(), (unsigned) (millis() - start));
     }
     identity->source = "self-signed";
@@ -649,10 +692,11 @@ void PrecisionFeederTls::relay_task_(int client) {
   setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &handshake_timeout, sizeof(handshake_timeout));
   setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &handshake_timeout, sizeof(handshake_timeout));
   if (tls != nullptr && identity != nullptr && esp_tls_server_session_create(&identity->cfg, client, tls) == 0) {
-    timeval none{0, 0};
-    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof(none));
-    // Nothing here may block for good: a write that cannot go on for the idle timeout ends the session.
+    // Nothing here may block for good: a write that cannot go on, or a TLS record that stops arriving halfway, for the
+    // idle timeout ends the session (the receive limit since 2.4.5: a client that sent part of a record held its
+    // session for ever).
     timeval stalled{static_cast<long>(this->idle_timeout_s_), 0};
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &stalled, sizeof(stalled));
     setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &stalled, sizeof(stalled));
     backend = ::socket(AF_INET, SOCK_STREAM, 0);
     if (backend >= 0)
@@ -955,7 +999,8 @@ void PrecisionFeederTls::handle_request(AsyncWebServerRequest *request, const st
         return;
       }
     }
-    const bool saved = nvs_put("up_cert", cert) && nvs_put("up_key", key);
+    const bool saved = cert.empty() ? nvs_put_fields("up_id", {}, UP_LEGACY)
+                                    : nvs_put_fields("up_id", {cert, key}, UP_LEGACY);
     std::fill(key.begin(), key.end(), '\0');
     if (!saved) {
       request->send(422, "application/json", "{\"error\":\"flash\"}");
@@ -972,7 +1017,7 @@ void PrecisionFeederTls::handle_request(AsyncWebServerRequest *request, const st
   }
 
   if (url == "/feeder/tls/self-signed") {
-    nvs_put("ss_name", "");  // made again at the next start
+    nvs_put_fields("ss_id", {}, SS_LEGACY);  // made again at the next start
     this->feeder_->run_on_main_loop([this]() { this->feeder_->note_restart_needed("HTTPS certificate"); });
     request->send(200, "application/json", "{\"restart\":true}");
     return;
@@ -1371,7 +1416,7 @@ void PrecisionFeederTls::acme_task_() {
     mbedtls_pk_free(&account);
   }
   if (error.empty() &&
-      !(nvs_put("ac_cert", chain) && nvs_put("ac_key", key) && nvs_put("ac_name", name) && nvs_put("ac_dir", dir)))
+      !nvs_put_fields("ac_id", {chain, key, name, dir}, AC_LEGACY))
     error = "flash";
   std::fill(key.begin(), key.end(), '\0');
   const CertFacts f = error.empty() ? facts_of_pem(chain) : CertFacts{};

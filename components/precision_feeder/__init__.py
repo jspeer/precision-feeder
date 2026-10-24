@@ -8,7 +8,7 @@ reviewed by a human, but it may still contain mistakes.
 import re
 
 import esphome.codegen as cg
-from esphome.components import output, time as time_, wifi
+from esphome.components import output, text, time as time_, wifi
 from esphome.components.esphome.ota import ESPHomeOTAComponent
 from esphome.components.esp32.gpio import ESP32InternalGPIOPin
 import esphome.config_validation as cv
@@ -33,6 +33,7 @@ CONF_WIGGLE = "wiggle"
 CONF_DETACH_DELAY = "detach_delay"
 CONF_WEB_SERVER_ID = "web_server_id"
 CONF_PROTECTED = "protected_entities"
+CONF_MQTT_PASSWORD_ID = "mqtt_password_id"
 CONF_SERVO_PIN_ID = "servo_pin_id"
 CONF_BUTTON_ID = "button_id"
 CONF_BUTTON_PIN_ID = "button_pin_id"
@@ -101,6 +102,8 @@ CONFIG_SCHEMA = cv.Schema(
         # which counts as "web_server" loaded even in a build without the web app (found in 2.1.2: such builds failed).
         cv.Optional(CONF_WEB_SERVER_ID): cv.use_id(WebServer),
         cv.Optional(CONF_PROTECTED, default=[]): cv.ensure_list(protected_entity),
+        # The MQTT Password text (packages/mqtt.yaml): written only masked, through POST /feeder/mqtt/password (2.4.5).
+        cv.Optional(CONF_MQTT_PASSWORD_ID): cv.use_id(text.Text),
         # Runtime pins (DESIGN.md section 2.1): the pins of the servo output, the button and the status LED, so the
         # pins saved on the device can replace the YAML's before those drivers start. Set by the packages (core.yaml,
         # button.yaml, status_led.yaml); leave them out and every pin stays as the YAML says.
@@ -192,8 +195,13 @@ async def to_code(config):
     loader = cg.new_Pvariable(config[CONF_PIN_LOADER_ID], var)  # does nothing without runtime pins
     await cg.register_component(loader, {})
 
+    # Before the guard and before App.setup(): ESPHome's own /update is refused in every build (2.4.5).
+    cg.add(var.register_update_block())
+
     if CONF_WEB_SERVER_ID in config:
         cg.add(var.set_web_server(await cg.get_variable(config[CONF_WEB_SERVER_ID])))
+        if CONF_MQTT_PASSWORD_ID in config:
+            cg.add(var.set_mqtt_password(await cg.get_variable(config[CONF_MQTT_PASSWORD_ID])))
         for entity in config[CONF_PROTECTED]:
             cg.add(var.add_protected(entity))
         # Wi-Fi scan (2.3.0, D31): ESPHome keeps its scan results after connecting, guards them with a lock for the web

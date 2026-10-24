@@ -932,6 +932,20 @@ def make_handler(feeder: Feeder, auth: str | None, ping_s: float):
                     return self._send(200, b"{}", "application/json")
                 if path.startswith("/feeder/network/"):
                     return self._send(*self._network(path, params, header, refused))
+                if path == "/feeder/mqtt/password":  # 2.4.5: masked like the access point's, signed over it
+                    pw_hex = params.get("password", "")
+                    if not password.check(header, f"{path}\n{pw_hex}"):
+                        return self._send(*refused)
+                    try:
+                        secret = password.unmask_text(bytes.fromhex(header[:32]) if header else bytes(16), pw_hex)
+                    except ValueError:
+                        return self._send(400, b'{"error":"format"}', "application/json")
+                    if len(secret) > 63:
+                        return self._send(400, b'{"error":"format"}', "application/json")
+                    feeder.set("text", "MQTT Password", secret)
+                    return self._send(200, b"{}", "application/json")
+                if parts[:2] == ["text", "MQTT Password"]:  # never as ?value= (2.4.5)
+                    return self._send(403, b'{"error":"masked"}', "application/json")
                 if path == "/feeder/auth/password":
                     ok = password.change(header, params.get("salt", ""), params.get("key", ""))
                     return self._send(200, b"{}", "application/json") if ok else self._send(*refused)

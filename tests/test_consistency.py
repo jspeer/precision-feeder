@@ -247,6 +247,25 @@ class Consistency(unittest.TestCase):
         for entry in ("select/Board", "select/Servo Pin", "select/Button Pin", "select/LED Pin"):
             self.assertIn(entry, listed)
 
+    def test_mqtt_password_masked(self):
+        """The MQTT password goes only through the masked route (2.4.5): the package names its text, which fits a masked
+        secret, and the web app's entity is that text."""
+        mqtt = (ROOT / "packages/mqtt.yaml").read_text()
+        target = re.search(r"mqtt_password_id: (\w+)", mqtt).group(1)
+        block = mqtt[mqtt.index(f"    id: {target}\n"):]
+        self.assertIn('name: "MQTT Password"', block[:block.index("- platform")])
+        limit = int(re.search(r"SECRET_TEXT_MAX = (\d+);", CORE_H).group(1))
+        self.assertLessEqual(int(re.search(r"max_length: (\d+)", block).group(1)), limit)
+        self.assertIn("mqttPassword: 'text/MQTT Password'", (ROOT / "web/src/entities.js").read_text())
+
+    def test_update_blocked(self):
+        """ESPHome's own /update is refused in every build (2.4.5): the blocker is registered outside the web server's
+        block, so a build with only the captive portal has it too."""
+        init = (ROOT / "components/precision_feeder/__init__.py").read_text()
+        call = init.index("var.register_update_block()")
+        self.assertLess(call, init.index("if CONF_WEB_SERVER_ID in config:"))
+        self.assertLess(call, init.index("var.register_settings_guard()"))
+
     def test_timezone_length(self):
         """The Timezone entity takes as many characters as the device's parser accepts."""
         tz_h = (ROOT / "components/precision_feeder/tz_rules.h").read_text()

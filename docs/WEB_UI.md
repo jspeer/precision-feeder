@@ -83,7 +83,7 @@ else the feeder lists under Faults.
     password and topic prefix, whether it is connected and the prefix in use; and (2.4.3, with the `mqtt_tls`
     package) TLS, how the broker is checked (a CA certificate, or pinned on first contact), the TLS status and the
     pinned certificate, with Forget. Saved at once; once MQTT has connected, changes are used after a restart.
-    The password is never shown or sent back;
+    The password is never shown or sent back, and since 2.4.5 it travels masked by the settings password;
   - HTTPS and certificates (2.4.3, with the `tls` package): the certificate in use (self-signed, uploaded or from
     ACME; its name, expiry and fingerprint), upload a certificate and key of your own (pasted or from files; the key
     travels masked by the settings password), remove it or make a new self-signed one, Send port 80 to HTTPS and

@@ -106,7 +106,7 @@ int main() {
     CHECK(q.push_write(proto::CHANNEL_COMMAND, w, 3) && q.push_write(proto::CHANNEL_COMMAND, w, 3),
           "writes still fit in the reserve");
     CHECK(q.count() == LinkQueue::SIZE, "full");
-    CHECK(q.push_disconnect(), "a disconnect into a full queue takes a read's place");
+    CHECK(q.push_disconnect(1), "a disconnect into a full queue takes a read's place");
     CHECK(q.count() == LinkQueue::SIZE && q.overflows() == 0, "still full, nothing lost but a read");
     LinkEvent e, last;
     size_t n = 0, read_count = 0;
@@ -118,10 +118,61 @@ int main() {
     CHECK(n == LinkQueue::SIZE && read_count == reads - 1, "one read gave way");
     CHECK(last.kind == LinkEvent::DISCONNECT, "the disconnect comes last, after the writes before it");
 
+    // 2.4.5 (code review of 2.4.3, R1): with only writes queued, a disconnect and the next connect still go in, in
+    // order, each in place of the oldest write; the MTU is refused.
     LinkQueue full;
-    for (size_t i = 0; i < LinkQueue::SIZE; i++)
-      full.push_write(proto::CHANNEL_COMMAND, w, 3);
-    CHECK(!full.push_disconnect() && full.overflows() == 1, "with only writes queued, a link event is refused");
+    for (size_t i = 0; i < LinkQueue::SIZE; i++) {
+      uint8_t numbered[3] = {static_cast<uint8_t>(i), 0, 0};
+      full.push_write(proto::CHANNEL_COMMAND, numbered, 3);
+    }
+    const uint8_t peer[6] = {6, 5, 4, 3, 2, 1};
+    CHECK(full.push_disconnect(7) && full.push_connect(peer), "a disconnect and a connect into a queue of writes");
+    CHECK(!full.push_mtu(185), "the MTU is refused there");
+    CHECK(full.overflows() == 3, "the two writes that gave way and the MTU are counted");
+    n = 0;
+    bool writes_in_order = true;
+    LinkEvent got[LinkQueue::SIZE];
+    while (full.pop(e))
+      got[n++] = e;
+    CHECK(n == LinkQueue::SIZE, "still full");
+    for (size_t i = 0; i + 2 < n; i++)
+      writes_in_order = writes_in_order && got[i].kind == LinkEvent::WRITE && got[i].data[0] == i + 2;
+    CHECK(writes_in_order, "the oldest two writes gave way, the rest kept their order");
+    CHECK(got[n - 2].kind == LinkEvent::DISCONNECT && got[n - 2].generation == 7, "then the disconnect, numbered");
+    CHECK(got[n - 1].kind == LinkEvent::CONNECT && std::memcmp(got[n - 1].data, peer, 6) == 0, "then the connect");
+
+    // A queue of nothing but link events (a main loop stalled through several connections): the oldest gives way.
+    LinkQueue links;
+    for (uint32_t i = 0; i < LinkQueue::SIZE; i++)
+      links.push_disconnect(i + 1);
+    CHECK(links.push_disconnect(100), "a disconnect into a queue of disconnects");
+    LinkEvent newest;
+    while (links.pop(e))
+      newest = e;
+    CHECK(newest.generation == 100, "the newest disconnect is kept");
+  }
+
+  // ---- ValueStore: closed from the radio's disconnect until the main loop has handled it (2.4.5, R1) ----
+  {
+    ValueStore v;
+    uint8_t out[ValueStore::MAX_VALUE];
+    const uint8_t status[proto::STATUS_SIZE] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
+    const uint8_t info[6] = {2, 0, 0, 0, 0, 1};
+    v.set(proto::CHANNEL_STATUS, status, sizeof(status));
+    v.set(proto::CHANNEL_INFO, info, sizeof(info));
+    v.set(proto::CHANNEL_AUTH, status, 16);
+    const uint32_t first = v.close();
+    bool zeros = v.get(proto::CHANNEL_STATUS, out) == sizeof(status);
+    for (size_t i = 0; i < sizeof(status); i++)
+      zeros = zeros && out[i] == 0;
+    CHECK(zeros, "closed: the last session's Status reads as zeros of its length");
+    CHECK(v.get(proto::CHANNEL_AUTH, out) == 16 && out[0] == 0, "and the old challenge too");
+    CHECK(v.get(proto::CHANNEL_INFO, out) == 6 && out[5] == 1, "Info is public and still reads");
+    const uint32_t second = v.close();  // another client came and went before the main loop caught up
+    v.reopen(first);
+    CHECK(v.get(proto::CHANNEL_STATUS, out) == sizeof(status) && out[0] == 0, "the first disconnect alone does not reopen");
+    v.reopen(second);
+    CHECK(v.get(proto::CHANNEL_STATUS, out) == sizeof(status) && out[0] == 1, "the latest one does");
   }
 
   // ---- ValueStore ----

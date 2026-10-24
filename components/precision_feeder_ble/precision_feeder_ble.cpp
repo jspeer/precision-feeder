@@ -185,6 +185,7 @@ void PrecisionFeederBle::loop() {
         break;
       case LinkEvent::DISCONNECT:
         this->engine_->on_disconnect();
+        this->values_.reopen(e.generation);
         break;
       case LinkEvent::MTU:
         this->engine_->set_mtu(e.size);
@@ -299,7 +300,7 @@ int PrecisionFeederBle::on_gap_event(ble_gap_event *event) {
     case BLE_GAP_EVENT_DISCONNECT:
       this->conn_handle_ = BLE_HS_CONN_HANDLE_NONE;
       this->subscriptions_ = 0;
-      this->queue_.push_disconnect();
+      this->queue_.push_disconnect(this->values_.close());
       this->count_bonds_();
       this->advertise_();
       break;

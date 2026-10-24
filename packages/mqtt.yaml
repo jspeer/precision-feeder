@@ -48,6 +48,8 @@ precision_feeder:
     - text/MQTT Username
     - text/MQTT Password
     - text/MQTT Topic Prefix
+  # Written only masked, through POST /feeder/mqtt/password (2.4.5); a plain ?value= write is refused.
+  mqtt_password_id: pf_mqtt_password
 
 globals:
   # False until the settings are read at boot: restoring the values must not reconnect anything.
@@ -133,7 +135,11 @@ switch:
           then:
             - script.execute: { id: pf_mqtt_apply, boot: false }
     on_turn_off:
-      - lambda: id(pf_mqtt).disable();
+      - lambda: |-
+          id(pf_mqtt).disable();
+          #ifdef USE_PRECISION_FEEDER_TLS
+          id(feeder_tls).cancel_mqtt_start();  // a pin on first contact still under way must not turn it back on
+          #endif
 
 text:
   - platform: template

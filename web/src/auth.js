@@ -290,6 +290,26 @@ const auth = {
     if (kind !== 'wifi') await this.loadNetwork();
   },
 
+  /** Save the MQTT password (2.4.5): masked by the settings password like the access point's and signed with it, never
+   *  as a plain ?value= (the device refuses that). '' clears it. The device never sends it back. */
+  async setMqttPassword(password) {
+    const c = await this.challenge();
+    if (this.set && !this.key) throw new Error('Locked: unlock with the settings password first.');
+    const path = '/feeder/mqtt/password';
+    const masked = password ? toHex(maskText(password, this.set ? this.key : null, c.nonceBytes)) : '';
+    const headers = this.set ? { 'X-Feeder-Auth': authHeader(this.key, c.nonceBytes, authMessage(path, masked)) } : {};
+    let r;
+    try {
+      r = await fetch(`${location.origin}${path}?password=${masked}`, { method: 'POST', headers });
+    } catch (e) {
+      throw new Error('The feeder could not be reached.');
+    }
+    if (r.status === 403 || r.status === 429) throw await this.refusal(r);
+    if (r.status === 400) throw new Error('The feeder did not accept that value.');
+    if (r.status === 404) throw new Error('This build does not have that setting.');
+    if (!r.ok) throw new Error(`The feeder answered ${r.status}.`);
+  },
+
   /** The setup wizard finished or skipped (true), or to be offered again (false). Signed when a password is set. */
   async setSetupDone(done) {
     const c = await this.challenge();

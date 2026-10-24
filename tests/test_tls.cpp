@@ -3,6 +3,7 @@
 //   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder_tls test_tls.cpp -o /tmp/test_tls && /tmp/test_tls
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "tls_policy.h"
 
@@ -117,6 +118,24 @@ int main() {
     CHECK(count_pem(two, "CERTIFICATE") == 2, "two certificates");
     CHECK(count_pem("-----BEGIN CERTIFICATE-----\na\n", "CERTIFICATE") == 0, "an unfinished block does not count");
     CHECK(count_pem(two, "PRIVATE KEY") == 0, "another label");
+  }
+
+  // ---- Saved identities (2.4.5) ----
+  {
+    const std::vector<std::string> id = {"-----BEGIN CERTIFICATE-----\nchain\n", std::string("k\0ey", 4), "", "dir"};
+    const std::string blob = pack_fields(id);
+    CHECK(blob.size() == 4 * 4 + id[0].size() + 4 + 3, "a length before each value");
+    std::vector<std::string> back;
+    CHECK(unpack_fields(blob, 4, back) && back == id, "the values come back, an empty one and a NUL byte too");
+    CHECK(!unpack_fields(blob, 3, back) && back.empty(), "another count is refused");
+    CHECK(!unpack_fields(blob.substr(0, blob.size() - 1), 4, back), "a cut blob is refused");
+    CHECK(!unpack_fields(blob + "x", 4, back), "bytes after the last value are refused");
+    CHECK(!unpack_fields("", 2, back), "nothing saved: refused");
+    std::string huge = blob;
+    huge[0] = '\xff';
+    huge[3] = '\x7f';
+    CHECK(!unpack_fields(huge, 4, back), "a length past the end is refused");
+    CHECK(unpack_fields(pack_fields({}), 0, back) && back.empty(), "no values");
   }
 
   if (failures == 0)

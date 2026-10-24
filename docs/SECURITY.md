@@ -99,9 +99,10 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0 to 2
   read (2.3.0), and calibration, pins, keys and the network are never on MQTT (2.2.0). The
   settings password does not apply over MQTT. Give the broker accounts and access rules, and do not use an open
   broker. The MQTT settings themselves (broker, login) can only be changed from the web app, and the password is never
-  sent back.
-- **ESPHome's own web upload (`/update`) is off.** Firmware goes only through the signed upload, ESPHome's encrypted
-  OTA, or USB.
+  sent back. Since 2.4.5 it travels masked by the settings password, like the access point's password.
+- **ESPHome's own web upload (`/update`) is refused.** Before 2.4.5 the captive portal still took a firmware image
+  there while the access point was up, with no settings password; it is refused in every build now. Firmware goes
+  only through the signed upload, ESPHome's encrypted OTA, or USB.
 
 ## What the feeder talks to
 

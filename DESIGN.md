@@ -801,6 +801,10 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   || HMAC-SHA256(key, nonce || "new secret 2"), cut to its length (`password_unmask_text()`, golden vector shared
   by tests/test_core.cpp and tests/test_web.mjs). 400 for a value FeederCore's checks refuse, 409 when the build
   has no access point or no Wi-Fi, or (forget) a YAML network or none saved.
+- **The MQTT password** (2.4.5, D43) is masked the same way: `POST /feeder/mqtt/password?password=<hex>` (empty:
+  none), signed over the path and the hex. It sets the MQTT Password text (`mqtt_password_id` in packages/mqtt.yaml),
+  which never reads back (ESPHome sends a password text as `********`). A plain `POST /text/MQTT Password/set` is
+  refused (403 `masked`).
 - On load, a saved name or password that no longer passes the checks is dropped (with a warning) for the build's.
 
 ### 9.4 Setup wizard (firmware 2.0.0)
@@ -856,7 +860,9 @@ binary's config.
   bootloader, which ESPHome's backend would accept and only the bootloader would refuse at the next boot; found on the
   bench, N8), and its SHA-256 is the signed one; otherwise it aborts and the running firmware stays (422: `image`,
   `sha256`, `incomplete`, `flash`). The Firmware page checks for the app description too. Then it restarts half a second later, or once the tray stops if it is moving.
-  ESPHome's own `/update` stays off (`ota: false`): it is guarded only by web auth.
+  ESPHome's own `/update` is off for the web server (`ota: false`), but the captive portal brings its upload into
+  every build and takes an image while the access point is up, with no settings password. Since 2.4.5 (D43) a handler
+  of ours, registered before ESPHome's in every build (headless too), claims `POST /update` and refuses it (403).
 - Flash (ESPHome 2026.9.1, 1.8 MB app slot of the 4 MB layout): **full 79.1%** (1,451,555 bytes), **no-BLE 61.1%**
   (1,120,447 bytes) in 2.0.2; 78.9% and 60.9% in N7. 2.1.0 with both drives and MQTT: **full 88.5%** (1,623,115
   bytes, RAM 48.2%); **no-BLE 70.4%** (1,291,243 bytes, RAM 39.0%). 2.1.2 with ESPHome 2026.10.0: **full 88.3%**
@@ -926,8 +932,8 @@ weighed: docs/plans/https-tls.md.
 - **The identity.** At its first start (in the first loop pass, so the name saved on the device is in force) the
   feeder makes a self-signed certificate: P-256, `CN=<name>.local, O=Precision Feeder`, SAN `<name>.local`, valid
   2025 to 2049 (the feeder has no clock at its first boot), a random positive serial. It is kept in NVS (namespace
-  `pf_tls`, new in 2.4.1: `ss_cert`, `ss_key`, `ss_name`) and made again when the name changes. An uploaded
-  certificate chain and key (`up_cert`, `up_key`) win while they still check (every certificate parses, the key
+  `pf_tls`, new in 2.4.1: `ss_id` holds the certificate, key and name) and made again when the name changes. An
+  uploaded certificate chain and key (`up_id`) win while they still check (every certificate parses, the key
   matches the first one, the chain verifies against the trust store's CA when one is set; dates only once the clock
   is valid); one that no longer checks at a start falls back to the self-signed one, and the HTTPS status says why.
   An uploaded identity is used after a restart (Restart Needed); ACME's is served at once (below). The keys are in
@@ -944,7 +950,7 @@ weighed: docs/plans/https-tls.md.
   every certificate. The challenge's key authorization is served on port 80 at
   `/.well-known/acme-challenge/<token>` only for the token being asked about (D38's filter never touches that path).
   What comes back is checked before it is kept: the chain parses, its key is the CSR's, and it verifies against the
-  trust store for the name. Saved as `ac_cert`, `ac_key`, `ac_name`, `ac_dir` and served at once: new sessions get
+  trust store for the name. Saved as `ac_id` (chain, key, name, directory) and served at once: new sessions get
   it, open ones keep theirs. It runs in its own task (10 KB stack, priority 2), never on the main loop, which only
   checks every 30 s whether it is due: only with a valid clock; at once with no certificate, or one for another name
   or directory; else two thirds into its lifetime (16 h into step-ca's default 24 h). A failure keeps the current
@@ -1387,7 +1393,8 @@ precision-feeder/
   - Releases: a `v*` tag builds and publishes; a manual run only builds (owner). Pages is deployed by the workflow
     (source "GitHub Actions", no gh-pages branch); it holds the latest release only.
   - **Reverses "no web-server OTA"** (section 13, 1.x): the web app uploads firmware through a handler of ours
-    behind the settings password and checks the SHA-256 on the device; ESPHome's own `/update` stays off.
+    behind the settings password and checks the SHA-256 on the device; ESPHome's own `/update` stays off (refused
+    in every build since 2.4.5, D43: the captive portal had kept it open while the access point was up).
   - The upload is signed over the image's SHA-256, so a challenge answers for one image only; the device checks the
     bytes against it before switching.
   - The update check is the browser's (as planned); the manifest has only the latest release.
@@ -1514,6 +1521,24 @@ precision-feeder/
     NimBLE trimmed): measured on the real build, 3 held open left 50 KB of heap at the lowest and ten requests at once
     25 KB; 4 went down to 31 KB. The relay's socket leak, its connection to port 80 without a time limit and its
     tasks on either core were bugs, fixed. An ACME certificate survives a change of directory (above).
+  - D43: the audits against 2.4.4 (2026-10-24; owner: "fix what needs fixing", as 2.4.5). Only what broke a rule the
+    project already had; the logged decisions they questioned stand (firmware upload with no settings password, the
+    API key on first use, NTP and the time zone unprotected, HTTPS Only off by default, D36, no flash encryption).
+    - BLE (2.4.3 review R1): a full queue of writes could drop a disconnect or connect, so a new client inherited the
+      old session's readable values. A link event now displaces a read, then a write, then an MTU (a dropped write
+      is acknowledged by the radio but never acted on: a missed command, never a doubled one); a disconnect also
+      closes `ValueStore` on NimBLE's task, so nothing protected is readable until the main loop has seen it.
+    - TLS identities (R2) are saved as one NVS blob each (`ss_id`, `up_id`, `ac_id`: length-prefixed fields,
+      `pack_fields` in tls_policy.h), so a failed write never pairs a new certificate with an old key. NVS replaces a
+      blob whole (it writes the new one before erasing the old, checked in ESP-IDF 5.5.6). 2.4.1 to 2.4.4's separate
+      keys are read once and erased after the first save; nothing to do on upgrade.
+    - Turning MQTT off cancels a pin on first contact still under way (R3); the pin, once kept, stays.
+    - HTTPS (R4): after the handshake the client socket has a receive timeout too (the idle timeout), so a client
+      that sends part of a record cannot hold a session for good.
+    - ESPHome's `/update` (security review S F2) is refused in every build, ahead of ESPHome's handler (section 9.5):
+      it enforces section 9.5's rule that browser uploads go only through `/feeder/firmware`.
+    - The MQTT password travels masked by the settings password, like the access point's, through
+      `POST /feeder/mqtt/password`; the plain `?value=` write is refused (403 `masked`).
 
 - **Codex reviews of 2.1.1 (firmware 2.1.2, 2026-10-22; owner asked for the fixes):** each finding reproduced in a
   host test before it was fixed.
@@ -1739,9 +1764,15 @@ precision-feeder/
     one portion) and the heap with a client connected. Still open: Forget BLE Bonds with a client that bonds (macOS
     does not, as no attribute asks for encryption); HTTPS Only while the
     access point is up; an ACME certificate expiring by itself and the 16 h renewal staying quiet (the soak, with MQTT
-    over TLS and BLE together).
+    over TLS and BLE together). 2.4.5's fixes (D43) are host-tested and compiled, not yet run on hardware: `/update`
+    refused while the access point is up, the masked MQTT password, the upgrade of 2.4.4's saved certificates, BLE
+    after a burst of writes, and a stalled HTTPS client cut off.
 
-## 15. Implementation status (v2.4.4)
+## 15. Implementation status (v2.4.5)
+
+2.4.5 carries the fixes from the audits checked against 2.4.4 (D43): ESPHome's `/update` refused in every build, the
+MQTT password masked, BLE link events that always get through and reads closed from a disconnect, TLS identities
+saved as one record each, MQTT kept off when turned off during a pin, and a receive timeout on HTTPS sessions.
 
 2.4.4 carries the fixes from the bench run of 2.4.3 on the disc rig (D42; docs/BENCH.md): BLE advertises again (the
 controller keeps its central role), the HTTPS relay no longer leaks a socket per session (about 20 sessions froze

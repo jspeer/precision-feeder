@@ -2,7 +2,8 @@
 //
 // NimBLE calls the adapter from its own FreeRTOS task, while BleEngine and FeederCore run on the main loop only. So
 // every callback either copies an event into LinkQueue (connects, disconnects, the MTU, writes, reads) or answers a
-// read from ValueStore; the main loop drains the queue into the engine and updates the values. Both are guarded by
+// read from ValueStore, and a disconnect also closes ValueStore until the main loop has handled it; the main loop
+// drains the queue into the engine and updates the values. Both are guarded by
 // one std::mutex and have fixed sizes, so nothing allocates on the host task. Tested on a host
 // (tests/test_ble_link.cpp).
 //
@@ -30,6 +31,7 @@ struct LinkEvent {
   uint8_t channel{0};  // WRITE, READ
   uint16_t size{0};    // WRITE: the length the client wrote (only MAX_DATA bytes are kept); READ: bytes read; MTU
   uint8_t data[MAX_DATA]{};  // WRITE: the first bytes; CONNECT: the peer address, most significant byte first
+  uint32_t generation{0};    // DISCONNECT: the number ValueStore::close() gave it
 };
 
 /// A fixed queue of LinkEvents, filled by NimBLE's task and drained by the main loop.
@@ -57,17 +59,18 @@ class LinkQueue {
     e.size = static_cast<uint16_t>(n);
     return this->push_(e, READ_RESERVE);
   }
-  /// A connection, with the peer's address (most significant byte first). Connects, disconnects and the MTU take
-  /// the place of a queued READ when the queue is full (push_link_()).
+  /// A connection, with the peer's address (most significant byte first). Connects and disconnects are never
+  /// refused, and the MTU takes a queued READ's place when the queue is full (push_link_()).
   bool push_connect(const uint8_t address[6]) {
     LinkEvent e;
     e.kind = LinkEvent::CONNECT;
     std::memcpy(e.data, address, 6);
     return this->push_link_(e);
   }
-  bool push_disconnect() {
+  bool push_disconnect(uint32_t generation) {
     LinkEvent e;
     e.kind = LinkEvent::DISCONNECT;
+    e.generation = generation;
     return this->push_link_(e);
   }
   bool push_mtu(uint16_t mtu) {
@@ -112,19 +115,33 @@ class LinkQueue {
     this->count_++;
     return true;
   }
-  /// Connects, disconnects and the MTU matter to the session, so a full queue gives up its oldest READ for them.
-  /// With no READ to give up the event is refused and counted (the queue is then full of writes, which a client
-  /// sends one at a time, so this does not happen in practice).
+  /// Connects and disconnects bound a session, so they are never refused (2.4.5; a lost one let the next client
+  /// inherit the last one's session). A full queue gives up its oldest READ (only counted), else its oldest WRITE (a
+  /// write the client was told arrived is then never acted on: a missed command, never a doubled one), else its
+  /// oldest MTU or link event (a session long gone: the newest disconnect is never the one given up). The MTU only
+  /// takes a READ's place. Whatever gave way is counted, as a refused event is.
   bool push_link_(const LinkEvent &e) {
     std::lock_guard<std::mutex> guard(this->lock_);
-    for (size_t i = 0; this->count_ >= SIZE && i < this->count_; i++) {
-      if (this->events_[(this->head_ + i) % SIZE].kind != LinkEvent::READ)
-        continue;
-      for (size_t j = i; j + 1 < this->count_; j++)
-        this->events_[(this->head_ + j) % SIZE] = this->events_[(this->head_ + j + 1) % SIZE];
-      this->count_--;
+    if (this->count_ >= SIZE && !this->drop_oldest_(LinkEvent::READ) && e.kind != LinkEvent::MTU) {
+      if (!this->drop_oldest_(LinkEvent::WRITE) && !this->drop_oldest_(LinkEvent::MTU))
+        this->drop_at_(0);
+      this->overflows_++;
     }
     return this->push_locked_(e, 0);
+  }
+  bool drop_oldest_(LinkEvent::Kind kind) {
+    for (size_t i = 0; i < this->count_; i++) {
+      if (this->events_[(this->head_ + i) % SIZE].kind == kind) {
+        this->drop_at_(i);
+        return true;
+      }
+    }
+    return false;
+  }
+  void drop_at_(size_t i) {
+    for (size_t j = i; j + 1 < this->count_; j++)
+      this->events_[(this->head_ + j) % SIZE] = this->events_[(this->head_ + j + 1) % SIZE];
+    this->count_--;
   }
 
   std::mutex lock_;
@@ -152,18 +169,39 @@ class ValueStore {
     this->sizes_[channel] = static_cast<uint8_t>(n);
     return true;
   }
-  /// Copy a value into `out` (MAX_VALUE bytes of room); returns its length (0 for an unknown channel).
+  /// Copy a value into `out` (MAX_VALUE bytes of room); returns its length (0 for an unknown channel). While closed,
+  /// every value but Info reads as zeros of its length.
   size_t get(uint8_t channel, uint8_t *out) {
     if (channel >= CHANNELS)
       return 0;
     std::lock_guard<std::mutex> guard(this->lock_);
     const size_t n = this->sizes_[channel];
-    std::memcpy(out, this->values_[channel], n);
+    if (this->closed_ && channel != proto::CHANNEL_INFO)
+      std::memset(out, 0, n);
+    else
+      std::memcpy(out, this->values_[channel], n);
     return n;
+  }
+  /// A client went (on NimBLE's task). Until the main loop has handled that disconnect (reopen()), the values read as
+  /// zeros, so the next client never reads what the last one was shown, however late the main loop is (2.4.5).
+  /// Returns the number to queue with the disconnect.
+  uint32_t close() {
+    std::lock_guard<std::mutex> guard(this->lock_);
+    this->closed_ = true;
+    return ++this->generation_;
+  }
+  /// The main loop handled the disconnect numbered `generation` (the engine has cleared the session's values). The
+  /// values read again, unless another client has gone since.
+  void reopen(uint32_t generation) {
+    std::lock_guard<std::mutex> guard(this->lock_);
+    if (generation == this->generation_)
+      this->closed_ = false;
   }
 
  protected:
   std::mutex lock_;
+  bool closed_{false};
+  uint32_t generation_{0};
   uint8_t values_[CHANNELS][MAX_VALUE]{};
   uint8_t sizes_[CHANNELS]{};
 };
