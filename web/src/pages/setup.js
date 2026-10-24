@@ -168,8 +168,10 @@ PAGES.setup = {
   step6() {
     const restart = store.bool(E.restartNeeded) === true || (auth.network && auth.network.restart);
     return [
-      h('p', {}, 'Last, line the tray up with the opening: Maintenance has a walkthrough (set the servo range, ' +
-                 'then nudge each slot). Then load food with Tray reload and set a schedule.'),
+      h('p', {}, 'Maintenance has the calibration walkthrough. ' + (mechanism() === MECHANISMS.servo
+        ? 'Set the servo range, then nudge each slot.'
+        : 'Empty the disc, turn Calibration mode on and follow Next step.') +
+        ' Then load food with Tray reload and set a schedule.'),
       restart ? h('p', {}, 'A change from setup is waiting for a restart; Configuration has the Restart button.') : null,
       h('div', { class: 'actions' },
         h('button', { class: 'btn btn-primary', onclick: () => this.finish('#maintenance') }, 'Finish and calibrate'),

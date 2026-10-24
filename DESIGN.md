@@ -1,6 +1,6 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **source version 2.4.5, not tagged; its audit fixes are not yet bench-tested** (section 15).
+Status: **source version 2.4.6, not tagged; 2.4.5 disc-rig smoke tests passed, broader audit verification remains open** (section 15).
 The latest tagged version recorded here is 2.3.1; 2.4.4 was tested on the disc rig (docs/BENCH.md). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
@@ -194,6 +194,8 @@ and keeps everything else itself:
   range and offsets stay in the Calibration record, so a servo build never writes the Tuning record.
 - **Entities:** Mechanism (`servo` or `n20-direct`) and Capacity (6, or the disc's), both diagnostic. The web app picks the mechanism's tray drawing,
   wording and calibration cards by Mechanism (`web/src/mechanisms.js`), the servo's when a firmware reports none.
+  Maintenance shows servo slot/pulse controls only for the running servo mechanism, even when a combined build
+  exposes those entities beside the disc's (2.4.6). Setup uses the same running-mechanism choice.
 - Adding one: AGENTS.md, "Adding a mechanism", and [docs/MECHANISMS.md](docs/MECHANISMS.md). The first other
   mechanism is the direct-drive disc (section 3.3; [docs/plans/drive-decoupling.md](docs/plans/drive-decoupling.md),
   stage 2), carried beside the servo in one firmware (section 3.4).
@@ -1784,14 +1786,17 @@ precision-feeder/
     one portion) and the heap with a client connected. Still open: Forget BLE Bonds with a client that bonds (macOS
     does not, as no attribute asks for encryption); HTTPS Only while the
     access point is up; an ACME certificate expiring by itself and the 16 h renewal staying quiet (the soak, with MQTT
-    over TLS and BLE together). 2.4.5's fixes (D43) are host-tested and compiled, not yet run on hardware: `/update`
-    refused while the access point is up, the masked MQTT password, the upgrade of 2.4.4's saved certificates, BLE
-    after a burst of writes, and a stalled HTTPS client cut off.
+    over TLS and BLE together). 2.4.5 on the disc rig (2026-10-24): BLE after 200 commands and a stalled TLS record cut off at 20 s passed.
+    `/update` rejected a bogus upload on both HTTP and HTTPS, but returned 500 rather than the intended 403
+    (the ESPHome response wrapper maps this status; the refusal body was correct). Correct that status and still
+    verify refusal while the access point is up. Other audit checks remain: the masked MQTT password and the
+    upgrade of 2.4.4's saved certificates.
 
 ## 15. Implementation status (v2.4.5)
 
 The current source implements the behavior in sections 3 to 10, subject to the limits and open items in section 14.
-It is not tagged. The current audit fixes are host-tested and compiled but have not been tested on hardware.
+It is not tagged. The current source passed host checks, both prebuilt builds and disc-rig BLE, motion, guard and
+HTTPS smoke tests (docs/BENCH.md). This does not close the broader audit and endurance checks in section 14.
 
 | Area | Current state |
 |---|---|

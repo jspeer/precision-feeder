@@ -106,3 +106,6 @@ remove those cards. The app follows what the device reports; settings are saved 
 A few open browsers can exhaust the device's connections. A background page releases its connection after 30
 seconds and reconnects when opened again. HTTPS allows three simultaneous sessions by default. After a firmware
 restart, an open page offers to reload so it uses the app bundled with the new firmware.
+
+Calibration controls follow the running mechanism: the servo has its slot offsets and pulse range; the direct-drive
+disc has its guided calibration and encoder settings. A combined image shows one calibration workflow.

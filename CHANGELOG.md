@@ -6,6 +6,12 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## 2.4.6: Show calibration for the active drive (2026-10-24, not tagged)
+
+- Combined-drive firmware now shows only the running mechanism's calibration workflow in Maintenance.
+  Selecting the disc no longer exposes the servo slot picker and pulse controls. Setup instructions also follow
+  the running mechanism. Saved calibration and the mechanism calibration algorithms are unchanged.
+
 ## 2.4.5: Fixes from the audits (2026-10-24, not tagged)
 
 - **Documentation rework:** current features and task-based setup/use guides replace release-by-release narration.

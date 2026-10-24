@@ -372,3 +372,80 @@ test('Wi-Fi dialog (2.3.1): a scan refresh keeps the user\'s choice', () => {
   assert.deepEqual(pick([a, b], [c, a], '62', true), [['63', '61', '62'], '62'], 'a picked network the scan missed stays');
   assert.deepEqual(pick([a, b], [b], '62', true), [['62'], '62'], 'and is not listed twice');
 });
+
+// Render the real Maintenance page with every entity present, as in a combined-drive image.
+function calibrationPage(drive) {
+  const values = new Map();
+  const calls = [];
+  const node = (tag, attrs = {}, ...kids) => ({ tag, ...attrs, kids: kids.flat().filter(Boolean),
+    setAttribute(k, v) { this[k] = v; },
+    querySelectorAll(tag) { return this.kids.filter(k => k.tag === tag); },
+  });
+  const c = vm.createContext({
+    PAGES: {}, auth: { network: null },
+    store: {
+      has: () => true,
+      get: id => ({ value: values.get(id) ?? 0, option: ['0', '1', '2', '3', '4', '5', '6'], min_value: -15, max_value: 15 }),
+      text: id => String(values.get(id) ?? ''),
+      num: id => Number(values.get(id) ?? 0),
+      bool: id => values.get(id) === true,
+    },
+    h: node, card: (title, ...kids) => node('card', { title }, ...kids),
+    row: label => ({ row: node('row', { label }), value: {} }),
+    setting: (label, hint, id) => ({ label, id, _update() {} }),
+    setText: (n, text) => { n.text = text; },
+    append: (root, ...kids) => root.push(...kids),
+    clear: root => { root.length = 0; },
+    finishCalibration() {}, recoverPositionFlow() {}, trayReloadFlow() {},
+    confirmDialog: async () => true,
+    api: {
+      turnAndConfirm: async (...args) => calls.push(['turn', ...args]),
+      setAndConfirm: async (...args) => calls.push(['set', ...args]),
+      press: async (...args) => calls.push(['press', ...args]),
+    },
+    toast() {}, toastError(err) { throw err; },
+  });
+  for (const file of ['entities.js', 'mechanisms.js', 'pages/maintenance.js', 'pages/setup.js']) {
+    vm.runInContext(readFileSync(new URL(`../web/src/${file}`, import.meta.url), 'utf8'), c);
+  }
+  vm.runInContext('this.page = PAGES.maintenance; this.E = E; this.setup = PAGES.setup;', c);
+  values.set(c.E.mechanism, drive);
+  const root = [];
+  c.page.mount(root);
+  return { c, values, calls, root };
+}
+
+test('calibration: combined image shows one workflow for the running drive, including after remount', async () => {
+  const { c, values, calls, root } = calibrationPage('servo');
+  assert.equal(root.filter(n => n.title === 'Calibration').length, 1);
+  assert.ok(c.page.calStatus, 'servo slot controls exist');
+  values.set(c.E.calibrationMode, true);
+  c.page.update();
+  assert.equal(c.page.workArea.hidden, false);
+  c.page.pickSlot(3);
+  await Promise.resolve();
+  assert.deepEqual(plain(calls[0]), ['set', c.E.calibrationPosition, '3']);
+  values.set(c.E.mechanism, 'n20-direct');
+  c.page.update();
+  const discRoot = root;
+  assert.equal(discRoot.filter(n => n.title === 'Calibration').length, 1, 'no second servo card');
+  assert.equal(c.page.calStatus, null, 'no stale servo UI references after remount');
+  const all = n => typeof n === 'object' ? [n, ...(n.kids || []).flatMap(all)] : [];
+  const discNodes = discRoot.flatMap(all);
+  assert.ok(discNodes.some(n => n.id === c.E.discSlots));
+  assert.ok(!discNodes.some(n => n.id === c.E.servoMinPulse || n.class === 'slot-picker'));
+  await discNodes.find(n => n.tag === 'button' && n.kids[0] === 'Start').onclick();
+  assert.deepEqual(plain(calls.at(-1)), ['press', c.E.calStart], 'disc Start uses the disc action');
+});
+
+
+test('calibration: direct-drive initial mount and Setup never offer servo calibration', () => {
+  const { c, root } = calibrationPage('n20-direct');
+  assert.equal(root.filter(n => n.title === 'Calibration').length, 1);
+  assert.equal(c.page.calStatus, null);
+  const text = JSON.stringify(c.setup.step6());
+  assert.match(text, /Empty the disc/);
+  assert.doesNotMatch(text, /servo range/);
+  const servo = calibrationPage('servo');
+  assert.match(JSON.stringify(servo.c.setup.step6()), /servo range/);
+});

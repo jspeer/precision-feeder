@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '6780f30f3ac0';
+const BUILD_ID = 'a2e9194d32e1';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -1522,9 +1522,7 @@ function setting(label, hint, id) {
 }
 
 // ---- mechanisms.js ----
-// What moves the tray (firmware 2.1.0). The device names its mechanism in the Mechanism entity; each one has a
-// description here: its tray drawing, its wording, and its own calibration cards, as data. Layout and wording only:
-// limits and behaviour come from the device. Adding a mechanism: AGENTS.md, "Adding a mechanism".
+// Mechanism drawings, wording and calibration cards. Behaviour and limits come from the device.
 
 /** Portions per load, as the device reports it (6 from a firmware before 2.1.0, which has no Capacity). */
 function capacity() {
@@ -1581,9 +1579,7 @@ const MECHANISMS = {
     recoverFallback: 'Not sure? Cancel and use Tray reload instead: it returns to the closed slot, which is always safe.',
     recoveryHint: 'Tell it which slot is over the opening, or reload the tray (it turns back to the closed slot, which ' +
                   'is always safe).',
-    // The servo's calibration (slots, offsets, pulse range) is the Calibration card, shown whenever the build has a
-    // Calibration Position. Cards a mechanism adds: {title, hint, settings: [[label, hint, E.x]], buttons: [[label,
-    // E.x, done]], readings: [[label, E.x]]}.
+    // Servo calibration is rendered by Maintenance. Extra cards use settings, buttons and readings below.
     cards: [],
   },
 };
@@ -3279,19 +3275,21 @@ PAGES.configuration = {
 };
 
 // ---- pages/maintenance.js ----
-// Maintenance: calibrating the tray positions, the servo's pulse range, recovering the tray position, and the
-// owner-approved debugging edit of the 24 h count (DESIGN.md section 13, 2026-10-14). Every step is a request the
-// device carries out; feeds are refused while calibration mode is on (the device's own rule).
+// Maintenance: active-drive calibration, position recovery and the owner-approved 24 h count edit.
 
 PAGES.maintenance = {
   mount(root) {
+    this.root = root;
+    this.drive = mechanism();
+    this.calStatus = null;
+    this.countRow = null;
     this.keys = {};
     this.rows = [];
     this.busy = false;
     const parts = [];
 
-    // The servo's slot calibration: whenever the build has its Calibration Position (packages/calibration.yaml).
-    if (store.has(E.calibrationMode) && store.has(E.calibrationPosition)) {
+    // Combined builds expose both drives' entities; use the running mechanism to choose the workflow.
+    if (mechanism() === MECHANISMS.servo && store.has(E.calibrationMode) && store.has(E.calibrationPosition)) {
       this.calStatus = h('p', { class: 'cal-status' });
       this.calStart = h('button', { class: 'btn btn-primary', onclick: () => this.startCalibration() }, 'Start calibration');
       this.calFinish = h('button', { class: 'btn btn-primary', onclick: finishCalibration }, 'Finish and save');
@@ -3357,6 +3355,11 @@ PAGES.maintenance = {
   },
 
   update() {
+    if (this.drive !== mechanism()) {
+      clear(this.root);
+      this.mount(this.root);
+      return;
+    }
     for (const r of this.rows) r._update();
     const state = store.text(E.trayState);
     setText(this.posRow.value, state === 'unknown' ? 'Position unknown'
@@ -4013,8 +4016,10 @@ PAGES.setup = {
   step6() {
     const restart = store.bool(E.restartNeeded) === true || (auth.network && auth.network.restart);
     return [
-      h('p', {}, 'Last, line the tray up with the opening: Maintenance has a walkthrough (set the servo range, ' +
-                 'then nudge each slot). Then load food with Tray reload and set a schedule.'),
+      h('p', {}, 'Maintenance has the calibration walkthrough. ' + (mechanism() === MECHANISMS.servo
+        ? 'Set the servo range, then nudge each slot.'
+        : 'Empty the disc, turn Calibration mode on and follow Next step.') +
+        ' Then load food with Tray reload and set a schedule.'),
       restart ? h('p', {}, 'A change from setup is waiting for a restart; Configuration has the Restart button.') : null,
       h('div', { class: 'actions' },
         h('button', { class: 'btn btn-primary', onclick: () => this.finish('#maintenance') }, 'Finish and calibrate'),

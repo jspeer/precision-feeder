@@ -1,6 +1,4 @@
-// What moves the tray (firmware 2.1.0). The device names its mechanism in the Mechanism entity; each one has a
-// description here: its tray drawing, its wording, and its own calibration cards, as data. Layout and wording only:
-// limits and behaviour come from the device. Adding a mechanism: AGENTS.md, "Adding a mechanism".
+// Mechanism drawings, wording and calibration cards. Behaviour and limits come from the device.
 
 /** Portions per load, as the device reports it (6 from a firmware before 2.1.0, which has no Capacity). */
 function capacity() {
@@ -57,9 +55,7 @@ const MECHANISMS = {
     recoverFallback: 'Not sure? Cancel and use Tray reload instead: it returns to the closed slot, which is always safe.',
     recoveryHint: 'Tell it which slot is over the opening, or reload the tray (it turns back to the closed slot, which ' +
                   'is always safe).',
-    // The servo's calibration (slots, offsets, pulse range) is the Calibration card, shown whenever the build has a
-    // Calibration Position. Cards a mechanism adds: {title, hint, settings: [[label, hint, E.x]], buttons: [[label,
-    // E.x, done]], readings: [[label, E.x]]}.
+    // Servo calibration is rendered by Maintenance. Extra cards use settings, buttons and readings below.
     cards: [],
   },
 };

@@ -1,16 +1,18 @@
-// Maintenance: calibrating the tray positions, the servo's pulse range, recovering the tray position, and the
-// owner-approved debugging edit of the 24 h count (DESIGN.md section 13, 2026-10-14). Every step is a request the
-// device carries out; feeds are refused while calibration mode is on (the device's own rule).
+// Maintenance: active-drive calibration, position recovery and the owner-approved 24 h count edit.
 
 PAGES.maintenance = {
   mount(root) {
+    this.root = root;
+    this.drive = mechanism();
+    this.calStatus = null;
+    this.countRow = null;
     this.keys = {};
     this.rows = [];
     this.busy = false;
     const parts = [];
 
-    // The servo's slot calibration: whenever the build has its Calibration Position (packages/calibration.yaml).
-    if (store.has(E.calibrationMode) && store.has(E.calibrationPosition)) {
+    // Combined builds expose both drives' entities; use the running mechanism to choose the workflow.
+    if (mechanism() === MECHANISMS.servo && store.has(E.calibrationMode) && store.has(E.calibrationPosition)) {
       this.calStatus = h('p', { class: 'cal-status' });
       this.calStart = h('button', { class: 'btn btn-primary', onclick: () => this.startCalibration() }, 'Start calibration');
       this.calFinish = h('button', { class: 'btn btn-primary', onclick: finishCalibration }, 'Finish and save');
@@ -76,6 +78,11 @@ PAGES.maintenance = {
   },
 
   update() {
+    if (this.drive !== mechanism()) {
+      clear(this.root);
+      this.mount(this.root);
+      return;
+    }
     for (const r of this.rows) r._update();
     const state = store.text(E.trayState);
     setText(this.posRow.value, state === 'unknown' ? 'Position unknown'

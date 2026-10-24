@@ -919,3 +919,67 @@ The Mac did not pair (bonds=0 in BLE Info): macOS pairs only when an attribute a
 do not (access control is the protocol 2 key). So Forget BLE Bonds is still to check with a client that bonds. The
 built-in browser could not open the feeder's address; the owner had the app open over HTTPS in their own browser
 throughout. Afterwards the guard permission was off again; the Bluetooth key made for the run stays.
+
+## Firmware 2.4.5 automated disc-rig checks (2026-10-24)
+
+Current branch at `40ffe09`, built with ESPHome 2026.10.0 as `firmware/full.yaml` and uploaded through
+`POST /feeder/firmware` with its SHA-256 checked. The owner authorized the upload, replacing the test BLE key,
+and motion tests on the empty disc. The device at `precision-feeder-disc.local` reported `2.4.5`, `full`,
+`n20-direct`; upgrade kept position 6, 8 portions remaining, profile A, no hold, the schedule, daily cap 14,
+24-hour count 2 and timezone CST6. Both prebuilt variants compiled; `tools/check.sh` passed.
+
+- BLE selftest: 12/12 with guard permission off (two guard-write checks skipped as intended); 13/13 with it on.
+  All 12 profile-event records were read, written back unchanged and checked. Profile switching, timed and indefinite
+  holds, cancellation, invalid portions, per-command limit, minimum gap and daily cap checks passed.
+- One accepted feed plus 50 byte-identical retries changed the reported remaining count from 8 to 7 exactly once.
+  A two-portion feed changed it from 7 to 5. Reload reset the reported position and capacity. A stop during an actual
+  feed left position unknown and further feeds were refused; reload recovered it. Declaring empty then feeding was
+  refused. These are device/encoder reports, not an independent visual measurement of delivery.
+- 200 new commands all answered OK; 25 connect/AUTH/Status/disconnect cycles passed, median 1.83 s, longest 2.43 s.
+- HTTPS app, assets, status/auth/network endpoints and concurrent reads passed. An invalid firmware digest was
+  rejected with 400. A TLS connection stalled partway through an encrypted record was closed at 20.0 s; HTTPS still
+  answered afterwards.
+- **Finding:** `POST /update` with bogus data was rejected on HTTP and HTTPS with the correct refusal body, but the
+  status was **500 instead of 403**. `UpdateBlocker` uses the ESPHome response wrapper whose status limitation is
+  already handled elsewhere by `web_send_refusal`; this handler still needs that treatment. The upload was refused;
+  this run did not test the endpoint while the fallback access point was up.
+- The initial stop test incorrectly used SET_POSITION as a moving operation: the N20 declares its current slot
+  without motion. Those two failed expectations were superseded by the actual-feed stop/recovery test above.
+
+Guard permission, scheduler settings, daily cap, portion limit and portion gap were restored. The test BLE key was
+replaced with the owner's permission and retained privately on the bench Mac. MQTT was disconnected. This run does
+not establish Home Assistant/MQTT/ACME integration, captive-portal behavior, power-cut recovery, physical delivery
+accuracy or endurance. No release tag, merge or push was made.
+
+The minute scheduler was also exercised with a temporary profile C clock event: it fed one portion at 14:35 CST6
+(remaining 14 to 13, source schedule) and did not feed again in that minute. The original profile C header/events,
+active profile and scheduler setting were restored afterwards. The physically empty disc was left declared empty
+(position 14, zero portions); the recorded feed count includes this run's empty-disc test motions.
+
+A requested idle restart retained firmware 2.4.5, the replacement BLE key (AUTH succeeded again), profile A,
+scheduler enabled and the declared empty state. Status reported six portions fed today including test motions;
+Home Assistant supplied the clock after reboot. The daily cap remained 14, command limit 1 and portion gap 5 s.
+
+### Calibration page regression (2.4.6, 2026-10-24)
+
+The owner reported that the combined image showed both servo and disc calibration on a disc-driven unit. The
+servo card was gated only on entity presence; both drives' entities exist in this image. Maintenance now chooses
+by the running Mechanism and rebuilds when that changes. Setup wording follows the same choice. The added web
+regression renders both mechanisms with all entities present and checks the disc Start request and servo slot
+selection, including a mechanism change while the page remains open.
+
+Host checks cover the disc's complete guided calibration, trim, direction and encoder measurement, and the servo's
+pulse range, offsets, persistence and golden trace. On the renamed disc rig, entering calibration reported
+`calibrating` and the correct disc Step 1; leaving it required no motor movement. No new physical servo calibration
+was performed: this rig has the disc motor fitted. The owner's successful disc recalibration is additional manual
+evidence, not an automated alignment measurement.
+
+`tools/check.sh` and all 30 web tests passed; both prebuilt variants compiled with ESPHome 2026.10.0. The full
+2.4.6 image was uploaded to the authorized test unit; it reported 2.4.6 and served the corrected embedded app.
+USB capture showed the console-open USB reset and the expected software restart for the update, with no panic or
+watchdog signatures. Calibration mode was restored off, and the pre-update comparison retained tuning, position,
+profile and drive. No calibration motion or new measurement was requested.
+
+The post-update comparison also passed: all sampled calibration/tuning values, position, profile and drive matched
+the pre-test snapshot; calibration remained off. Some HTTPS snapshot requests timed out; a complete IPv4 retry
+passed. That connectivity issue was not diagnosed as part of this calibration UI fix.
