@@ -4,8 +4,8 @@
 // (docs/BENCH.md): an account found again by its key, one http-01 authorization, a certificate that takes a poll to
 // be issued. Signatures are fake (the device's are mbedTLS's); SHA-256 is the project's own (crypto.h).
 // Build and run:
-//   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder_tls -I../components/precision_feeder test_acme.cpp \
-//     -o /tmp/test_acme && /tmp/test_acme
+//   c++ -std=c++17 -Wall -Wextra -I../components/precision_feeder_tls -I../components/precision_feeder test_acme.cpp -o /tmp/test_acme
+//   /tmp/test_acme
 #include <cstdio>
 #include <functional>
 #include <map>
