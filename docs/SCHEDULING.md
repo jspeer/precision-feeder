@@ -1,10 +1,9 @@
 # Scheduling
 
-How to set up the feeder's on-board schedule from Home Assistant. The built-in web app
-(firmware 1.1.0 and later) has a Schedule page that does the same with an editor per
-event: it sets the fields below for you, in this order, and checks the result. The schedule runs on the feeder itself: once it is
-set, feeding carries on with no Home Assistant and no network, as long as the
-clock is set.
+Set up the on-board schedule in the built-in web app's **Schedule** page. Since 2.2.0 Home Assistant can switch
+Scheduler and Active Profile, but cannot edit profiles, events or one-shot feeds. MQTT's own topics and BLE can
+also edit profiles ([MQTT.md](MQTT.md), [PROTOCOL.md](PROTOCOL.md)). The schedule runs on the feeder itself: once
+set, feeding carries on with no Home Assistant and no network, as long as the clock is set.
 
 *Written with the assistance of an AI (Anthropic's Claude); check it against your
 own feeder.*
@@ -15,21 +14,25 @@ own feeder.*
   **Active Profile**. Keep different plans in them, for example "normal",
   "holiday" and "sunset only", and switch with one click.
 - Each profile has **four events** (1 to 4). An event is one feeding: *when* (a
-  clock time, or so long before or after sunrise or sunset), *how much* (1 to 6, the tray's capacity
-  portions) and *on which weekdays*.
+  clock time, or so long before or after sunrise or sunset), *how much* (1 to the mechanism's capacity: 6 on the servo, 14 on the default 15-slot disc) and *on which weekdays*.
 - Each profile also has two whole-profile settings: **every N days** (feed every
   day, every second day, ...) and **fast days** (weekdays with no feeding at all).
-- A full tray holds **6 portions**. One portion is one step of the tray. Use
+- A full servo tray holds **6 portions**; a disc holds **its slot count minus one**. One portion is one step of the tray. Use
   hard food (pellets): flake food can stick in the slots and is not advised.
 
-**Editing and running are separate.** "Edit Profile" chooses which profile the
-controls below it change; "Active Profile" chooses which one the feeder runs. You
-can build profile B while A keeps feeding. The **Edited Profile** sensor always
-shows the profile you are editing and says `[active]` or `[not active]`.
+**Editing and running are separate.** Looking at a profile in the Schedule page does not activate it. You can
+build profile B while A keeps feeding. The raw **Edit Profile** selector chooses which profile the shared editor
+controls change; its **Edited Profile** sensor shows `[active]` or `[not active]`. **Active Profile** chooses which
+plan runs.
 
-**Changes apply immediately.** There is no Save button: every field takes effect
-the moment you change it, and is stored a couple of seconds later. That is why the
-steps below set the time first and switch the event on last.
+**In the Schedule page**, choose a profile, set its cadence and fast days, then press **Edit** beside an event.
+Choose its time or sun anchor, portions and weekdays, then save the dialog. **Make active** selects the plan to run.
+The app disables a live event before changing its time or days, writes the fields, and enables it last. It checks
+what the device saved. Use the one-shot card for a dated feed.
+
+**The underlying entities apply each write immediately**, with flash saving a couple of seconds later. The raw
+controls in Diagnostics have no combined Save button. The reference below describes those controls; use the
+Schedule page for normal editing.
 
 ## Before you start
 
@@ -45,7 +48,7 @@ steps below set the time first and switch the event on last.
   any 24 hours, and it also applies to the schedule (see the rules below).
 - The **Scheduler** switch must be on for profiles to run.
 
-## Build a profile, step by step
+## Raw editor controls, step by step
 
 1. **Edit Profile**: pick the profile to work on (A, B or C).
 2. **Profile Every N Days**: 1 for every day, 2 for every second day, and so on
@@ -58,7 +61,7 @@ steps below set the time first and switch the event on last.
    2. **Event Time**: `08:30` for a clock event; `+01:30` or `-00:45` for a
       sun event (see the field reference).
    3. **Event Days**: `all`, `weekdays`, `mon,wed,fri`, ...
-   4. **Event Portions**: 1 to 6 (the tray's capacity).
+   4. **Event Portions**: 1 to the mechanism's capacity (6 on the servo).
    5. **Event Enabled**: switch it on last. The event is live from now on.
 5. Switch off any event you do not want (all four start switched off, at 08:00,
    12:00, 18:00 and 20:00 with 1 portion every day).
@@ -82,7 +85,7 @@ feeder's log says why (for example `Event time '25:00' not understood`).
 | Event Anchor | what the time is measured from | clock, sunrise, sunset |
 | Event Time | clock: time of day. Sunrise/sunset: offset from the sun event | clock: `HH:MM`, 00:00 to 23:59 (`8:30` is fine). Sun: `+HH:MM` or `-HH:MM`, up to 12 hours either way; `+90` means plus 90 minutes; no sign means plus. Nothing may follow the time (`08:00 PM` is refused) |
 | Event Days | weekdays this event feeds on | `all` (or `daily`), `none`, `weekdays` (Mon to Fri), `weekend`, or day names separated by commas or spaces: `mon,wed,fri` (`monday` works too) |
-| Event Portions | portions this event feeds | 1 to 6 (the tray's capacity) |
+| Event Portions | portions this event feeds | 1 to the mechanism's capacity (6 on the servo) |
 | Event Enabled | whether the event runs | on / off |
 | Active Profile | the profile the feeder runs | A, B, C |
 | Scheduler | runs the active profile's events | on / off |
@@ -152,7 +155,7 @@ Status flag bit 12.
 
 ## Examples
 
-A full tray is 6 portions, so plan around how often you will refill.
+These examples use the servo tray's 6 portions; plan around how often you will refill.
 
 **A: two meals a day, no feeding on Sundays.**
 Every N Days 1, Fast Days `sun`.
@@ -180,5 +183,5 @@ Others off. `C: sunset-00:30 x1`. The time follows the sunset through the year
 
 A controller can read and write the same profiles through the Profile
 characteristic ([PROTOCOL.md](PROTOCOL.md)). There, profiles are 0 to 2 and events
-0 to 3 (Home Assistant shows A to C and 1 to 4), and days are a bit mask with bit
+0 to 3 (the web app shows A to C and 1 to 4), and days are a bit mask with bit
 0 = Sunday.

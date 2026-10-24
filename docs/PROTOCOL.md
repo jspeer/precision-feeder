@@ -164,7 +164,7 @@ write as refused). New values may be added within protocol 2; 6 and 7 were.
 ### BLE permissions (firmware 2.0.0)
 
 Two settings on the feeder, both on by default, decide what an authenticated client
-may change. Turned off (in the feeder's web app or Home Assistant), these writes are
+may change. Turned off (in the feeder's web app, Configuration, Keys), these writes are
 answered NOT_AUTHORIZED with detail 7. They still use up their sequence number, and
 an exact retry gets the same answer from the cache.
 
@@ -212,7 +212,7 @@ also keeps the last answer readable, in case a notification was missed).
 | Opcode | Name | Arguments | `detail` in the response |
 |---|---|---|---|
 | 0x01 | FEED | `portions u8` | portions that will be dispensed (clamped to what remains); remaining portions if refused |
-| 0x02 | TRAY_RELOAD | none | remaining portions (6) |
+| 0x02 | TRAY_RELOAD | none | current remaining portions (see completion note below) |
 | 0x03 | SET_PROFILE | `index u8` (0 to 2) | index |
 | 0x04 | HOLD | `minutes u32`: 0 cancels, 0xFFFFFFFF until cancelled | |
 | 0x05 | STOP | none | |
@@ -221,11 +221,17 @@ also keeps the last answer readable, in case a notification was missed).
 | 0x08 | CALIBRATE | `on u8` (0 or 1) | |
 | 0x09 | JOG | `position u8`, `delta i16` (tenths of a degree) | |
 | 0x0A | SAVE_CALIBRATION | none | |
-| 0x0B | SET_POSITION | `position u8` (0 to 6) | remaining portions |
+| 0x0B | SET_POSITION | `position u8` (0 to `positions - 1`) | remaining portions |
 | 0x0C | SET_TIMEZONE | reserved: always answered UNSUPPORTED | |
 | 0x0D | AUTH | `proof[16]`, no tag (see [Authentication](#authentication)) | NOT_AUTHORIZED detail |
 
 Argument lengths are exact (not counting the tag); a wrong length is INVALID_ARG.
+
+**Positioning completion:** TRAY_RELOAD and SET_POSITION return OK after calling the core; the response does not
+prove the move finished. Watch Status for moving to clear and check the tray state and remaining portions. On the
+servo, remaining portions can still reflect the old position while the move settles. Both handlers reject
+calibration mode with CALIBRATING, but a failed intent save inside the core is not propagated as a command error;
+UNKNOWN state and the device's Faults report the storage failure. TRAY_RELOAD on the disc marks it full without moving.
 
 ### Results
 
@@ -276,7 +282,7 @@ notifications, until AUTH succeeds. 20 bytes:
 
 | Offset | Field | Type |
 |---|---|---|
-| 0 | tray position (0 to 6) | u8 |
+| 0 | tray position (0 to `positions - 1`) | u8 |
 | 1 | portions remaining | u8 |
 | 2 | tray state: 0 loaded, 1 empty, 2 unknown, 3 calibrating, 4 moving | u8 |
 | 3 | active profile (0 to 2) | u8 |
@@ -334,8 +340,8 @@ key).
 | 2 | seconds between portions of one feed | 1 to 60 |
 | 3 | reload pause, minutes | 0 to 60 |
 | 4 | refill interval, days | 1 to 30 |
-| 5 | rolling 24 h portion cap | 1 to 6 (`positions - 1`) |
-| 6 | max portions per command | 1 to 6 (`positions - 1`) |
+| 5 | rolling 24 h portion cap | 1 to `positions - 1` (6 on the servo) |
+| 6 | max portions per command | 1 to `positions - 1` (6 on the servo) |
 | 7 | scheduler enabled | 0 or 1 |
 | 8 | latitude, 1e-5 degree | -9,000,000 to 9,000,000 |
 | 9 | longitude, 1e-5 degree | -18,000,000 to 18,000,000 |
@@ -368,7 +374,7 @@ the last refusal when the window closes.
 
 Nothing on the air changes: no new characteristic, opcode or field, and the
 protocol stays at version 2. The device keeps local diagnostics about BLE for its
-web app and Home Assistant: counters since boot, the current session (connected,
+web app: counters since boot, the current session (connected,
 authenticated, the last two bytes of the client's address, the MTU), and an
 activity log of the last 32 connections and writes with their answers. Reads and
 Status notifications are only counted, so a client that polls does not fill the

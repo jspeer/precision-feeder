@@ -14,7 +14,8 @@ own build.*
 wizard's last step points there): start calibration, pick a slot, nudge its offset by 0.1
 or 1 degree, go to the next slot, then finish and save. The servo pulse range is under
 "Servo pulse range (advanced)" there. Changing the calibration needs the settings password
-when one is set. The steps below use the entity names, as Home Assistant shows them.
+when one is set. The steps below use the firmware entity names, available in the web app
+(including Diagnostics). Since 2.2.0 calibration and position recovery are internal entities, hidden from Home Assistant.
 
 ## First-time setup
 
@@ -120,7 +121,7 @@ Drive, Direct-drive disc, then Restart. Its pins are under the same card.
 
 **Empty the disc first.** The calibration turns it, and every open slot passes over the hole.
 
-In the web app: **Maintenance → Calibration** (or the Calibration buttons in Home Assistant). Turn **Calibration
+In the web app: **Maintenance → Calibration**. Turn **Calibration
 mode** on (feeding is refused until you turn it off), then follow **Next step**: it says which step you are on and
 which button to press.
 

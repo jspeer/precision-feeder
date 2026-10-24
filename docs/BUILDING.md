@@ -20,13 +20,13 @@ file lists the packages it wants, so a feature is switched on or off by one line
 | `schedule_editor` | editing profiles and events, one-shot feeds | **always** (unless something else, like a PLC over BLE, owns the schedule) |
 | `calibration` | the servo's calibration: pulse range and per-slot offsets | **always** (the disc's calibration is in its own package) |
 | `mechanism_n20` | the direct-drive disc as a second drive, with its tuning, calibration wizard, motor pins and **Drive** (servo or disc, chosen on the device) | only for a disc feeder ([`disc.yaml`](../examples/disc.yaml)) |
-| `web_server` | the built-in web app at `http://<name>.local` (`https://` with `tls`), and the settings password | recommended (both examples); leave it out to save memory |
-| `hardware` | Board and Servo Pin chosen on the device, Pins In Use, Restart Needed, Restart | recommended (both examples); harmless if you never use it |
-| `status_led` | colour-coded state on the board's RGB LED; LED Pin on the device | if your board has the LED (both examples) |
+| `web_server` | the built-in web app at `http://<name>.local` (`https://` with `tls`), and the settings password | recommended (all three examples); leave it out to save memory |
+| `hardware` | Board and Servo Pin chosen on the device, Pins In Use, Restart Needed, Restart | recommended (all three examples); harmless if you never use it |
+| `status_led` | colour-coded state on the board's RGB LED; LED Pin on the device | if your board has the LED (all three examples) |
 | `button` | a push button: short press feeds (or reloads when the tray is empty or its position unknown), a 3 s press toggles calibration; Button Pin on the device | only if you fitted one |
-| `time_homeassistant` | Home Assistant as a second clock source (keeps time when the internet is down but Home Assistant is up) | both examples; harmless without Home Assistant. It also uses Home Assistant's time zone unless you pin yours (see its comment) |
-| `network_info` | the Wi-Fi network, IP addresses and signal strength | both examples; leave it out to save a little flash |
-| `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | both examples; leave it out if you never set Wi-Fi over USB |
+| `time_homeassistant` | Home Assistant as a second clock source (keeps time when the internet is down but Home Assistant is up) | all three examples; harmless without Home Assistant. It also uses Home Assistant's time zone unless you pin yours (see its comment) |
+| `network_info` | the Wi-Fi network, IP addresses and signal strength | all three examples; leave it out to save a little flash |
+| `improv_serial` | Wi-Fi set over the USB cable from an install page ([Improv](https://www.improv-wifi.com/)) | all three examples; leave it out if you never set Wi-Fi over USB |
 | `ble_gatt` | the Bluetooth control interface ([PROTOCOL.md](PROTOCOL.md)) and two switches for what BLE may change | only if a PLC, app or script will use BLE. Costs about 170 KB of flash and, at run time, about 60 KB of RAM (NimBLE, since 2.4.0). It cannot be combined with ESPHome's own Bluetooth components (`esp32_ble`, `bluetooth_proxy` and so on) |
 | `tls` | the web app over HTTPS at `https://<name>.local` (a self-signed certificate made on the feeder, or one you upload), the redirect from port 80, and the trust store; needs `web_server` | recommended (all three examples; [HTTPS.md](HTTPS.md)). Costs about 40 KB of flash and about 20 KB of RAM per open HTTPS session (at most 3) |
 | `mqtt_tls` | MQTT over TLS, checked against a CA certificate or pinned on first contact; needs `mqtt` and `tls` | if your broker offers TLS (usually port 8883) |
@@ -109,7 +109,7 @@ see [MECHANISMS.md](MECHANISMS.md). The direct-drive disc's
 `motor_in1_pin`, `motor_in2_pin`, `motor_standby_pin`, `encoder_a_pin`, `encoder_b_pin` and
 `motor_pwm_frequency` (pins chosen on the feeder win); set `tray_capacity: "59"` and `button_pin: GPIO3` with it, as
 `disc.yaml` does. Many are only **starting values**: the same setting changed
-on the feeder (web app or Home Assistant) is saved there and wins, as the table says.
+on the feeder through the web app is saved there and wins, as the table says.
 
 | Substitution | Default | What it is |
 |---|---|---|
@@ -142,9 +142,11 @@ Since 2.2.0 Home Assistant (and MQTT) sees only the everyday controls and status
 reached through the web app (`web_server` package, which sets `include_internal`). `tools/check_scopes.py` checks a
 build's resolved configuration for that (`esphome config my.yaml > resolved.yaml`, then run it on the file).
 
-A build without the web app (leave `web_server` out) cannot change those settings at run time: set the pins and
-everything else in your YAML, and run it over Bluetooth (`ble_gatt`), which reaches feeding, the schedule, the clock,
-and the guard limits and calibration behind their switches. That is a fully headless feeder.
+For a build without the web app, leave out `web_server` and `tls`, plus `acme` and `mqtt_tls` if included. Configure
+components such as pins in YAML. Bluetooth (`ble_gatt`) still reaches feeding, the schedule, the clock, and the
+guard limits and servo calibration behind their permission switches. It has no commands for the disc calibration
+wizard or tuning; use the web app to calibrate a disc. The generated headless configuration in `tools/check.sh`
+is validated by default and compiled with `--compile`; it does not establish a complete BLE setup workflow.
 
 ## Wi-Fi, the name and keys in a YAML build
 
@@ -171,3 +173,15 @@ add `web_username` and `web_password` to your `secrets.yaml`. That is HTTP basic
 crosses the network on every request, readable by anyone recording it on plain HTTP (with the `tls` package, use
 `https://` and turn on HTTPS Only), so it keeps casual visitors out and no more. If you never use the web
 app, leave the `web_server` package out instead.
+
+## Checking a change
+
+Run `tools/check.sh` from the repository root. It runs the C++ and Python host tests, consistency and scope checks,
+and verifies `web/dist/` against `web/src/`. With Node available it also checks the web app's syntax and parser
+tests. With ESPHome available in `.venv` or on PATH, it validates all three examples, the runtime API-key, headless
+and MQTT TLS/ACME configurations, and both prebuilt configurations. Missing Node or ESPHome is reported as a skip.
+
+`tools/check.sh --compile` also compiles the six example configurations and fails on a compile error or a compiler
+warning. It validates the prebuilt configurations; to compile the two prebuilt images too, use
+`tools/build_bins.sh /tmp/precision-feeder-bins`. CI runs the checks on pushes and pull requests; full example compilation is a manual
+workflow option. These checks do not exercise hardware.

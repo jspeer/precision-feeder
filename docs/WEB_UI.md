@@ -14,7 +14,7 @@ from the internet.
   `name`), or to the feeder's IP address. IPv4 and IPv6 both work; Diagnostics lists the
   addresses. A new feeder opens the setup wizard.
 - It is in the prebuilt firmware, and in a YAML build with the `web_server` package (on in
-  both examples).
+  all three examples).
 - **Passwords:** none by default. A **settings password** (Configuration) protects the
   safety limits, calibration, pins, keys, network and firmware ([SECURITY.md](SECURITY.md)).
   A YAML build can also put the whole app behind a login ([BUILDING.md](BUILDING.md)).
@@ -121,6 +121,6 @@ else the feeder lists under Faults.
   in the background lets go of its connection after 30 seconds and takes it again when
   you return.
 - **After a firmware update**, an open page offers to reload itself.
-- **Shared with Home Assistant:** the schedule editor is one shared set of controls. If
-  someone edits the schedule in Home Assistant at the same moment, the app may say so after
-  saving, and names what to check.
+- **Shared editor:** browser pages use one shared set of schedule editor entities. If another browser or an
+  MQTT or BLE client edits the same schedule at the same moment, the app may report a conflict after saving and
+  name what to check. Home Assistant cannot edit the schedule.

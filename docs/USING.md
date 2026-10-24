@@ -13,7 +13,9 @@ warning): the Dashboard has Feed now, Tray reload and
 Hold; the Schedule page edits profiles, events and one-shot feeds; Maintenance calibrates and recovers the tray
 position. [WEB_UI.md](WEB_UI.md) walks through every page.
 
-**In Home Assistant** the same controls are entities:
+**In Home Assistant**, everyday feeding, hold and status are available as entities. Schedule editing, calibration
+and position recovery use the web app. The table names the firmware entities; those marked web app are internal
+and do not appear in Home Assistant:
 
 | To | Use |
 |---|---|
@@ -21,8 +23,8 @@ position. [WEB_UI.md](WEB_UI.md) walks through every page.
 | Refill | **Tray Reload**, then fill the tray. Scheduled feeding pauses for the **Reload Pause** (default 10 minutes) while you load. On the direct-drive disc Tray Reload moves nothing: fill every slot except the one over the chute (food there falls straight out), then press it. |
 | Pause the schedule | **Hold Duration** (hours; 0 = until cancelled) + **Hold Scheduled Feeding**; **Cancel Hold** ends it. Manual feeds still work. |
 | Switch plans | **Active Profile** |
-| Feed once at a set time | **One-shot Portions** + **Add One-shot Feed** (`2026-10-20 18:00`) |
-| After a power cut mid-feed | look at the tray, set **Declared Tray Position**, press **Declare Tray Position**; or press **Tray Reload** |
+| Feed once at a set time (web app, Schedule) | **One-shot Portions** + **Add One-shot Feed** (`2026-10-20 18:00`) |
+| After a power cut mid-feed (web app, Maintenance) | look at the tray, set **Declared Tray Position**, press **Declare Tray Position**; or press **Tray Reload** |
 | Stop a feed in progress | **Stop** (the position becomes unknown, as above) |
 
 **Get told when it needs food.** **Needs Food** turns on when the tray is empty or the next feed needs more portions
@@ -48,11 +50,12 @@ unknown. Hold it 3 seconds to turn calibration mode on or off.
 
 ## Settings
 
-Saved on the feeder, changed in the web app or Home Assistant, kept across updates:
+Saved on the feeder and kept across updates. Use the web app for configuration; Home Assistant exposes only the
+everyday controls and status ([SECURITY.md](SECURITY.md#who-can-do-what)).
 
 | Setting | Default | Where |
 |---|---|---|
-| The schedule: profiles, events, cadence, fast days, one-shot feeds; Active Profile; Scheduler | three profiles of four events, all off | Schedule ([SCHEDULING.md](SCHEDULING.md)) |
+| The schedule: profiles, events, cadence, fast days, one-shot feeds; Active Profile; Scheduler | profile A active, Scheduler on; three profiles of four events, all events off | Schedule ([SCHEDULING.md](SCHEDULING.md)) |
 | Minimum Gap Between Feeds | 60 s | Configuration (protected) |
 | Gap Between Portions | 5 s | Configuration (protected) |
 | Daily Portion Cap (rolling 24 h) | 4 | Configuration (protected) |
@@ -120,7 +123,8 @@ These are deliberate, so a fault ends in a missed meal rather than an over-fed t
 
 ## Limits
 
-- **Six portions per load.** Schedules that feed several times a day need frequent refills; the runway sensors tell
+- **Six portions per load on the servo tray; disc slots minus one on the direct-drive disc** (14 with the default
+  15-slot disc). Schedules that feed several times a day need frequent refills; the runway sensors tell
   you how long a load lasts.
 - **After a power cut with no network,** scheduled feeding waits until the clock is set again (NTP, Home Assistant,
   or BLE). There is no battery-backed clock.

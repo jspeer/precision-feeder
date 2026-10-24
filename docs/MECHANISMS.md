@@ -5,7 +5,7 @@
 
 Since firmware 2.1.0 the feeder's logic (the feed guard, the schedule, the history, the tray position) does not know
 what motor it drives. That is a **mechanism**: a motor, its driver and the tray or disc it turns. The servo fan tray
-of the Precision Feeder Rev2 is the reference mechanism, and the only one on `main`. This guide is for building your
+of the Precision Feeder Rev2 is the reference mechanism; `main` also carries the direct-drive disc. This guide is for building your
 own: another motor, another tray, another number of slots.
 
 The rules are in [AGENTS.md](../AGENTS.md), "Adding a mechanism", and the design in [DESIGN.md](../DESIGN.md)
@@ -44,10 +44,13 @@ Take the servo as the pattern: `components/precision_feeder/mechanism_servo.{h,c
    own task, and keep the logic in a pure function the host tests can call with a time and the inputs.
 4. **Its package**, `packages/mechanism_<name>.yaml`: `tray_capacity` (its capacity), its pins as substitutions with
    comments, its outputs, its tuning and calibration entities (config category, listed in the settings password's
-   protected entities). It registers the mechanism with the feeder before the feeder starts (`set_mechanism()`) and
-   reserves its pins (`reserve_pin()`), so the button and LED cannot be moved onto them.
-5. **The one-line switch**: in `packages/core.yaml`, `mechanism: !include mechanism_<name>.yaml` instead of the
-   servo's.
+   protected entities). Its adapter offers the drive before setup with
+   `offer_drive()`, as `components/precision_feeder_n20/n20_driver.cpp` does. A driver that owns its pins implements
+   `MotorPinUser` and calls `offer_motor_pins()`: saved pins are validated and applied before setup, and reserved
+   from the button and LED while that drive is in use.
+5. **Add it beside the servo** in the build's YAML. Keep `core.yaml`'s servo package and offer the other mechanism
+   through Drive (see `packages/mechanism_n20.yaml` and `packages/drive_select.yaml`). Only the selected drive's
+   driver starts; a saved choice takes effect after a restart. The prebuilt firmware defaults to the servo.
 6. **Its web description**: an entry in `MECHANISMS` in `web/src/mechanisms.js` under its `name()`, with its tray
    drawing (`dial`), its wording and its calibration cards, and its entities in `web/src/entities.js`. Then
    `python3 tools/build_web.py`.
@@ -86,7 +89,7 @@ decision it moves to main, where it becomes a second drive beside the servo, cho
 - [ ] `mechanism_<name>.{h,cpp}`: implements `Mechanism`, no ESPHome includes, unique `name()`
 - [ ] faults: stall, wrong direction, timeout from the distance, travel limit, loop watchdog (if it can keep turning)
 - [ ] tuning table with limits and a `tuning_layout()`; YAML min/max match it (`tests/test_consistency.py`)
-- [ ] `packages/mechanism_<name>.yaml`: `tray_capacity`, pins as documented substitutions, `reserve_pin()`
+- [ ] `packages/mechanism_<name>.yaml`: `tray_capacity`, pins as documented substitutions, `offer_motor_pins()`
 - [ ] added beside the servo in a build's YAML (an example), offered as a drive with `offer_drive()`; the servo stays the
       prebuilt firmware's default
 - [ ] `web/src/mechanisms.js` description, entities in `web/src/entities.js`, `web/dist/` rebuilt

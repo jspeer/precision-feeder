@@ -39,7 +39,7 @@ What protects the feeder, from whom, and where the limits are (firmware 2.0 to 2
   path and the value), so a recorded request cannot be replayed or moved to another value. A challenge lasts a
   minute and answers one request.
 - **Wrong guesses wait:** 1 s after the first failure, doubling to 60 s.
-- **New secrets travel masked:** a new password key, an API or BLE key, the Wi-Fi and access-point passwords are
+- **New secrets travel masked:** a new password key, an API or BLE key, the Wi-Fi and access-point passwords (and since 2.4.5 the MQTT password) are
   masked with a key derived from the current password, and since 2.4.1 so is an uploaded HTTPS private key. With no password set they cross the network as they are
   (anyone there could set their own anyway).
 - **Another website cannot use your browser** to make a protected change: the signature header needs the browser's

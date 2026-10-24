@@ -12,6 +12,10 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 records the next time they are saved. The web app must be 2.4.5's to change the MQTT password (an older page's plain
 write is refused).
 
+- **Documentation review:** corrected Home Assistant visibility, schedule editing and calibration instructions,
+  drive integration, capacity-dependent BLE ranges and positioning completion, and the current source/bench status.
+  Added the build-check workflow; no firmware behaviour changed.
+
 The earlier code and security reviews checked against 2.4.4 (DESIGN.md D43). Only what broke one of the project's
 own rules; the logged design decisions stand.
 

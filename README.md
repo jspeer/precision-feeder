@@ -24,7 +24,7 @@ install, no account. Open `precision-feeder-xxxxxx.local` (or its IP address) on
 the dashboard, the schedule, the settings, calibration and diagnostics. The app is stored in the firmware; nothing is
 loaded from the internet.
 
-Everything else is optional, on top: full **Home Assistant** control (the native API, or **MQTT** with discovery), and
+Everything else is optional, on top: everyday **Home Assistant** control (the native API, or **MQTT** with discovery), and
 a **Bluetooth (BLE) interface** for a PLC or another controller.
 
 It does everything the [original Arduino firmware](https://github.com/FlyingGyroscope/PrecisionFeederRev2) does, then
@@ -37,7 +37,8 @@ that protects the fish from being over-fed.
 > has been calibrated and fed on a bench rig (with BLE and MQTT), and the two-drive firmware switched drives on both
 > rigs. 2.2.0's release images were run on both rigs, including the servo's upgrade from 2.1.1; 2.3.0 was run on
 > the disc rig ([docs/BENCH.md](docs/BENCH.md)); 2.3.1's fixes are logic only, checked with host tests. 2.4.0 (Bluetooth on NimBLE), 2.4.1 (HTTPS and MQTT over
-> TLS), 2.4.2 (ACME), 2.4.3 (their web app pages and guides) and 2.4.4 (fixes from their first bench run) are not tagged; HTTPS, MQTT over TLS, ACME
+> TLS), 2.4.2 (ACME), 2.4.3 (their web app pages and guides) and 2.4.4 (fixes from their first bench run) are not tagged; the current source is 2.4.5
+> (audit fixes, not tagged or run on hardware). HTTPS, MQTT over TLS, ACME
 > and Bluetooth on NimBLE have been run on the disc rig. The disc has not yet fed animals, and neither has had months of daily use. Watch it for a few days, and do not rely on it as the only way your animals get
 > fed.
 
@@ -56,7 +57,8 @@ holds N - 1 portions (14 on a 15-slot disc). It only ever turns forward, a slot 
 full without moving it. The motor's encoder places each slot, but the firmware still treats a move that was cut short
 as unknown.
 
-There is no position sensor: the firmware keeps track of where the tray is. It saves where it is going *before* every
+There is no absolute position sensor: the servo is open-loop, and the disc has motor encoder feedback. The firmware
+keeps track of portions fed since reload. It saves where it is going *before* every
 move, so if the power is cut halfway, the position is marked **unknown** on the next boot and feeding stops until you
 say where the tray is (or reload it). It never guesses.
 
@@ -77,7 +79,7 @@ say where the tray is (or reload it). It never guesses.
 - **Hold** the schedule for a number of hours or until you cancel it, and add **one-shot feeds** for a date and time.
 - **Two drives, one firmware:** the servo tray or the direct-drive disc, chosen in the web app, with every pin
   (motor, encoder, button, LED) chosen there too.
-- **Calibration** in the web app or Home Assistant: the servo's pulse range and a fine offset for each slot, or the
+- **Calibration** in the web app: the servo's pulse range and a fine offset for each slot, or the
   disc's step-by-step wizard (direction, one full turn, slot count, trim).
 - **Time from NTP** (the public pool, or your own servers, set on the feeder), optionally also from Home Assistant,
   or pushed over BLE when there is no network. Shows where the clock came from and how old it is.

@@ -1,6 +1,7 @@
 # Precision Feeder ESPHome Firmware: Design
 
-Status: **release 2.3.0, tested on bench builds** (section 15). This is the current design;
+Status: **source version 2.4.5, not tagged; its audit fixes are not yet bench-tested** (section 15).
+The latest tagged version recorded here is 2.3.1; 2.4.4 was tested on the disc rig (docs/BENCH.md). This is the current design;
 history is in [CHANGELOG.md](CHANGELOG.md), hardware results in [docs/BENCH.md](docs/BENCH.md), and the user guides in
 [docs/](docs/) (INSTALL, BUILDING, USING, WEB_UI, SECURITY, SCHEDULING, CALIBRATION, PROTOCOL). First written
 2026-10-13.
@@ -179,8 +180,9 @@ and keeps everything else itself:
   the user set. They are held to it when used: a scheduled event asking for more than a load feeds what the load
   holds; a manual request for more is refused (found on the bench, 2026-10-21: a daily cap of 14 became 6 for good
   after a round trip through the servo drive).
-- **One mechanism per firmware, chosen in the YAML** (owner, 2026-10-20): `core.yaml` includes the mechanism's
-  package (`packages/mechanism_servo.yaml` on main). A build for another mechanism changes that one line.
+- **Two drives in one firmware, chosen on the device** (D17, superseding the original one-mechanism build):
+  `core.yaml` includes the servo package; adding `packages/mechanism_n20.yaml` beside it offers the disc through
+  Drive (section 3.4). Only the selected driver starts; a changed choice applies after a restart.
 - **Tuning values** of a mechanism are saved in their own record (`Tuning`, section 9.2), checked against the
   mechanism's table by one setter (`set_tuning`). A record for another mechanism or table layout is not used (and is
   left as it is until a value changes). The servo has no tuning table: its settings are the YAML's, and its pulse
@@ -376,8 +378,8 @@ chooses which one the feeder uses. The prebuilt binaries carry both.
 - **Saved limits are kept as set.** The guard limits are saved up to the largest capacity any drive may have
   (`CAPACITY_MAX`) and held to the drive's capacity only when used, so a round trip through the servo never cuts a
   disc's daily cap to 6. Portions above the capacity: scheduled ones are clamped, manual ones refused.
-- **Entities.** Both drives' entities exist (Home Assistant shows the disc's in a servo feeder and the other way
-  round); the web app shows the drive in use (Mechanism). The servo's pin is offered only while the servo is the
+- **Entities.** Both drives' entities exist internally; since 2.2.0 Home Assistant sees neither drive's
+  configuration entities. The web app shows the drive in use (Mechanism). The servo's pin is offered only while the servo is the
   drive; the disc's pins only while the disc is. Calibration Mode and the recovery entities, which both use, are in
   `packages/tray_recovery.yaml`, included by `core.yaml`.
 - Cost: about 4.4 KB of flash for the second drive.
@@ -404,8 +406,8 @@ between steps (default a few seconds), each with its own wiggle.
 
 ## 5. Scheduling
 
-The scheduler runs on the device. HA and BLE can **edit** it and can
-**trigger** feeds, but never need to be present.
+The scheduler runs on the device. The web app, BLE and MQTT's own topics can **edit** it; Home Assistant can
+select the active profile and turn Scheduler on or off. All can **trigger** feeds, but never need to be present.
 
 ### 5.1 Profiles
 
@@ -413,7 +415,7 @@ Three profiles (A, B, C), one active at a time. Switching profile is a single
 select or one BLE command.
 
 Per profile:
-- `name` (short text)
+- profile labels A, B and C (custom names are not implemented; open item 8)
 - `cadence`: `daily`, `every_2nd`, or `every_n` (n = 1 to 14), with an anchor
   date defining cycle day 0
 - `fast_days`: 7-bit weekday mask of no-feed days
@@ -504,7 +506,7 @@ path.
 
 - **NTP is the truth.** Up to three servers: the YAML's (`ntp_server_1` to `3`, the public pool by default), or
   ones set on the feeder (firmware 2.0.2): the **NTP Servers** text entity (web app, Configuration and the setup
-  wizard; Home Assistant), host names or IPv4/IPv6 addresses separated by commas, saved in the Device record and
+  wizard; internal, hidden from Home Assistant), host names or IPv4/IPv6 addresses separated by commas, saved in the Device record and
   applied at once. ESPHome sets its servers once and has no setter, so the adapter stops ESP-IDF's SNTP client, gives
   it the new names and starts it again (empty goes back to the build's, read from ESP-IDF at boot). Not protected by
   the settings password, like the timezone (owner, 2026-10-16). **Found in 2.0.2:** ESP-IDF's default
@@ -512,13 +514,13 @@ path.
   the bench (docs/BENCH.md, 2.0.2): a local server, an unreachable one, back to the build's, kept across a restart.
 - **BLE `SET_TIME` is the fallback.** It carries `epoch u32` (UTC) and
   `utc_offset_min i16`. Policy `ble_time_policy`:
-  - `fallback_only` (recommended): accepted only if NTP has not synced within
-    `ble_time_ntp_stale_hours` (default 24). Otherwise the result is
+  - `fallback_only` (recommended): accepted only if neither NTP nor Home Assistant has synced within
+    `ble_network_time_stale_after` (default `24h`). Otherwise the result is
     `IGNORED_NTP_ACTIVE`. This stops a wrong PLC clock from corrupting a
     correct device clock, and lets a PLC push time on every connect.
   - `always`: accepted any time.
   - `off`: rejected.
-- **Home Assistant time** is a second source, enabled in both examples (decision
+- **Home Assistant time** is a second source, enabled in all three examples (decision
   2026-10-14), useful when the internet is down but HA is up. By default HA also
   pushes its timezone; a build can pin its own (packages/time_homeassistant.yaml). With NTP and HA both enabled, last sync wins;
   the policy gate applies only to BLE.
@@ -539,7 +541,7 @@ path.
   names are converted to POSIX strings off the device (the setup wizard, N6).
   A change never repeats a feed: fired events are stored by day number.
   BLE `SET_TIMEZONE` stays reserved (protocol unchanged); adding it needs a decision.
-- **Time quality is exposed** (HA and GATT): source (none / BLE / NTP / HA) and
+- **Time quality is exposed** (web app and GATT): source (none / BLE / NTP / HA) and
   sync age. A BLE-set clock that has aged is flagged "time stale" and keeps
   running. The clock free-runs at a few seconds of drift per day, so a week
   without sync is harmless for feeding.
@@ -577,9 +579,9 @@ Status (read-only): tray position, remaining portions, tray state, needs food
 feeds today, runway days, empty-on date, schedule summary (text), time source
 and sync age, fault flags, firmware version, uptime, WiFi RSSI.
 
-Controls: `Feed` (button, 1 portion), `Tray reload` (button), active profile
-(select), hold (number of minutes, plus cancel button), internal scheduler
-enabled (switch), stop/abort (button).
+Controls: `Feed One Portion` and `Feed Selected Portions` with `Manual Portions`, `Tray Reload`, Active Profile
+(select), `Hold Duration` (hours; 0 means until cancelled) with `Hold Scheduled Feeding` and `Cancel Hold`,
+Scheduler (switch), and Stop. These are in the slim set.
 
 Editor: profile to edit, event to edit, and fields (enabled, anchor, time,
 portions, days), plus profile fields (every N days, fast days). Edits apply
@@ -605,7 +607,7 @@ never repeats scheduler or guard logic. Each fits Home Assistant's 255-character
 - `Feed Guard`: the guard's answer to a one-portion feed from ESPHome right now,
   without feeding: `ready`, or the refusal in Last Result's words.
 - `Device Time` (diagnostic): `Thu 2026-10-15 17:30 -05:00`, or `clock not set`.
-- `Schedule Data` (diagnostic, disabled by default in Home Assistant):
+- `Schedule Data` (internal diagnostic):
   `1|<A>|<B>|<C>`. The leading `1` is the format version. Each profile is
   `every_n,fast,ev1,ev2,ev3,ev4`, with `fast` the fast-day weekday mask as 2 hex
   digits. Each event is `<0|1><c|r|s><offset>/<portions>/<days>`: enabled, anchor
@@ -614,8 +616,7 @@ never repeats scheduler or guard logic. Each fits Home Assistant's 255-character
   Sunday). About 165 characters at most.
 - The optional `network_info` package adds ESPHome's `wifi_info` (network, up to four
   addresses) and `wifi_signal` sensors.
-- With the BLE package, two diagnostic text sensors (disabled by default in Home
-  Assistant) and one web endpoint. They never contain the key, a nonce or a tag:
+- With the BLE package, two internal diagnostic text sensors and one web endpoint. They never contain the key, a nonce or a tag:
   - `BLE Info`: `service=<uuid>;protocol=2;auth=hmac-sha256;time=<policy>;stale_h=<h>;key=<none|build|device>;
     guard=<0|1>;calibration=<0|1>;bonds=<n>` (where the key comes from, and the two BLE permissions, firmware 2.0.0;
     the clients that paired, 2.4.3, once the stack has counted them).
@@ -790,7 +791,7 @@ Assistant has no use for them. Checked against the ESPHome 2026.9.1 source.
   same to anyone on the access point. If the link drops while our scan runs, ESPHome's reconnect scan may be refused
   or use our results; its own scan timeout and retries cover that. The web app's Join dialog (Configuration and the
   setup wizard) offers the list with "Other network..." for a typed name, and the typed name alone without the route.
-- **Improv serial** (`packages/improv_serial.yaml`, on in both examples): ESP Web Tools sets Wi-Fi over the USB
+- **Improv serial** (`packages/improv_serial.yaml`, on in all three examples): ESP Web Tools sets Wi-Fi over the USB
   cable after flashing. Physical access is trusted (section 10.1).
 - **Endpoints** (signed like any protected change; section 10.1): `GET /feeder/network` reports the name in use,
   saved and the build's, where the access-point password comes from (`build`, `device`, `off`), whether Wi-Fi can
@@ -1191,6 +1192,8 @@ precision-feeder/
   components/precision_feeder_n20/  the direct-drive disc on the device: DRV8833 through LEDC, the encoder through
                                     PCNT, the 1 ms control timer
   components/precision_feeder_mqtt/ MQTT's own topics on the device (their logic: feeder_mqtt.*, host-tested)
+  components/precision_feeder_tls/  HTTPS relay, certificates and trust store, MQTT over TLS, ACME;
+                                    tls_policy.h and acme.h are host-tested
   components/precision_feeder_ble/  optional BLE protocol: protocol.h and the
                                     BleEngine (engine.*: every handler), the GATT table
                                     (gatt_table.h) and the hand-off between tasks
@@ -1199,7 +1202,7 @@ precision-feeder/
   packages/            core (which includes mechanism_servo and tray_recovery), status, controls, schedule_editor,
                        calibration, mechanism_n20 (the disc, with drive_select), status_led, web_server, button,
                        hardware (with restart), time_homeassistant, diagnostics, network_info, ble_gatt,
-                       api_key_on_device, mqtt
+                       api_key_on_device, mqtt, tls, mqtt_tls, acme
   examples/            basic.yaml, ble.yaml, disc.yaml, secrets.example.yaml
   firmware/            full.yaml, no-ble.yaml: the prebuilt binaries (built by tools/build_bins.sh)
   install/             index.html: the install page (ESP Web Tools), published with each release
@@ -1787,7 +1790,7 @@ configs. The page was checked against tools/mock_device.py (which now serves `/f
 entities and Forget BLE Bonds): uploads with and without a settings password, the trust store, ACME's settings and
 Renew now, Forget pairings, a phone-width layout; the key's mask is tested against the device's vector
 (`tests/test_web.mjs`). The full image is 1,546,295 bytes (84.3% of the app slot; 2.4.2: 1,540,671), static RAM
-149,867 bytes; no-ble 1,377,351. Not tagged, and not on hardware (open item 27). The guides were revised for the
+149,867 bytes; no-ble 1,377,351. Not tagged. Subsequently bench-tested with the 2.4.4 fixes (open item 27). The guides were revised for the
 whole of 2.4 in the same version (the docs revision planned as 2.4.4): docs/HTTPS.md is new (opening the app over
 HTTPS, an uploaded certificate, ACME with step-ca, port 80, the trust store, MQTT over TLS), and the README,
 INSTALL.md (the variants' sizes, HTTPS, recovery), USING.md, SECURITY.md, WEB_UI.md, BUILDING.md and MQTT.md
@@ -1796,15 +1799,14 @@ follow 2.4.
 2.4.2 (ACME, D40; section 9.7) is built and compiled in every example and both prebuilt configs, with host tests for
 the client against a fake ACME server (`tests/test_acme.cpp`: the exchange, badNonce, a failed challenge, a reused
 authorization, a certificate that never comes, renewal times). The full image is 1,540,671 bytes (84.0% of the
-app slot; 2.4.1: 1,493,615), static RAM 149,779 bytes (2.4.1: 148,779). Not tagged, and not on hardware: the bench's ACME run (docs/BENCH.md) used a scratch
-client, not this one; the checks are in open item 27.
+app slot; 2.4.1: 1,493,615), static RAM 149,779 bytes (2.4.1: 148,779). Not tagged. The initial ACME experiment used a scratch client; the firmware's client was subsequently tested
+against step-ca with the 2.4.4 fixes (open item 27 and docs/BENCH.md).
 
 2.4.1 (HTTPS, the trust store and MQTT over TLS, D36 to D39; section 9.7) is built and compiled in every example and
 both prebuilt configs, with host tests for its decisions (`tests/test_tls.cpp`) and for the masked key upload. The full image is
 1,493,615 bytes (81.4% of the app slot; 2.4.0: 1,452,343), static RAM 148,779 bytes (2.4.0: 146,931). Not
-tagged, and not yet on hardware: the handshake and heap with 4 sessions (and with BLE), the redirect from Home
-Assistant's link, browsers with the self-signed certificate, an uploaded chain, and MQTT against a broker with a CA
-and by pinning are to do, with the testing at the end of the 2.4 work (open item 27).
+tagged. HTTPS, uploaded chains, the redirect and MQTT against a CA and by pinning were subsequently bench-tested
+with the 2.4.4 fixes; that run reduced the default to 3 sessions (open item 27 and docs/BENCH.md).
 
 2.4.0 (BLE on NimBLE, D33 to D35; section 8) is built and compiled, with host tests for the hand-off between
 NimBLE's task and the main loop and for the GATT table; not tagged. It did not advertise on hardware (fixed in
@@ -1866,10 +1868,10 @@ Deviations from the first draft of this design, all deliberate:
 - The minimum gap uses uptime when available, otherwise the saved epoch.
 - Polar days use a 06:00 / 18:00 fallback instead of skipping (section 5.2).
 
-Saved data: four records, each with its own preference key and version
-(`feeder_core.h`): settings (schedule, guard, location), calibration (pulse range
-and offsets), tray state, and the device record (section 9.2); and since 2.1.0 a fifth, the mechanism's tuning
-values, written only by a mechanism that has a tuning table (never by the servo), and the disc's motor pins. The tray
+Saved core data: six records, each with its own preference key and version
+(`feeder_core.h`): Settings (schedule, guard, location), Calibration (pulse range and offsets), State (tray and
+history), Device (section 9.2), Tuning (written only for a mechanism with a tuning table, never the servo), and
+MotorPins (the disc's motor pins). MQTT and TLS keep their own records too (sections 9.6 and 9.7). The tray
 state is version 3 since 2.1.2 (64 feeds of history, key `precision_feeder.state.v3`); a version 2 record under the
 old key is migrated at boot with everything kept, an unfinished move included. A layout change gets a new key and a
 migration from the old layout; saved data is never simply discarded.

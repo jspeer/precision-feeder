@@ -19,7 +19,7 @@ add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 ## Choosing a variant
 
-| Variant | What it has | App slot used (of 1.8 MB) | RAM used at boot |
+| Variant | What it has | App slot used (of 1.8 MB) | Static RAM (compile-time) |
 |---|---|---|---|
 | `full` | everything, including the BLE control plane for a PLC or a script | 84.9% (1,558,531 bytes) | 45.4% |
 | `no-ble` | Wi-Fi, the web app, HTTPS, Home Assistant and MQTT; no Bluetooth | 75.1% (1,378,423 bytes) | 39.8% |
