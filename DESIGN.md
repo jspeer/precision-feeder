@@ -1776,6 +1776,8 @@ precision-feeder/
 2.4.5 carries the fixes from the audits checked against 2.4.4 (D43): ESPHome's `/update` refused in every build, the
 MQTT password masked, BLE link events that always get through and reads closed from a disconnect, TLS identities
 saved as one record each, MQTT kept off when turned off during a pin, and a receive timeout on HTTPS sessions.
+The full image is 1,561,067 bytes (85.1% of the app slot; 2.4.4: 1,558,531), static RAM 155,187 bytes; no-ble
+1,380,551. Not tagged, and not on hardware (open item 27).
 
 2.4.4 carries the fixes from the bench run of 2.4.3 on the disc rig (D42; docs/BENCH.md): BLE advertises again (the
 controller keeps its central role), the HTTPS relay no longer leaks a socket per session (about 20 sessions froze

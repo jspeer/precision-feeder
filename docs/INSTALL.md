@@ -21,8 +21,8 @@ add-on or ESPHome on a computer), see [BUILDING.md](BUILDING.md).
 
 | Variant | What it has | App slot used (of 1.8 MB) | Static RAM (compile-time) |
 |---|---|---|---|
-| `full` | everything, including the BLE control plane for a PLC or a script | 84.9% (1,558,531 bytes) | 45.4% |
-| `no-ble` | Wi-Fi, the web app, HTTPS, Home Assistant and MQTT; no Bluetooth | 75.1% (1,378,423 bytes) | 39.8% |
+| `full` | everything, including the BLE control plane for a PLC or a script | 85.1% (1,561,067 bytes) | 45.4% |
+| `no-ble` | Wi-Fi, the web app, HTTPS, Home Assistant and MQTT; no Bluetooth | 75.2% (1,380,551 bytes) | 39.8% |
 
 Both carry both drives (the servo tray, which they start with, and the direct-drive disc: choose it in Configuration,
 Drive), MQTT (off until you set a broker in Configuration, MQTT), and HTTPS with MQTT over TLS and ACME

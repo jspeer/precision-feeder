@@ -46,7 +46,7 @@ function collisionMessage(moved) {
          'Check it before relying on the schedule.';
 }
 
-/** Run a schedule save, then make sure nothing else changed: Home Assistant shares the editor, and if it moved the
+/** Run a schedule save, then make sure nothing else changed: another page shares the editor, and if it moved the
  *  editor in the middle of the save a write may have landed on another event. That is reported by name, also when
  *  the save itself failed (a write that landed elsewhere is not confirmed where it was meant to go). */
 async function guardedSave(p, e, task) {

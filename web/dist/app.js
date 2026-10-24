@@ -3,7 +3,7 @@
 // Part of the Precision Feeder ESPHome firmware (MIT licence, see LICENSE).
 // Designed and written with the assistance of an AI (Anthropic's Claude);
 // reviewed by a human, but it may still contain mistakes.
-const BUILD_ID = '2c4a85773a81';
+const BUILD_ID = '6780f30f3ac0';
 
 // ---- entities.js ----
 // Every entity the app uses, by its YAML name: the contract between the firmware and the app. The web server
@@ -2180,7 +2180,7 @@ function collisionMessage(moved) {
          'Check it before relying on the schedule.';
 }
 
-/** Run a schedule save, then make sure nothing else changed: Home Assistant shares the editor, and if it moved the
+/** Run a schedule save, then make sure nothing else changed: another page shares the editor, and if it moved the
  *  editor in the middle of the save a write may have landed on another event. That is reported by name, also when
  *  the save itself failed (a write that landed elsewhere is not confirmed where it was meant to go). */
 async function guardedSave(p, e, task) {
