@@ -6,11 +6,11 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
-## Unreleased
+## 2.4.7: ESPHome 2026.10.2 (2026-11-14)
 
 - **ESPHome 2026.10.2** (from 2026.10.0; patch releases only, still ESP-IDF 5.5.6) for the prebuilt binaries and
-  CI; YAML builds should use it too. All six example builds compile without warnings. No firmware behaviour
-  changed, so `fw_version` stays 2.4.6.
+  CI; YAML builds should use it too. All six example builds compile without warnings. The feeder's own code is
+  unchanged; the version moves so the rebuilt binaries do not share 2.4.6's number. Not yet run on hardware.
 
 ## 2.4.6: Show calibration for the active drive (2026-10-24)
 
