@@ -6,6 +6,12 @@ protocol has its own version (docs/PROTOCOL.md). Bench results are in
 
 *Written with the assistance of an AI (Anthropic's Claude).*
 
+## Unreleased
+
+- **ESPHome 2026.10.2** (from 2026.10.0; patch releases only, still ESP-IDF 5.5.6) for the prebuilt binaries and
+  CI; YAML builds should use it too. All six example builds compile without warnings. No firmware behaviour
+  changed, so `fw_version` stays 2.4.6.
+
 ## 2.4.6: Show calibration for the active drive (2026-10-24)
 
 - Combined-drive firmware now shows only the running mechanism's calibration workflow in Maintenance.

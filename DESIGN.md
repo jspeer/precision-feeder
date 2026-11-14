@@ -1579,6 +1579,10 @@ precision-feeder/
   - `check.sh --compile` and `build_bins.sh` fail on a failed build (the exit status was masked).
   - ESPHome 2026.10.0 (owner): the release builds and CI use it; the facts our code relies on were checked again in its
     source (the app name's `StringRef name_`, the web server's status codes; its task stack is now 4,512 bytes).
+- **ESPHome 2026.10.2 (owner, 2026-11-14):** CI, the release builds and BUILDING.md move from 2026.10.0 to 2026.10.2.
+  Patch releases only, same ESP-IDF 5.5.6; none of their fixes touch what this firmware uses on the S3 (the LEDC
+  reset fix is for targets without the legacy peripheral API; the esp32_ble fix does not apply, BLE is NimBLE since
+  2.4.0). `check.sh --compile` passed on it; not yet run on hardware.
 
 ## 14. Open items
 

@@ -31,12 +31,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ESPHome (the version this project is built with)
-        run: pip install esphome==2026.10.0
+        run: pip install esphome==2026.10.2
       - name: Cache the toolchain
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: platformio-esphome-2026.10.0
+          key: platformio-esphome-2026.10.2
       - name: Checks
         run: tools/check.sh
       - name: Build both variants

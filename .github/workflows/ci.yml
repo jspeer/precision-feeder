@@ -21,6 +21,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ESPHome (the version this project is built with)
-        run: pip install esphome==2026.10.0
+        run: pip install esphome==2026.10.2
       - name: Checks
         run: tools/check.sh ${{ inputs.compile && '--compile' || '' }}
